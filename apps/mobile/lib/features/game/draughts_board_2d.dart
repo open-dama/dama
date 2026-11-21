@@ -78,6 +78,9 @@ class _ActiveAnim {
   final bool isCapture;
   final List<List<dynamic>>? boardAfter;
   bool boardApplied = false;
+
+  /// One land SFX per animation (land phase + finish must not double).
+  bool soundPlayed = false;
 }
 
 class _DraughtsBoard2DState extends State<DraughtsBoard2D>
@@ -116,15 +119,17 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
           _progress = _anim.value;
           final active = _active;
           if (active != null &&
-              !active.boardApplied &&
               active.boardAfter != null &&
               active.boardAfter!.isNotEmpty &&
               prev < _landPhaseStart &&
               _progress >= _landPhaseStart) {
-            active.boardApplied = true;
-            _renderBoard = _cloneBoard(active.boardAfter!);
-            widget.onPlyAnimated?.call(active.boardAfter!);
-            if (!widget.replayMode) {
+            if (!active.boardApplied) {
+              active.boardApplied = true;
+              _renderBoard = _cloneBoard(active.boardAfter!);
+              widget.onPlyAnimated?.call(active.boardAfter!);
+            }
+            if (!active.soundPlayed && !widget.replayMode) {
+              active.soundPlayed = true;
               // Put-down only - Chess.com move / capture / promote.
               unawaited(
                 GameNotify.playPiecePlace(
@@ -181,16 +186,20 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
 
   void _finishAndAdvance() {
     final finished = _active;
+    // Never snap back to widget.board after a successful land - that rewound the
+    // piece and could enqueue a second board-diff animation (double SFX).
     if (finished != null &&
-        !finished.boardApplied &&
         finished.boardAfter != null &&
         finished.boardAfter!.isNotEmpty) {
-      finished.boardApplied = true;
-      setState(() {
-        _renderBoard = _cloneBoard(finished.boardAfter!);
-      });
-      widget.onPlyAnimated?.call(finished.boardAfter!);
-      if (!widget.replayMode) {
+      if (!finished.boardApplied) {
+        finished.boardApplied = true;
+        setState(() {
+          _renderBoard = _cloneBoard(finished.boardAfter!);
+        });
+        widget.onPlyAnimated?.call(finished.boardAfter!);
+      }
+      if (!finished.soundPlayed && !widget.replayMode) {
+        finished.soundPlayed = true;
         unawaited(
           GameNotify.playPiecePlace(
             captured: finished.isCapture,
@@ -198,10 +207,6 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
           ),
         );
       }
-    } else if (_queue.isEmpty) {
-      setState(() {
-        _renderBoard = _cloneBoard(widget.board);
-      });
     }
     _active = null;
     _progress = 0;
@@ -489,161 +494,176 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
       aspectRatio: 1,
       child: Transform.translate(
         offset: Offset(shakeDx, 0),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final side = math.min(constraints.maxWidth, constraints.maxHeight);
-            final cell = side / size;
-            Widget? fly;
-            final active = _active;
-            if (active != null && _progress < 1) {
-              final t = _travelT(_progress);
-              final scale = _flyScale(_progress);
-              final fromR =
-                  widget.flipBoard ? size - 1 - active.fromR : active.fromR;
-              final fromC =
-                  widget.flipBoard ? size - 1 - active.fromC : active.fromC;
-              final toR = widget.flipBoard ? size - 1 - active.toR : active.toR;
-              final toC = widget.flipBoard ? size - 1 - active.toC : active.toC;
-              final vr = fromR + (toR - fromR) * t;
-              final vc = fromC + (toC - fromC) * t;
-              final piece = cell * 0.98;
-              fly = Positioned(
-                left: vc * cell + (cell - piece) / 2,
-                top: vr * cell + (cell - piece) / 2,
-                width: piece,
-                height: piece,
-                child: Transform.scale(
-                  scale: scale,
-                  child: _PieceDisc(
-                    player: active.player,
-                    king: active.isKing,
-                    light: tokens.pieceLight,
-                    dark: tokens.pieceDark,
-                    darkSplit: tokens.pieceDarkSplit,
-                    border: const Color(0x44000000),
-                    borderWidth: 1,
+        // Continuous opaque plane under cells (web/3D parity) so anti-alias
+        // seams never composite against the dark scaffold as black borders.
+        child: ColoredBox(
+          color: tokens.boardDark,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final side =
+                  math.min(constraints.maxWidth, constraints.maxHeight);
+              final cell = side / size;
+              Widget? fly;
+              final active = _active;
+              if (active != null && _progress < 1) {
+                final t = _travelT(_progress);
+                final scale = _flyScale(_progress);
+                final fromR =
+                    widget.flipBoard ? size - 1 - active.fromR : active.fromR;
+                final fromC =
+                    widget.flipBoard ? size - 1 - active.fromC : active.fromC;
+                final toR =
+                    widget.flipBoard ? size - 1 - active.toR : active.toR;
+                final toC =
+                    widget.flipBoard ? size - 1 - active.toC : active.toC;
+                final vr = fromR + (toR - fromR) * t;
+                final vc = fromC + (toC - fromC) * t;
+                final piece = cell * 0.98;
+                fly = Positioned(
+                  left: vc * cell + (cell - piece) / 2,
+                  top: vr * cell + (cell - piece) / 2,
+                  width: piece,
+                  height: piece,
+                  child: Transform.scale(
+                    scale: scale,
+                    child: _PieceDisc(
+                      player: active.player,
+                      king: active.isKing,
+                      light: tokens.pieceLight,
+                      dark: tokens.pieceDark,
+                      darkSplit: tokens.pieceDarkSplit,
+                      border: Colors.transparent,
+                      borderWidth: 0,
+                    ),
                   ),
-                ),
-              );
-            }
+                );
+              }
 
-            return Stack(
-              clipBehavior: Clip.hardEdge,
-              children: [
-                GridView.builder(
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: size,
-                  ),
-                  itemCount: size * size,
-                  itemBuilder: (context, i) {
-                    final visualRow = i ~/ size;
-                    final visualCol = i % size;
-                    final row =
-                        widget.flipBoard ? size - 1 - visualRow : visualRow;
-                    final col =
-                        widget.flipBoard ? size - 1 - visualCol : visualCol;
-                    final dark = _isDark(row, col);
-                    final cellData =
-                        (row < display.length && col < display[row].length)
-                            ? display[row][col]
-                            : null;
-                    final selected =
-                        widget.selectedRow == row && widget.selectedCol == col;
-                    final must = widget.mustContinueRow == row &&
-                        widget.mustContinueCol == col;
-                    final key = '$row,$col';
-                    final isTarget = targets.contains(key);
-                    final isLastFrom = lastMove?.$1 == key;
-                    final isLastTo = lastMove?.$2 == key;
-                    int? player;
-                    var king = false;
-                    if (cellData is Map) {
-                      final p = cellData['p'];
-                      if (p is num) player = p.toInt();
-                      king = cellData['k'] == true;
-                    }
-                    // Select / dest / must use boardSelected; last-move uses Chess yellow.
-                    final isLast = isLastFrom || isLastTo;
-                    final squareHighlighted = selected ||
-                        isTarget ||
-                        must ||
-                        isLast ||
-                        (widget.selectedRow == null && origins.contains(key));
-                    final hidePiece = hidden.contains(key);
-                    final canTap =
-                        widget.interactive && dark && _active == null;
-                    final hi = tokens.boardSelected;
-                    final lastHi = tokens.lastMove;
-                    final disc = Color.lerp(hi, Colors.white, 0.45) ?? hi;
-                    final squareColor = !squareHighlighted
-                        ? (dark ? tokens.boardDark : tokens.boardLight)
-                        : (isLast && !selected && !must && !isTarget
-                            ? lastHi
-                            : hi);
+              return Stack(
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: size,
+                    ),
+                    itemCount: size * size,
+                    itemBuilder: (context, i) {
+                      final visualRow = i ~/ size;
+                      final visualCol = i % size;
+                      final row =
+                          widget.flipBoard ? size - 1 - visualRow : visualRow;
+                      final col =
+                          widget.flipBoard ? size - 1 - visualCol : visualCol;
+                      final dark = _isDark(row, col);
+                      final cellData =
+                          (row < display.length && col < display[row].length)
+                              ? display[row][col]
+                              : null;
+                      final selected = widget.selectedRow == row &&
+                          widget.selectedCol == col;
+                      final must = widget.mustContinueRow == row &&
+                          widget.mustContinueCol == col;
+                      final key = '$row,$col';
+                      final isTarget = targets.contains(key);
+                      final isLastFrom = lastMove?.$1 == key;
+                      final isLastTo = lastMove?.$2 == key;
+                      int? player;
+                      var king = false;
+                      if (cellData is Map) {
+                        final p = cellData['p'];
+                        if (p is num) player = p.toInt();
+                        king = cellData['k'] == true;
+                      }
+                      // Select / dest / must use boardSelected; last-move uses Chess yellow.
+                      final isLast = isLastFrom || isLastTo;
+                      final squareHighlighted = selected ||
+                          isTarget ||
+                          must ||
+                          isLast ||
+                          (widget.selectedRow == null && origins.contains(key));
+                      final hidePiece = hidden.contains(key);
+                      final canTap =
+                          widget.interactive && dark && _active == null;
+                      final hi = tokens.boardSelected;
+                      final lastHi = tokens.lastMove;
+                      final disc = Color.lerp(hi, Colors.white, 0.45) ?? hi;
+                      final squareColor = !squareHighlighted
+                          ? (dark ? tokens.boardDark : tokens.boardLight)
+                          : (isLast && !selected && !must && !isTarget
+                              ? lastHi
+                              : hi);
 
-                    return Material(
-                      color: squareColor,
-                      child: InkWell(
-                        onTap: canTap
-                            ? () => widget.onSelectSquare(row, col)
-                            : null,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            ..._boardCoordLabels(
-                              row: row,
-                              col: col,
-                              boardSize: size,
-                              flipBoard: widget.flipBoard,
-                              isDark: dark,
-                              light: tokens.boardLight,
-                              darkColor: tokens.boardDark,
-                            ),
-                            if (isTarget)
-                              FractionallySizedBox(
-                                widthFactor: 0.44,
-                                heightFactor: 0.44,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: disc.withValues(alpha: 0.95),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: hi.withValues(alpha: 0.7),
-                                        blurRadius: 10,
-                                      ),
-                                    ],
+                      return Material(
+                        color: squareColor,
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        surfaceTintColor: Colors.transparent,
+                        type: MaterialType.canvas,
+                        borderRadius: BorderRadius.zero,
+                        child: InkWell(
+                          borderRadius: BorderRadius.zero,
+                          onTap: canTap
+                              ? () => widget.onSelectSquare(row, col)
+                              : null,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              ..._boardCoordLabels(
+                                row: row,
+                                col: col,
+                                boardSize: size,
+                                flipBoard: widget.flipBoard,
+                                isDark: dark,
+                                light: tokens.boardLight,
+                                darkColor: tokens.boardDark,
+                              ),
+                              if (isTarget)
+                                FractionallySizedBox(
+                                  widthFactor: 0.44,
+                                  heightFactor: 0.44,
+                                  // Flat fill disc like 3D destination mesh - no stroke.
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: disc.withValues(alpha: 0.95),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: hi.withValues(alpha: 0.7),
+                                          blurRadius: 10,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            if (player != null && !hidePiece)
-                              FractionallySizedBox(
-                                widthFactor: 0.98,
-                                heightFactor: 0.98,
-                                // Square fill is the movable cue - no under-piece ring.
-                                child: _PieceDisc(
-                                  player: player,
-                                  king: king,
-                                  light: tokens.pieceLight,
-                                  dark: tokens.pieceDark,
-                                  darkSplit: tokens.pieceDarkSplit,
-                                  border: const Color(0x44000000),
-                                  borderWidth: 1,
-                                  glow: selected || must ? hi : null,
-                                  scale: selected || must ? 1.1 : 1.0,
+                              if (player != null && !hidePiece)
+                                FractionallySizedBox(
+                                  widthFactor: 0.98,
+                                  heightFactor: 0.98,
+                                  // Square fill is the movable cue - no under-piece ring.
+                                  child: _PieceDisc(
+                                    player: player,
+                                    king: king,
+                                    light: tokens.pieceLight,
+                                    dark: tokens.pieceDark,
+                                    darkSplit: tokens.pieceDarkSplit,
+                                    border: Colors.transparent,
+                                    borderWidth: 0,
+                                    glow: selected || must ? hi : null,
+                                    scale: selected || must ? 1.1 : 1.0,
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                if (fly != null) fly,
-              ],
-            );
-          },
+                      );
+                    },
+                  ),
+                  if (fly != null) fly,
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

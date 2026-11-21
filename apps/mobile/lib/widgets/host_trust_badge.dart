@@ -44,13 +44,16 @@ class HostTrustBadge extends StatelessWidget {
     late final Color border;
     switch (code) {
       case HostTrustTierCode.documentVerified:
-        fg = tokens.verified;
-        bg = onMedia
-            ? tokens.verified.withValues(alpha: 0.22)
-            : tokens.verifiedBg;
-        border = onMedia
-            ? tokens.verified.withValues(alpha: 0.55)
-            : tokens.verifiedBorder;
+        // onMedia: solid forest chip + mint fg (web --dama-verified-on-media-*).
+        if (onMedia) {
+          fg = const Color(0xFFD1FAE5);
+          bg = const Color(0xFF052E16);
+          border = const Color(0xFF065F46);
+        } else {
+          fg = tokens.verified;
+          bg = tokens.verifiedBg;
+          border = tokens.verifiedBorder;
+        }
       case HostTrustTierCode.phoneVerified:
         fg = tokens.brand;
         bg = onMedia ? tokens.brand.withValues(alpha: 0.22) : tokens.brandMuted;

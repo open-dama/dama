@@ -1,5 +1,6 @@
 import 'package:dama_mobile/core/prefs/board_view_prefs.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
+import 'package:dama_mobile/features/game/smart_board_shell.dart';
 import 'package:flutter/material.dart';
 
 /// Chess.com column: top seat + square board + bottom seat share one width (flush L/R).
@@ -33,6 +34,15 @@ class PlayBoardFrame extends StatelessWidget {
   static const double _seatGap = 2;
   static const double _seatRowH = 40;
 
+  Widget _chromeSeat(BuildContext context, Widget seat) {
+    final scope = SmartBoardChromeScope.maybeOf(context);
+    if (scope == null) return seat;
+    return SmartBoardChromeTap(
+      onDoubleTap: scope.onChromeDoubleTap,
+      child: seat,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -65,8 +75,13 @@ class PlayBoardFrame extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(height: _seatRowH, child: topSeat),
+                // Seat chrome - double-tap toggles smart board (not the plane).
+                SizedBox(
+                  height: _seatRowH,
+                  child: _chromeSeat(context, topSeat),
+                ),
                 const SizedBox(height: _seatGap),
+                // Playing surface - no expand/collapse gesture here.
                 SizedBox(
                   width: side,
                   height: side,
@@ -81,7 +96,10 @@ class PlayBoardFrame extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: _seatGap),
-                SizedBox(height: _seatRowH, child: bottomSeat),
+                SizedBox(
+                  height: _seatRowH,
+                  child: _chromeSeat(context, bottomSeat),
+                ),
               ],
             ),
           ),

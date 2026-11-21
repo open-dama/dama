@@ -150,6 +150,8 @@ type ActiveAnimation = {
   duration: number;
   boardAfter?: BoardGrid;
   boardApplied?: boolean;
+  /** One land SFX per animation (land phase + finish must not double). */
+  soundPlayed?: boolean;
 };
 
 type AnimationMask = Pick<ActiveAnimation, "from" | "to" | "captures">;
@@ -777,12 +779,15 @@ function BoardScene({
   }, [replayMode]);
 
   const commitBoardAfter = useCallback((anim: ActiveAnimation) => {
-    if (anim.boardApplied || !anim.boardAfter?.length) return;
-    anim.boardApplied = true;
-    setRenderBoard(anim.boardAfter);
-    onPlyAnimatedRef.current?.(anim.boardAfter);
-    // Put-down only - Chess.com move / capture / promote samples.
-    if (!replayModeRef.current) {
+    if (!anim.boardAfter?.length) return;
+    if (!anim.boardApplied) {
+      anim.boardApplied = true;
+      setRenderBoard(anim.boardAfter);
+      onPlyAnimatedRef.current?.(anim.boardAfter);
+    }
+    // Put-down only once per ply - Chess.com move / capture / promote samples.
+    if (!anim.soundPlayed && !replayModeRef.current) {
+      anim.soundPlayed = true;
       void playPieceLandSound(
         pieceLandKind({ isCapture: anim.isCapture, isPromotion: anim.isPromotion }),
       );

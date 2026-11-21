@@ -29,6 +29,7 @@ class DraughtsBoard3D extends StatefulWidget {
     this.moveHistory = const [],
     this.onPlyAnimated,
     this.illegalShakeKey = 0,
+    this.replayMode = false,
   });
 
   final List<List<dynamic>> board;
@@ -53,6 +54,9 @@ class DraughtsBoard3D extends StatefulWidget {
 
   /// Increment to trigger horizontal reject shake (illegal destination). Not used for captures.
   final int illegalShakeKey;
+
+  /// History scrub / replay: no land SFX (2D parity).
+  final bool replayMode;
 
   @override
   State<DraughtsBoard3D> createState() => _DraughtsBoard3DState();
@@ -83,6 +87,9 @@ class _ActiveAnim {
   final bool isCapture;
   final List<List<dynamic>>? boardAfter;
   bool boardApplied = false;
+
+  /// One land SFX per animation (land phase + finish must not double).
+  bool soundPlayed = false;
 }
 
 class _DraughtsBoard3DState extends State<DraughtsBoard3D>
@@ -205,21 +212,25 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
           final active = _active;
           // Commit board as the piece puts down (captures disappear with the land).
           if (active != null &&
-              !active.boardApplied &&
               active.boardAfter != null &&
               active.boardAfter!.isNotEmpty &&
               prev < _landPhaseStart &&
               _progress >= _landPhaseStart) {
-            active.boardApplied = true;
-            _renderBoard = _cloneBoard(active.boardAfter!);
-            widget.onPlyAnimated?.call(active.boardAfter!);
-            // Put-down only - wood + piece contact (never during travel).
-            unawaited(
-              GameNotify.playPiecePlace(
-                captured: active.isCapture,
-                promoted: active.isPromotion,
-              ),
-            );
+            if (!active.boardApplied) {
+              active.boardApplied = true;
+              _renderBoard = _cloneBoard(active.boardAfter!);
+              widget.onPlyAnimated?.call(active.boardAfter!);
+            }
+            if (!active.soundPlayed && !widget.replayMode) {
+              active.soundPlayed = true;
+              // Put-down only - wood + piece contact (never during travel).
+              unawaited(
+                GameNotify.playPiecePlace(
+                  captured: active.isCapture,
+                  promoted: active.isPromotion,
+                ),
+              );
+            }
           }
         });
       })
@@ -270,25 +281,27 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
 
   void _finishAndAdvance() {
     final finished = _active;
+    // Never snap back to widget.board after a successful land - that rewound the
+    // piece and could enqueue a second board-diff animation (double SFX).
     if (finished != null &&
-        !finished.boardApplied &&
         finished.boardAfter != null &&
         finished.boardAfter!.isNotEmpty) {
-      finished.boardApplied = true;
-      setState(() {
-        _renderBoard = _cloneBoard(finished.boardAfter!);
-      });
-      widget.onPlyAnimated?.call(finished.boardAfter!);
-      unawaited(
-        GameNotify.playPiecePlace(
-          captured: finished.isCapture,
-          promoted: finished.isPromotion,
-        ),
-      );
-    } else if (_queue.isEmpty) {
-      setState(() {
-        _renderBoard = _cloneBoard(widget.board);
-      });
+      if (!finished.boardApplied) {
+        finished.boardApplied = true;
+        setState(() {
+          _renderBoard = _cloneBoard(finished.boardAfter!);
+        });
+        widget.onPlyAnimated?.call(finished.boardAfter!);
+      }
+      if (!finished.soundPlayed && !widget.replayMode) {
+        finished.soundPlayed = true;
+        unawaited(
+          GameNotify.playPiecePlace(
+            captured: finished.isCapture,
+            promoted: finished.isPromotion,
+          ),
+        );
+      }
     }
     _active = null;
     _progress = 0;
@@ -874,6 +887,10 @@ class _Board3DPainter extends CustomPainter {
       Paint()..color = const Color(0x55000000),
     );
 
+    // Soft AO rim from shade (web 3D mesh has no hard black contour stroke).
+    final edge = isLight
+        ? Color.lerp(pieceLight, const Color(0xFF8A8A8A), 0.28)!
+        : Color.lerp(pieceDark, const Color(0xFF1A1A1A), 0.35)!;
     _drawNeoStaunton3D(
       canvas,
       foot: foot,
@@ -881,7 +898,7 @@ class _Board3DPainter extends CustomPainter {
       crowned: king,
       base: glow ?? left,
       shade: glow != null ? Color.lerp(glow, right, 0.45)! : right,
-      outline: kNeoOutline,
+      outline: edge,
     );
   }
 

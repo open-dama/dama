@@ -143,6 +143,7 @@ class _MatchPauseOverlayState extends State<MatchPauseOverlay> {
           startingLabel: status,
           durationMs: 0,
           persistent: true,
+          reserveBottom: hasDetails,
           top: widget.top,
           bottom: widget.bottom,
         ),

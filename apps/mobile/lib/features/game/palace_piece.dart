@@ -49,7 +49,9 @@ class PalaceAccents {
 }
 
 const kDamaBrandMark = Color(0xFFA31D38);
-const kNeoOutline = Color(0xFF2B2B2B);
+
+/// Fallback only - painters prefer shade-mixed AO rims (3D mesh parity).
+const kNeoOutline = Color(0xFF6E6E6E);
 
 Color _mix(Color a, Color b, double t) {
   return Color.lerp(a, b, t.clamp(0.0, 1.0)) ?? a;
@@ -201,11 +203,14 @@ class PalacePiecePainter extends CustomPainter {
     _drawTinted(canvas, size, 'assets/pieces/neo/$kind-shade.png', shade);
     _drawTinted(
         canvas, size, 'assets/pieces/neo/$kind-highlight.png', highlight);
-    _drawTinted(
-        canvas, size, 'assets/pieces/neo/$kind-outline.png', kNeoOutline);
+    // Soft AO rim from shade (not hard #2B2B2B) - same as web NeoCourtPiece / 3D mesh.
+    final edge = isLight
+        ? _mix(pieceLight, const Color(0xFF8A8A8A), 0.28)
+        : _mix(pieceDark, const Color(0xFF1A1A1A), 0.35);
+    _drawTinted(canvas, size, 'assets/pieces/neo/$kind-outline.png', edge);
 
     if (role == PalacePieceRole.son) {
-      _drawSonCrown(canvas, size, split ? pieceLight : base, shade);
+      _drawSonCrown(canvas, size, split ? pieceLight : base, shade, edge);
     }
     canvas.restore();
   }
@@ -250,7 +255,13 @@ class PalacePiecePainter extends CustomPainter {
     canvas.restore();
   }
 
-  void _drawSonCrown(Canvas canvas, Size size, Color base, Color shade) {
+  void _drawSonCrown(
+    Canvas canvas,
+    Size size,
+    Color base,
+    Color shade,
+    Color edge,
+  ) {
     final sx = size.width / 45;
     final sy = size.height / 45;
     canvas.save();
@@ -272,9 +283,9 @@ class PalacePiecePainter extends CustomPainter {
     canvas.drawPath(
       path,
       Paint()
-        ..color = kNeoOutline
+        ..color = edge
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.7
+        ..strokeWidth = 1.2
         ..strokeJoin = StrokeJoin.round,
     );
     canvas.restore();

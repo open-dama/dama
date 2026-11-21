@@ -33,6 +33,7 @@ import 'package:dama_mobile/features/game/matchmaking_realtime.dart';
 import 'package:dama_mobile/features/game/official_pause_activity_strip.dart';
 import 'package:dama_mobile/features/game/pause_active_game.dart';
 import 'package:dama_mobile/features/game/play_board_frame.dart';
+import 'package:dama_mobile/features/game/smart_board_shell.dart';
 import 'package:dama_mobile/features/player/match_seat_avatars.dart';
 import 'package:dama_mobile/features/player/open_create_game_challenge.dart';
 import 'package:flutter/material.dart';
@@ -1312,6 +1313,7 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
   }
 
   void _onSquareTap(int row, int col) {
+    unawaited(GameNotify.unlock());
     if (_paused) {
       final official = (_chrome?.errOfficiallyPaused ?? '').trim();
       final specific = (_chrome?.errGamePaused ?? '').trim();
@@ -2459,200 +2461,217 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
                     ),
                   if (_board != null && _boardSize > 0)
                     const SizedBox(height: 10),
-                  Expanded(
-                    child: PlayBoardFrame(
-                      vsLabel: _railChrome?.vsSeparator ?? '',
-                      topSeat: MatchSeatAvatars(
-                        layout: MatchSeatBarLayout.sideColumn,
-                        sideSlot: MatchSideSeatSlot.top,
-                        yourPlayer: _yourPlayer,
-                        player1Id: _player1Id,
-                        player2Id: _player2Id,
-                        whitePieces: _whitePieces,
-                        blackPieces: _blackPieces,
-                        piecesPerSide: _piecesPerSide,
-                        clockLabel: oppClockLabel,
-                        clockActive: _outcome == null &&
-                            !_draw &&
-                            !_paused &&
-                            !_clockOwnedEnd &&
-                            !_yourClockActive &&
-                            _activeClockPlayer != null,
-                        labelWhite: seatLight,
-                        labelBlack: seatDark,
-                        seatMetaSeparator: chrome.seatMetaSeparator,
-                        piecesLeftSuffix: _profileChrome?.piecesLeftSuffix,
-                        capturedSuffix: _profileChrome?.capturedSuffix,
-                        ratingParenOpen: _railChrome?.ratingParenOpen,
-                        ratingParenClose: _railChrome?.ratingParenClose,
-                        trailing: _railChrome != null
-                            ? CompactBoardViewToggle(
-                                selected: _boardView,
-                                onChanged: _setBoardView,
-                                label2d: _railChrome!.boardView2d,
-                                label3d: _railChrome!.boardView3d,
-                              )
-                            : null,
-                        onChallenge: (req) =>
-                            openCreateGameChallenge(context, req),
-                      ),
-                      bottomSeat: MatchSeatAvatars(
-                        layout: MatchSeatBarLayout.sideColumn,
-                        sideSlot: MatchSideSeatSlot.bottom,
-                        yourPlayer: _yourPlayer,
-                        player1Id: _player1Id,
-                        player2Id: _player2Id,
-                        whitePieces: _whitePieces,
-                        blackPieces: _blackPieces,
-                        piecesPerSide: _piecesPerSide,
-                        clockLabel: yourClockLabel,
-                        clockActive: _outcome == null &&
-                            !_draw &&
-                            !_paused &&
-                            !_clockOwnedEnd &&
-                            _yourClockActive,
-                        labelWhite: seatLight,
-                        labelBlack: seatDark,
-                        seatMetaSeparator: chrome.seatMetaSeparator,
-                        piecesLeftSuffix: _profileChrome?.piecesLeftSuffix,
-                        capturedSuffix: _profileChrome?.capturedSuffix,
-                        ratingParenOpen: _railChrome?.ratingParenOpen,
-                        ratingParenClose: _railChrome?.ratingParenClose,
-                        onChallenge: (req) =>
-                            openCreateGameChallenge(context, req),
-                      ),
-                      board: BoardPaletteScope(
-                        board: boardPaletteById(_boardPaletteId),
-                        piece: piecePaletteById(_piecePaletteId),
-                        child: _boardView == BoardViewMode.flat2d
-                            ? DraughtsBoard2D(
-                                board: _displayBoard!,
-                                boardSize: _boardSize,
-                                legalMoves:
-                                    _replayIndex != null || !_showMoveHighlights
+                  // Live: hug board (no Expanded letterbox under seats - web parity).
+                  // Idle/finished: Expanded so the square still gets a height budget.
+                  Builder(
+                    builder: (context) {
+                      final boardLive = _gameStartedAt != null &&
+                          _outcome == null &&
+                          !_draw &&
+                          _endReason != 'clock_flag' &&
+                          _endReason != 'clock_draw';
+                      final shell = SmartBoardShell(
+                        active: boardLive,
+                        child: PlayBoardFrame(
+                          vsLabel: _railChrome?.vsSeparator ?? '',
+                          topSeat: MatchSeatAvatars(
+                            layout: MatchSeatBarLayout.sideColumn,
+                            sideSlot: MatchSideSeatSlot.top,
+                            yourPlayer: _yourPlayer,
+                            player1Id: _player1Id,
+                            player2Id: _player2Id,
+                            whitePieces: _whitePieces,
+                            blackPieces: _blackPieces,
+                            piecesPerSide: _piecesPerSide,
+                            clockLabel: oppClockLabel,
+                            clockActive: _outcome == null &&
+                                !_draw &&
+                                !_paused &&
+                                !_clockOwnedEnd &&
+                                !_yourClockActive &&
+                                _activeClockPlayer != null,
+                            labelWhite: seatLight,
+                            labelBlack: seatDark,
+                            seatMetaSeparator: chrome.seatMetaSeparator,
+                            piecesLeftSuffix: _profileChrome?.piecesLeftSuffix,
+                            capturedSuffix: _profileChrome?.capturedSuffix,
+                            ratingParenOpen: _railChrome?.ratingParenOpen,
+                            ratingParenClose: _railChrome?.ratingParenClose,
+                            trailing: _railChrome != null
+                                ? CompactBoardViewToggle(
+                                    selected: _boardView,
+                                    onChanged: _setBoardView,
+                                    label2d: _railChrome!.boardView2d,
+                                    label3d: _railChrome!.boardView3d,
+                                  )
+                                : null,
+                            onChallenge: (req) =>
+                                openCreateGameChallenge(context, req),
+                          ),
+                          bottomSeat: MatchSeatAvatars(
+                            layout: MatchSeatBarLayout.sideColumn,
+                            sideSlot: MatchSideSeatSlot.bottom,
+                            yourPlayer: _yourPlayer,
+                            player1Id: _player1Id,
+                            player2Id: _player2Id,
+                            whitePieces: _whitePieces,
+                            blackPieces: _blackPieces,
+                            piecesPerSide: _piecesPerSide,
+                            clockLabel: yourClockLabel,
+                            clockActive: _outcome == null &&
+                                !_draw &&
+                                !_paused &&
+                                !_clockOwnedEnd &&
+                                _yourClockActive,
+                            labelWhite: seatLight,
+                            labelBlack: seatDark,
+                            seatMetaSeparator: chrome.seatMetaSeparator,
+                            piecesLeftSuffix: _profileChrome?.piecesLeftSuffix,
+                            capturedSuffix: _profileChrome?.capturedSuffix,
+                            ratingParenOpen: _railChrome?.ratingParenOpen,
+                            ratingParenClose: _railChrome?.ratingParenClose,
+                            onChallenge: (req) =>
+                                openCreateGameChallenge(context, req),
+                          ),
+                          board: BoardPaletteScope(
+                            board: boardPaletteById(_boardPaletteId),
+                            piece: piecePaletteById(_piecePaletteId),
+                            child: _boardView == BoardViewMode.flat2d
+                                ? DraughtsBoard2D(
+                                    board: _displayBoard!,
+                                    boardSize: _boardSize,
+                                    legalMoves: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? const []
                                         : _legalMoves,
-                                selectedRow:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    selectedRow: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : _selectedRow,
-                                selectedCol:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    selectedCol: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : _selectedCol,
-                                mustContinueRow:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    mustContinueRow: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : (_mustContinue != null &&
                                                 _mustContinue!.length >= 2
                                             ? _mustContinue![0]
                                             : null),
-                                mustContinueCol:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    mustContinueCol: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : (_mustContinue != null &&
                                                 _mustContinue!.length >= 2
                                             ? _mustContinue![1]
                                             : null),
-                                onSelectSquare: _onSquareTap,
-                                interactive: !_busy &&
-                                    _replayIndex == null &&
-                                    _showMoveHighlights &&
-                                    _outcome == null &&
-                                    !_draw &&
-                                    !_gameOverVisible,
-                                yourPlayer: _yourPlayer,
-                                flipBoard: _flipBoard,
-                                moveHistory: _replayIndex != null
-                                    ? const []
-                                    : _moveHistory,
-                                replayMode: _replayIndex != null,
-                                illegalShakeKey: _illegalShakeKey,
-                                onPlyAnimated: _replayIndex == null &&
-                                        !_gameOverVisible
-                                    ? (boardAfter) {
-                                        setState(() {
-                                          _board = boardAfter;
-                                          final clockOwned =
-                                              _endReason == 'clock_flag' ||
+                                    onSelectSquare: _onSquareTap,
+                                    interactive: !_busy &&
+                                        _replayIndex == null &&
+                                        _showMoveHighlights &&
+                                        _outcome == null &&
+                                        !_draw &&
+                                        !_gameOverVisible,
+                                    yourPlayer: _yourPlayer,
+                                    flipBoard: _flipBoard,
+                                    moveHistory: _replayIndex != null
+                                        ? const []
+                                        : _moveHistory,
+                                    replayMode: _replayIndex != null,
+                                    illegalShakeKey: _illegalShakeKey,
+                                    onPlyAnimated: _replayIndex == null &&
+                                            !_gameOverVisible
+                                        ? (boardAfter) {
+                                            setState(() {
+                                              _board = boardAfter;
+                                              final clockOwned = _endReason ==
+                                                      'clock_flag' ||
                                                   _endReason == 'clock_draw';
-                                          if (_outcome == null &&
-                                              !_draw &&
-                                              !clockOwned) {
-                                            final wipe =
-                                                winnerFromBoard(boardAfter);
-                                            if (wipe != null) _outcome = wipe;
+                                              if (_outcome == null &&
+                                                  !_draw &&
+                                                  !clockOwned) {
+                                                final wipe =
+                                                    winnerFromBoard(boardAfter);
+                                                if (wipe != null)
+                                                  _outcome = wipe;
+                                              }
+                                            });
+                                            _scheduleGameOverIfNeeded();
                                           }
-                                        });
-                                        _scheduleGameOverIfNeeded();
-                                      }
-                                    : null,
-                              )
-                            : DraughtsBoard3D(
-                                board: _displayBoard!,
-                                boardSize: _boardSize,
-                                legalMoves:
-                                    _replayIndex != null || !_showMoveHighlights
+                                        : null,
+                                  )
+                                : DraughtsBoard3D(
+                                    board: _displayBoard!,
+                                    boardSize: _boardSize,
+                                    legalMoves: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? const []
                                         : _legalMoves,
-                                selectedRow:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    selectedRow: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : _selectedRow,
-                                selectedCol:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    selectedCol: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : _selectedCol,
-                                mustContinueRow:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    mustContinueRow: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : (_mustContinue != null &&
                                                 _mustContinue!.length >= 2
                                             ? _mustContinue![0]
                                             : null),
-                                mustContinueCol:
-                                    _replayIndex != null || !_showMoveHighlights
+                                    mustContinueCol: _replayIndex != null ||
+                                            !_showMoveHighlights
                                         ? null
                                         : (_mustContinue != null &&
                                                 _mustContinue!.length >= 2
                                             ? _mustContinue![1]
                                             : null),
-                                onSelectSquare: _onSquareTap,
-                                interactive: !_busy &&
-                                    _replayIndex == null &&
-                                    _showMoveHighlights &&
-                                    _outcome == null &&
-                                    !_draw &&
-                                    !_gameOverVisible,
-                                yourPlayer: _yourPlayer,
-                                flipBoard: _flipBoard,
-                                moveHistory: _replayIndex != null
-                                    ? const []
-                                    : _moveHistory,
-                                illegalShakeKey: _illegalShakeKey,
-                                onPlyAnimated: _replayIndex == null &&
-                                        !_gameOverVisible
-                                    ? (boardAfter) {
-                                        setState(() {
-                                          _board = boardAfter;
-                                          final clockOwned =
-                                              _endReason == 'clock_flag' ||
+                                    onSelectSquare: _onSquareTap,
+                                    interactive: !_busy &&
+                                        _replayIndex == null &&
+                                        _showMoveHighlights &&
+                                        _outcome == null &&
+                                        !_draw &&
+                                        !_gameOverVisible,
+                                    yourPlayer: _yourPlayer,
+                                    flipBoard: _flipBoard,
+                                    moveHistory: _replayIndex != null
+                                        ? const []
+                                        : _moveHistory,
+                                    replayMode: _replayIndex != null,
+                                    illegalShakeKey: _illegalShakeKey,
+                                    onPlyAnimated: _replayIndex == null &&
+                                            !_gameOverVisible
+                                        ? (boardAfter) {
+                                            setState(() {
+                                              _board = boardAfter;
+                                              final clockOwned = _endReason ==
+                                                      'clock_flag' ||
                                                   _endReason == 'clock_draw';
-                                          if (_outcome == null &&
-                                              !_draw &&
-                                              !clockOwned) {
-                                            final wipe =
-                                                winnerFromBoard(boardAfter);
-                                            if (wipe != null) _outcome = wipe;
+                                              if (_outcome == null &&
+                                                  !_draw &&
+                                                  !clockOwned) {
+                                                final wipe =
+                                                    winnerFromBoard(boardAfter);
+                                                if (wipe != null)
+                                                  _outcome = wipe;
+                                              }
+                                            });
+                                            _scheduleGameOverIfNeeded();
                                           }
-                                        });
-                                        _scheduleGameOverIfNeeded();
-                                      }
-                                    : null,
-                              ),
-                      ),
-                      coverOverlay: _boardCoverOverlay(chrome),
-                    ),
+                                        : null,
+                                  ),
+                          ),
+                          coverOverlay: _boardCoverOverlay(chrome),
+                        ),
+                      );
+                      if (boardLive) return shell;
+                      return Expanded(child: shell);
+                    },
                   ),
                   if (_moveHistory.isNotEmpty) ...[
                     const SizedBox(height: 10),

@@ -16,6 +16,7 @@ import { PlayersPanel } from "@/components/play-rail/PlayersPanel";
 import { BoardSeatBar } from "@/components/play/BoardSeatBar";
 import { type LivePlayEmbedApi, LivePlayHub } from "@/components/play/LivePlayHub";
 import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
+import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { CompetitionTournamentsHub } from "@/components/tournaments/CompetitionTournamentsHub";
 import { TournamentCupLobby } from "@/components/tournaments/TournamentCupLobby";
 import { Button } from "@/components/ui/button";
@@ -1054,9 +1055,8 @@ export function HomePlayHub({
 
     const playRailInner = (
       <>
-        <div className="border-b border-[var(--dama-border)] px-3 py-3">
-          <GeoAdSlot />
-        </div>
+        {/* No padded wrapper / no loading skeleton - both created a ghost band under the board. */}
+        <GeoAdSlot hideUntilReady />
         {/* Frozen main tabs (all breakpoints); body scrolls in PlayRailScrollPort. */}
         <div
           className={cn(playRailStickyMainClass, "grid grid-cols-3")}
@@ -1265,9 +1265,11 @@ export function HomePlayHub({
             isPlayBoard && mobilePlayBoardColumnClass,
           )}
         >
-          <div
+          <SmartBoardHost
+            active={Boolean(liveActive && live?.phase === "playing")}
             className={cn(
-              "dama-home-board-enter order-1 flex min-h-0 min-w-0 flex-col overflow-hidden lg:order-none",
+              // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
+              "dama-home-board-enter order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:order-none",
               centerBrowse
                 ? "justify-start pt-1"
                 : // Phone/tablet: definite height budget so measure cannot shrink-loop; rail scrolls below.
@@ -1377,7 +1379,7 @@ export function HomePlayHub({
                 coverOverlay={liveActive ? live?.boardCoverOverlay : undefined}
               />
             )}
-          </div>
+          </SmartBoardHost>
 
           {!compactPlayRail ? <PlayRailAside>{playRailInner}</PlayRailAside> : null}
         </div>

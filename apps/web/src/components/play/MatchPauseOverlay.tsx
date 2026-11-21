@@ -107,6 +107,7 @@ export function MatchPauseOverlay({
         bottom={bottom}
         nameMaxChars={nameMaxChars}
         nameSuffix={nameSuffix}
+        reserveBottom={hasDetails}
       />
       {hasDetails ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-50 flex justify-center px-3 sm:bottom-5">

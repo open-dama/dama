@@ -145,8 +145,7 @@ class WalletState extends Equatable {
     final outside = cc.isNotEmpty &&
         (allowed.isEmpty ||
             !allowed.any((c) => c.trim().toUpperCase() == cc) ||
-            cashRmgDisabledCountries
-                .any((c) => c.trim().toUpperCase() == cc));
+            cashRmgDisabledCountries.any((c) => c.trim().toUpperCase() == cc));
     if (cashRmgEnabled && outside) {
       return jurisdictionBlockedError.isNotEmpty
           ? jurisdictionBlockedError

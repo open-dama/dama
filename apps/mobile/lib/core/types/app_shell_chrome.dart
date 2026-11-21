@@ -55,16 +55,22 @@ class AppShellChrome {
   final String slide2Blurb;
   final String slide3Title;
   final String slide3Blurb;
+
   /// Must match native Android applicationId (mig 540).
   final String mobileAndroidApplicationId;
+
   /// Must match native iOS PRODUCT_BUNDLE_IDENTIFIER (mig 540).
   final String mobileIosBundleId;
+
   /// Must match native android:label / CFBundleDisplayName (mig 540).
   final String mobileDisplayName;
+
   /// Must match Android/iOS OAuth URL scheme (mig 540).
   final String mobileOAuthScheme;
+
   /// Must match Android/iOS OAuth URL host (mig 540).
   final String mobileOAuthHost;
+
   /// Full redirect URL for Supabase OAuth (mig 540). No client invent.
   final String mobileOAuthRedirectUrl;
 

@@ -24,18 +24,18 @@ const GAME_START_SRC = "/sounds/game-start.mp3";
 const MESSAGE_SRC = "/sounds/message.wav";
 
 let lastMessageNotifyAt = 0;
-let lastLandNotifyAt = 0;
 
 let ctx: AudioContext | null = null;
 
-/** Small pools so rapid multi-jump lands never restart a mid-play element (dropout/clip). */
-const LAND_POOL = 3;
+/** Pool so rapid multi-jump lands never restart a mid-play element (dropout/clip). */
+const LAND_POOL = 4;
 const landPools: Partial<Record<PieceLandKind, HTMLAudioElement[]>> = {};
 const landPoolIdx: Partial<Record<PieceLandKind, number>> = {};
 let gameStartPlayer: HTMLAudioElement | null = null;
 let messagePlayer: HTMLAudioElement | null = null;
 
 let visibilityHooked = false;
+let audioUnlocked = false;
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -62,6 +62,33 @@ async function ensureCtx(): Promise<AudioContext | null> {
   if (!audio) return null;
   if (audio.state === "suspended") await audio.resume();
   return audio;
+}
+
+/**
+ * Call on first board pointer/tap so Autoplay policies unlock HTMLAudio + AudioContext
+ * before the first land SFX (avoids intermittent silence).
+ */
+export async function unlockGameAudio(): Promise<void> {
+  if (typeof window === "undefined" || audioUnlocked) return;
+  audioUnlocked = true;
+  try {
+    await ensureCtx();
+    for (const kind of Object.keys(LAND_SRC) as PieceLandKind[]) {
+      const el = nextLandPlayer(kind);
+      el.volume = 0.001;
+      try {
+        el.currentTime = 0;
+        await el.play();
+        el.pause();
+        el.currentTime = 0;
+      } catch {
+        /* unlock best-effort */
+      }
+      el.volume = 0.8;
+    }
+  } catch {
+    audioUnlocked = false;
+  }
 }
 
 function beep(
@@ -111,10 +138,8 @@ function nextLandPlayer(kind: PieceLandKind): HTMLAudioElement {
  */
 export async function playPieceLandSound(kind: PieceLandKind): Promise<void> {
   if (typeof window === "undefined") return;
-  const now = Date.now();
-  // Soft debounce only - pool handles true overlap so multi-jumps stay audible.
-  if (now - lastLandNotifyAt < 18) return;
-  lastLandNotifyAt = now;
+  // No global time debounce: multi-jump lands are often <18ms apart and were going silent.
+  // Overlap is handled by the element pool; per-animation boards gate with soundPlayed.
   try {
     await ensureCtx();
     const el = nextLandPlayer(kind);

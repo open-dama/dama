@@ -109,7 +109,7 @@ import { isPaymentModalChromeReady } from "@/types/payment-modal-chrome";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 const STATUS_ALL = "__all__";
@@ -135,7 +135,17 @@ export default function EventsListPage() {
   const createDialogWasOpen = useRef(false);
   const createDialog = useDeferredDialogValue<true>();
   const detailDialog = useDeferredDialogValue<HostedEvent>();
-  const openDetail = detailDialog.openWith;
+  /** After create / missing prize: open manage on Branding with uploads first. */
+  const [manageMediaHandoff, setManageMediaHandoff] = useState(false);
+  const openDetail = useCallback(
+    (ev: HostedEvent, opts?: { focusPrizeMedia?: boolean }) => {
+      const missingPrize = !(ev.prize_image_url || "").trim();
+      const focusMedia = opts?.focusPrizeMedia ?? missingPrize;
+      setManageMediaHandoff(focusMedia);
+      detailDialog.openWith(ev);
+    },
+    [detailDialog.openWith],
+  );
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search.trim(), 250);
@@ -1507,9 +1517,12 @@ export default function EventsListPage() {
                   }
                 }
                 create.mutate(body, {
-                  onSuccess: () => {
+                  onSuccess: (created) => {
                     resetCreateForm();
                     createDialog.close();
+                    if (created?.id) {
+                      openDetail(created, { focusPrizeMedia: true });
+                    }
                   },
                   onError: (err) => {
                     const payErr = err as CreateHostedEventError;
@@ -1539,6 +1552,9 @@ export default function EventsListPage() {
             (chrome.dialog_close_label || "").trim() ||
             softHostingCancelAction(chrome.cancel_action)
           }
+          initialTab={manageMediaHandoff ? "branding" : undefined}
+          focusPrizeMedia={manageMediaHandoff}
+          onMediaHandoffConsumed={() => setManageMediaHandoff(false)}
         />
       ) : null}
     </div>

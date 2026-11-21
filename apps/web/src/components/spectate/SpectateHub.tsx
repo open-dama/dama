@@ -10,6 +10,7 @@ import { PlayRailScrollPort } from "@/components/play-rail/PlayRailScrollPort";
 import { BoardSeatBar } from "@/components/play/BoardSeatBar";
 import { MatchPauseOverlay } from "@/components/play/MatchPauseOverlay";
 import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
+import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { useServerMatchClocks } from "@/components/player/MatchClock";
 import { MatchVotePanel } from "@/components/spectate/MatchVotePanel";
 import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
@@ -940,9 +941,11 @@ export default function SpectateHub({ fillHeight = false }: SpectateHubProps = {
       )}
     >
       {/* Match seats: opponent above board, you below; 2D/3D beside top seat (desktop). */}
-      <div
+      <SmartBoardHost
+        active={Boolean(game && !gameFinished)}
         className={cn(
-          "order-1 flex min-h-0 min-w-0 flex-col overflow-hidden lg:flex-1 lg:justify-center",
+          // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
+          "order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:flex-1 lg:justify-center",
           mobilePlayBoardMaxHeightClass,
         )}
       >
@@ -1077,7 +1080,7 @@ export default function SpectateHub({ fillHeight = false }: SpectateHubProps = {
           board={boardNode}
           coverOverlay={boardCoverOverlay}
         />
-      </div>
+      </SmartBoardHost>
 
       <PlayRailAside>
         <div

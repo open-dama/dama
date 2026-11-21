@@ -128,7 +128,7 @@ import type { TournamentBracketMatch } from "@/types/tournament-bracket";
 import { type TournamentChrome, isTournamentChromeReady } from "@/types/tournament-chrome";
 import { useQueries } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type TournamentFormMode = { kind: "create" } | { kind: "edit"; tournament: AdminTournament };
 
@@ -1239,6 +1239,10 @@ export default function AdminTournamentsPage() {
   const [formatId, setFormatId] = useState("");
   const [arenaDurationMinutes, setArenaDurationMinutes] = useState("");
   const [formAttempted, setFormAttempted] = useState(false);
+  /** After create: surface prize/gallery uploads first (ads create→media parity). */
+  const [focusMediaAfterOpen, setFocusMediaAfterOpen] = useState(false);
+  const [mediaFirstInForm, setMediaFirstInForm] = useState(false);
+  const mediaSectionRef = useRef<HTMLDivElement | null>(null);
 
   const pageSize = parseListPageSize(chrome?.list_page_size);
   const searchDebounceMs = parseSearchDebounceMs(chrome?.search_debounce_ms);
@@ -1271,6 +1275,22 @@ export default function AdminTournamentsPage() {
   }, [entryFilter, searchQ, skip]);
 
   const formDialog = useDeferredDialogValue<TournamentFormMode>();
+  useEffect(() => {
+    if (formDialog.open) return;
+    setFocusMediaAfterOpen(false);
+    setMediaFirstInForm(false);
+  }, [formDialog.open]);
+  /** Edit / create→media: open form; media-only step when prize image still missing. */
+  const openEditTournament = useCallback(
+    (t: AdminTournament, opts?: { mediaStep?: boolean }) => {
+      const missingPrize = !(t.prizeImageUrl || "").trim();
+      const mediaStep = opts?.mediaStep ?? missingPrize;
+      setFocusMediaAfterOpen(mediaStep);
+      setMediaFirstInForm(mediaStep);
+      formDialog.openWith({ kind: "edit", tournament: t });
+    },
+    [formDialog.openWith],
+  );
   /** Deferred clear keeps detail content through Dialog exit animation (cup lobby parity). */
   const detailDialog = useDeferredDialogValue<AdminTournament>();
   const detailTournament = detailDialog.value;
@@ -1362,6 +1382,20 @@ export default function AdminTournamentsPage() {
     const id = formMode.tournament.id;
     return listQuery.data?.tournaments.find((t) => t.id === id) ?? formMode.tournament;
   }, [isEditing, formMode, listQuery.data?.tournaments]);
+  useEffect(() => {
+    if (!formDialog.open || !focusMediaAfterOpen || !isEditing || !editMediaTournament) return;
+    // Wait until the upload section is mounted (media chrome may still be loading).
+    void dropzoneChrome;
+    const id = window.setTimeout(() => {
+      const el = mediaSectionRef.current;
+      if (!el) return;
+      const scroller = el.closest(".overflow-y-auto");
+      if (scroller instanceof HTMLElement) scroller.scrollTop = 0;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setFocusMediaAfterOpen(false);
+    }, 80);
+    return () => window.clearTimeout(id);
+  }, [formDialog.open, focusMediaAfterOpen, isEditing, editMediaTournament, dropzoneChrome]);
   const formPending = createMutation.isPending || updateMutation.isPending;
   const currencySelectLoading = currencyQuery.isLoading;
   const pageLoading = roleLoading || (isAdmin && (listQuery.isLoading || currencySelectLoading));
@@ -1540,7 +1574,7 @@ export default function AdminTournamentsPage() {
               {
                 id: "edit",
                 label: chrome.edit_action,
-                onSelect: () => formDialog.openWith({ kind: "edit", tournament: t }),
+                onSelect: () => openEditTournament(t),
               },
               {
                 id: "delete",
@@ -1575,7 +1609,7 @@ export default function AdminTournamentsPage() {
       });
     }
     return cols.filter((c) => c.id === "actions" || Boolean(c.header));
-  }, [chrome, formDialog, openDetailTournament, swissRoundsByMax, tournamentStatusLabels]);
+  }, [chrome, openEditTournament, openDetailTournament, swissRoundsByMax, tournamentStatusLabels]);
 
   function buildPrizePlaces(prizeAmount: number): Record<string, number> | null {
     const places: Record<string, number> = {};
@@ -1750,10 +1784,9 @@ export default function AdminTournamentsPage() {
                 }
               }
             }
-            // Stay open in edit so prize thumbnail + gallery uploads work (smart-menu create→media).
-            formDialog.openWith({
-              kind: "edit",
-              tournament: {
+            // Stay open on media-only step (remaining prize/gallery uploads).
+            openEditTournament(
+              {
                 id: created.id,
                 title: created.title,
                 description: (payload.description as string | null) ?? null,
@@ -1780,7 +1813,8 @@ export default function AdminTournamentsPage() {
                   (created.prizePayoutMode || payload.prizePayoutMode || "").trim() || null,
                 prizePlacePercents: handoffPercents,
               },
-            });
+              { mediaStep: true },
+            );
           };
           const needsRestPatch =
             (payload.prizePoolPlaces && payload.prizePoolAmount > 0) ||
@@ -2044,150 +2078,202 @@ export default function AdminTournamentsPage() {
               <DialogTitle>{formTitle}</DialogTitle>
               <DialogDescription className="sr-only">{formTitle}</DialogDescription>
             </DialogHeader>
-            <TournamentFormFields
-              chrome={chrome}
-              isFree={isFree}
-              setIsFree={setIsFree}
-              title={title}
-              setTitle={setTitle}
-              description={description}
-              setDescription={setDescription}
-              entryFee={entryFee}
-              setEntryFee={setEntryFee}
-              entryCurrency={entryCurrency}
-              setEntryCurrency={setEntryCurrency}
-              prizePool={prizePool}
-              setPrizePool={setPrizePool}
-              prizeCurrency={prizeCurrency}
-              setPrizeCurrency={setPrizeCurrency}
-              prizePlace1={prizePlace1}
-              setPrizePlace1={setPrizePlace1}
-              prizePlace2={prizePlace2}
-              setPrizePlace2={setPrizePlace2}
-              prizePlace3={prizePlace3}
-              setPrizePlace3={setPrizePlace3}
-              prizePoolDisplay={prizePoolDisplay}
-              setPrizePoolDisplay={setPrizePoolDisplay}
-              maxPlayers={maxPlayers}
-              setMaxPlayers={setMaxPlayers}
-              formatId={formatId}
-              setFormatId={setFormatId}
-              formatOptions={formatOptions}
-              formatLocked={editCupStarted}
-              supportedCurrencies={supportedCurrencies}
-              currencySelectLoading={currencySelectLoading}
-              prizePoolDisplayPlatform={prizePoolDisplayPlatform}
-              disabled={formPending}
-              idPrefix={isEditing ? "edit-tournament" : "create-tournament"}
-              titleError={
-                formAttempted && !title.trim() ? (chrome.title_required || "").trim() : undefined
-              }
-              entryFeeError={
-                formAttempted && !isFree && parsePositiveDecimal(entryFee) == null
-                  ? (chrome.entry_fee_required || "").trim()
-                  : undefined
-              }
-              formatError={
-                formAttempted && !formatId.trim()
-                  ? (chrome.format_required || "").trim()
-                  : undefined
-              }
-              maxPlayersError={
-                formAttempted
-                  ? (() => {
-                      const mpRaw = maxPlayers.trim();
-                      const mpParsed = mpRaw === "" ? null : Number.parseInt(mpRaw, 10);
-                      if (arenaFormatSelected) {
-                        // Empty = Unlimited. Typed invalid low must show required, not open enroll.
-                        if (
-                          mpRaw !== "" &&
-                          (mpParsed == null || !Number.isFinite(mpParsed) || mpParsed < 2)
-                        ) {
-                          return (chrome.err_max_players_required || "").trim();
+            {(() => {
+              // Post-create handoff: media step only (remaining upload work). Full form stays for
+              // normal edit / after leaving the media step.
+              const mediaUnavailable = (
+                mediaUploadChromeQuery.data?.media_upload_unavailable || ""
+              ).trim();
+              const mediaBlock =
+                isEditing && editMediaTournament ? (
+                  <div ref={mediaSectionRef} className="scroll-mt-4 space-y-4">
+                    {dropzoneChrome ? (
+                      <TournamentDetailMedia
+                        tournament={editMediaTournament}
+                        chrome={chrome}
+                        dropzoneChrome={dropzoneChrome}
+                        priority={mediaFirstInForm}
+                        uploadingPrize={
+                          (prizeImageMutation.isPending &&
+                            prizeImageMutation.variables?.id === editMediaTournament.id) ||
+                          (clearPrizeImageMutation.isPending &&
+                            clearPrizeImageMutation.variables?.id === editMediaTournament.id)
                         }
-                        return undefined;
-                      }
-                      if (mpParsed == null || !Number.isFinite(mpParsed) || mpParsed < 2) {
-                        return (chrome.err_max_players_required || "").trim();
-                      }
-                      if (classicSeatCeilingVal >= 2 && mpParsed > classicSeatCeilingVal) {
-                        return (chrome.err_unlimited_arena_only || "").trim();
-                      }
-                      return undefined;
+                        uploadingGallery={
+                          (galleryMutation.isPending &&
+                            galleryMutation.variables?.id === editMediaTournament.id) ||
+                          (removeGalleryMutation.isPending &&
+                            removeGalleryMutation.variables?.id === editMediaTournament.id)
+                        }
+                        onPrizeImage={(file) =>
+                          prizeImageMutation.mutate({ id: editMediaTournament.id, file })
+                        }
+                        onClearPrizeImage={() =>
+                          clearPrizeImageMutation.mutate({ id: editMediaTournament.id })
+                        }
+                        onGallery={(files) =>
+                          galleryMutation.mutate({ id: editMediaTournament.id, files })
+                        }
+                        onRemoveGallery={(index) =>
+                          removeGalleryMutation.mutate({ id: editMediaTournament.id, index })
+                        }
+                      />
+                    ) : mediaUnavailable ? (
+                      <p className="text-sm text-[var(--dama-danger)]" role="alert">
+                        {mediaUnavailable}
+                      </p>
+                    ) : (
+                      <div className="space-y-3" aria-busy="true">
+                        <ShimmerBlock className="h-40 w-full rounded-lg" />
+                        <ShimmerBlock className="h-20 w-full rounded-lg" />
+                      </div>
+                    )}
+                  </div>
+                ) : null;
+              const fields = (
+                <TournamentFormFields
+                  chrome={chrome}
+                  isFree={isFree}
+                  setIsFree={setIsFree}
+                  title={title}
+                  setTitle={setTitle}
+                  description={description}
+                  setDescription={setDescription}
+                  entryFee={entryFee}
+                  setEntryFee={setEntryFee}
+                  entryCurrency={entryCurrency}
+                  setEntryCurrency={setEntryCurrency}
+                  prizePool={prizePool}
+                  setPrizePool={setPrizePool}
+                  prizeCurrency={prizeCurrency}
+                  setPrizeCurrency={setPrizeCurrency}
+                  prizePlace1={prizePlace1}
+                  setPrizePlace1={setPrizePlace1}
+                  prizePlace2={prizePlace2}
+                  setPrizePlace2={setPrizePlace2}
+                  prizePlace3={prizePlace3}
+                  setPrizePlace3={setPrizePlace3}
+                  prizePoolDisplay={prizePoolDisplay}
+                  setPrizePoolDisplay={setPrizePoolDisplay}
+                  maxPlayers={maxPlayers}
+                  setMaxPlayers={setMaxPlayers}
+                  formatId={formatId}
+                  setFormatId={setFormatId}
+                  formatOptions={formatOptions}
+                  formatLocked={editCupStarted}
+                  supportedCurrencies={supportedCurrencies}
+                  currencySelectLoading={currencySelectLoading}
+                  prizePoolDisplayPlatform={prizePoolDisplayPlatform}
+                  disabled={formPending}
+                  idPrefix={isEditing ? "edit-tournament" : "create-tournament"}
+                  titleError={
+                    formAttempted && !title.trim()
+                      ? (chrome.title_required || "").trim()
+                      : undefined
+                  }
+                  entryFeeError={
+                    formAttempted && !isFree && parsePositiveDecimal(entryFee) == null
+                      ? (chrome.entry_fee_required || "").trim()
+                      : undefined
+                  }
+                  formatError={
+                    formAttempted && !formatId.trim()
+                      ? (chrome.format_required || "").trim()
+                      : undefined
+                  }
+                  maxPlayersError={
+                    formAttempted
+                      ? (() => {
+                          const mpRaw = maxPlayers.trim();
+                          const mpParsed = mpRaw === "" ? null : Number.parseInt(mpRaw, 10);
+                          if (arenaFormatSelected) {
+                            // Empty = Unlimited. Typed invalid low must show required, not open enroll.
+                            if (
+                              mpRaw !== "" &&
+                              (mpParsed == null || !Number.isFinite(mpParsed) || mpParsed < 2)
+                            ) {
+                              return (chrome.err_max_players_required || "").trim();
+                            }
+                            return undefined;
+                          }
+                          if (mpParsed == null || !Number.isFinite(mpParsed) || mpParsed < 2) {
+                            return (chrome.err_max_players_required || "").trim();
+                          }
+                          if (classicSeatCeilingVal >= 2 && mpParsed > classicSeatCeilingVal) {
+                            return (chrome.err_unlimited_arena_only || "").trim();
+                          }
+                          return undefined;
+                        })()
+                      : undefined
+                  }
+                  placesSumError={
+                    formAttempted &&
+                    !isFree &&
+                    Number(prizePool) > 0 &&
+                    placesSumInvalid(Number(prizePool))
+                      ? (chrome.err_prize_places_sum || "").trim()
+                      : undefined
+                  }
+                  showArenaDuration={arenaFormatSelected}
+                  arenaDurationMinutes={arenaDurationMinutes}
+                  setArenaDurationMinutes={setArenaDurationMinutes}
+                  arenaDurationError={
+                    formAttempted &&
+                    arenaFormatSelected &&
+                    (() => {
+                      const d = Number.parseInt(arenaDurationMinutes.trim(), 10);
+                      return !Number.isFinite(d) || d <= 0;
                     })()
-                  : undefined
+                      ? (chrome.arena_duration_required || "").trim()
+                      : undefined
+                  }
+                  enums={enumsQuery.data}
+                  payoutMode={payoutMode}
+                  setPayoutMode={setPayoutMode}
+                  prizePercent1={prizePercent1}
+                  setPrizePercent1={setPrizePercent1}
+                  prizePercent2={prizePercent2}
+                  setPrizePercent2={setPrizePercent2}
+                  prizePercent3={prizePercent3}
+                  setPrizePercent3={setPrizePercent3}
+                  percentsSumError={
+                    formAttempted &&
+                    prizePoolDisplay &&
+                    (payoutMode.trim() ===
+                      (enumsQuery.data?.competition_payout_mode_places_percent || "").trim() ||
+                      payoutMode.trim() ===
+                        (enumsQuery.data?.competition_payout_mode_dual_purse || "").trim()) &&
+                    placePercentsSumInvalid(prizePercent1, prizePercent2, prizePercent3)
+                      ? (chrome.err_prize_place_percents_sum || "").trim()
+                      : undefined
+                  }
+                />
+              );
+              if (mediaFirstInForm) {
+                return (
+                  <>
+                    {mediaBlock}
+                    <div className="border-t border-[var(--dama-border)] pt-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        onClick={() => setMediaFirstInForm(false)}
+                      >
+                        {chrome.edit_modal_title}
+                      </Button>
+                    </div>
+                  </>
+                );
               }
-              placesSumError={
-                formAttempted &&
-                !isFree &&
-                Number(prizePool) > 0 &&
-                placesSumInvalid(Number(prizePool))
-                  ? (chrome.err_prize_places_sum || "").trim()
-                  : undefined
-              }
-              showArenaDuration={arenaFormatSelected}
-              arenaDurationMinutes={arenaDurationMinutes}
-              setArenaDurationMinutes={setArenaDurationMinutes}
-              arenaDurationError={
-                formAttempted &&
-                arenaFormatSelected &&
-                (() => {
-                  const d = Number.parseInt(arenaDurationMinutes.trim(), 10);
-                  return !Number.isFinite(d) || d <= 0;
-                })()
-                  ? (chrome.arena_duration_required || "").trim()
-                  : undefined
-              }
-              enums={enumsQuery.data}
-              payoutMode={payoutMode}
-              setPayoutMode={setPayoutMode}
-              prizePercent1={prizePercent1}
-              setPrizePercent1={setPrizePercent1}
-              prizePercent2={prizePercent2}
-              setPrizePercent2={setPrizePercent2}
-              prizePercent3={prizePercent3}
-              setPrizePercent3={setPrizePercent3}
-              percentsSumError={
-                formAttempted &&
-                prizePoolDisplay &&
-                (payoutMode.trim() ===
-                  (enumsQuery.data?.competition_payout_mode_places_percent || "").trim() ||
-                  payoutMode.trim() ===
-                    (enumsQuery.data?.competition_payout_mode_dual_purse || "").trim()) &&
-                placePercentsSumInvalid(prizePercent1, prizePercent2, prizePercent3)
-                  ? (chrome.err_prize_place_percents_sum || "").trim()
-                  : undefined
-              }
-            />
-            {isEditing && editMediaTournament && dropzoneChrome ? (
-              <TournamentDetailMedia
-                tournament={editMediaTournament}
-                chrome={chrome}
-                dropzoneChrome={dropzoneChrome}
-                uploadingPrize={
-                  (prizeImageMutation.isPending &&
-                    prizeImageMutation.variables?.id === editMediaTournament.id) ||
-                  (clearPrizeImageMutation.isPending &&
-                    clearPrizeImageMutation.variables?.id === editMediaTournament.id)
-                }
-                uploadingGallery={
-                  (galleryMutation.isPending &&
-                    galleryMutation.variables?.id === editMediaTournament.id) ||
-                  (removeGalleryMutation.isPending &&
-                    removeGalleryMutation.variables?.id === editMediaTournament.id)
-                }
-                onPrizeImage={(file) =>
-                  prizeImageMutation.mutate({ id: editMediaTournament.id, file })
-                }
-                onClearPrizeImage={() =>
-                  clearPrizeImageMutation.mutate({ id: editMediaTournament.id })
-                }
-                onGallery={(files) => galleryMutation.mutate({ id: editMediaTournament.id, files })}
-                onRemoveGallery={(index) =>
-                  removeGalleryMutation.mutate({ id: editMediaTournament.id, index })
-                }
-              />
-            ) : null}
+              return (
+                <>
+                  {fields}
+                  {mediaBlock}
+                </>
+              );
+            })()}
             <DialogFooter damaDialogFooter>
               {isEditing &&
               formMode?.kind === "edit" &&
@@ -2937,6 +3023,7 @@ function TournamentDetailMedia({
   onClearPrizeImage,
   onGallery,
   onRemoveGallery,
+  priority = false,
 }: {
   tournament: AdminTournament;
   chrome: Required<TournamentChrome>;
@@ -2947,6 +3034,8 @@ function TournamentDetailMedia({
   onClearPrizeImage: () => void;
   onGallery: (files: File[]) => void;
   onRemoveGallery: (index: number) => void;
+  /** After create: media sits above the form (no top rule; bottom rule separates fields). */
+  priority?: boolean;
 }) {
   const gallery = (tournament.gallery ?? []).filter((u) => (u || "").trim().length > 0);
   const prizeUrl = (tournament.prizeImageUrl || "").trim();
@@ -2955,7 +3044,13 @@ function TournamentDetailMedia({
     .filter(Boolean);
 
   return (
-    <div className="space-y-4 border-t border-[var(--dama-border)] pt-4">
+    <div
+      className={
+        priority
+          ? "space-y-4 border-b border-[var(--dama-border)] pb-4"
+          : "space-y-4 border-t border-[var(--dama-border)] pt-4"
+      }
+    >
       {preview.length > 0 ? (
         <GalleryCarousel images={preview} ariaLabel={chrome.gallery_label} />
       ) : null}
