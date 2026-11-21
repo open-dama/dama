@@ -13,6 +13,7 @@ import { PlayRailScrollPort } from "@/components/play-rail/PlayRailScrollPort";
 import type { RailPlayer } from "@/components/play-rail/PlayerListRow";
 import { BoardSeatBar } from "@/components/play/BoardSeatBar";
 import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
+import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { MatchPauseOverlay } from "@/components/play/MatchPauseOverlay";
 import { OfficialPauseActivityStrip } from "@/components/play/OfficialPauseActivityStrip";
 import { OfficialPauseBanner } from "@/components/play/OfficialPauseBanner";
@@ -54,7 +55,7 @@ import { useMaxLg } from "@/hooks/useMaxLg";
 import { authHeaders, resolveWsUrl, restClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/api-client-error";
 import { applyOptimisticDraughtsMove } from "@/lib/applyOptimisticDraughtsMove";
-import { playGameNotify } from "@/lib/audio-notify";
+import { playGameNotify, unlockGameAudio } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { pieceSeatNames, usePiecePalette } from "@/lib/board-palette";
 import { useBoardViewMode } from "@/lib/board-view";
@@ -992,9 +993,9 @@ export function LivePlayHub({
           }
           if ((msg.type === "move_ack" || msg.type === "game_state") && msg.game) {
             setAiThinking(false);
-            const prev = gameRef.current;
             const wasLocal = pendingLocalMoveRef.current || Boolean(moveWaitRef.current);
             const incoming = msg.game;
+            const prevSnap = gameRef.current;
             const envRole =
               typeof (msg as { actor_role?: string }).actor_role === "string"
                 ? String((msg as { actor_role?: string }).actor_role).trim()
@@ -1004,14 +1005,14 @@ export function LivePlayHub({
                 ? String((msg as { actor_display_name?: string }).actor_display_name).trim()
                 : "";
             const wasOfficial =
-              Boolean(prev?.paused) && (prev?.pause_kind || "").trim() === "official";
+              Boolean(prevSnap?.paused) && (prevSnap?.pause_kind || "").trim() === "official";
             // SpectateHub parity: envelope actor when resume game payload cleared pause fields.
             if (wasOfficial && !incoming.paused) {
               const role = officialPauseRoleLabel(
-                envRole || prev?.pause_actor_role,
+                envRole || prevSnap?.pause_actor_role,
                 officialPauseChrome,
               );
-              const name = envName || (prev?.pause_actor_display_name || "").trim();
+              const name = envName || (prevSnap?.pause_actor_display_name || "").trim();
               if (role && name) {
                 const banner = applyOfficialPauseFmt(officialPauseChrome?.banner_resumed_fmt, {
                   role,
@@ -1020,16 +1021,21 @@ export function LivePlayHub({
                 if (banner) setResumeBanner(banner);
               }
             }
-            const merged = wasLocal
-              ? mergeBoardStateAfterPlayerMove(prev, incoming)
-              : mergeRemoteBoardState(prev, incoming);
+            // Functional merge against latest React state (not lagging gameRef) so optimistic
+            // history is not replayed as a second land animation / SFX.
+            setGame((prev) => {
+              const merged = wasLocal
+                ? mergeBoardStateAfterPlayerMove(prev, incoming)
+                : mergeRemoteBoardState(prev, incoming);
+              gameRef.current = merged;
+              return merged;
+            });
             if (moveWaitRef.current) {
               moveWaitRef.current.resolve(incoming);
               moveWaitRef.current = null;
             }
             pendingLocalMoveRef.current = false;
             qc.setQueryData(gameStateQueryKey(incoming.id), incoming);
-            setGame(merged);
             setSelected(null);
           }
         } catch {
@@ -1516,9 +1522,12 @@ export function LivePlayHub({
               ? 1
               : game.turn;
       const from = selected;
+      void unlockGameAudio();
       const optimistic = applyOptimisticDraughtsMove(game, selected, [row, col], seat);
       if (optimistic) {
         pendingLocalMoveRef.current = true;
+        // Keep gameRef in sync immediately so a fast move_ack cannot merge against pre-optimistic state.
+        gameRef.current = optimistic;
         setGame(optimistic);
         setSelected(null);
         // Place SFX on board land phase only (not when the piece starts moving).
@@ -1590,12 +1599,16 @@ export function LivePlayHub({
       matchIntroSeenRef.current = id;
       return;
     }
-    // Wait for seat bios so VS intro shows real avatar/flag/name (DB-driven).
+    // Prefer seat bios for avatar/flag, but never block the cinematic forever
+    // (guest/AI public-player loads used to skip the whole intro).
     if (youSeatId && youPlayerQuery.isLoading) return;
     if (mode === "pvp") {
       const oppId = userId && game.player1_id === userId ? game.player2_id : game.player1_id;
       if (oppId && oppPlayerQuery.isLoading) return;
     }
+    // Mark seen only when we actually arm the overlay (not before chrome is ready).
+    if (!(railChrome?.match_intro_vs_label || chrome?.match_intro_vs_label || "").trim()) return;
+    if (!(railChrome?.match_intro_aria || chrome?.match_intro_aria || "").trim()) return;
     matchIntroSeenRef.current = id;
     setMatchResultActive(false);
     setMatchIntroActive(true);
@@ -1610,6 +1623,9 @@ export function LivePlayHub({
     youSeatId,
     youPlayerQuery.isLoading,
     oppPlayerQuery.isLoading,
+    chrome,
+    railChrome?.match_intro_vs_label,
+    railChrome?.match_intro_aria,
   ]);
 
   // Must stay above chrome/token early-returns (Rules of Hooks).
@@ -2452,9 +2468,11 @@ export function LivePlayHub({
       {confirmAndAds}
 
       {/* Match seats: opponent above board, you below; 2D/3D beside top seat (desktop). */}
-      <div
+      <SmartBoardHost
+        active={phase === "playing"}
         className={cn(
-          "order-1 flex min-h-0 min-w-0 flex-col overflow-hidden lg:flex-1 lg:justify-center",
+          // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
+          "order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:flex-1 lg:justify-center",
           mobilePlayBoardMaxHeightClass,
         )}
       >
@@ -2532,7 +2550,7 @@ export function LivePlayHub({
           board={boardNode}
           coverOverlay={boardCoverOverlay}
         />
-      </div>
+      </SmartBoardHost>
 
       {/* lg+: frozen chrome. max-lg: tabs scroll with the rail body. */}
       <PlayRailAside>

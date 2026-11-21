@@ -145,9 +145,24 @@ type Props = {
   chrome: Required<EventsOrganizerChrome>;
   token: string;
   closeLabel: string;
+  /** After create: open Branding (or another tab) instead of Overview. */
+  initialTab?: TabId;
+  /** After create: put prize/gallery uploads first and scroll to them. */
+  focusPrizeMedia?: boolean;
+  onMediaHandoffConsumed?: () => void;
 };
 
-export function ManageEventDialog({ open, onOpenChange, event, chrome, token, closeLabel }: Props) {
+export function ManageEventDialog({
+  open,
+  onOpenChange,
+  event,
+  chrome,
+  token,
+  closeLabel,
+  initialTab,
+  focusPrizeMedia = false,
+  onMediaHandoffConsumed,
+}: Props) {
   const [tab, setTab] = useState<TabId>("overview");
   const [editTitle, setEditTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -170,6 +185,8 @@ export function ManageEventDialog({ open, onOpenChange, event, chrome, token, cl
   const [activityGameId, setActivityGameId] = useState<string>("");
   const [rosterSkip, setRosterSkip] = useState(0);
   const [liveSkip, setLiveSkip] = useState(0);
+  const [mediaFirstInBranding, setMediaFirstInBranding] = useState(false);
+  const prizeMediaRef = useRef<HTMLDivElement | null>(null);
   const closeResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const eventId = event?.id ?? null;
@@ -228,6 +245,7 @@ export function ManageEventDialog({ open, onOpenChange, event, chrome, token, cl
 
   const resetManageEphemeralState = useCallback(() => {
     setTab("overview");
+    setMediaFirstInBranding(false);
     setLiveRowSelection({});
     setBulkSelectedMode(null);
     setBulkPauseRound(null);
@@ -239,6 +257,35 @@ export function ManageEventDialog({ open, onOpenChange, event, chrome, token, cl
   }, []);
 
   useEffect(() => () => cancelCloseReset(), [cancelCloseReset]);
+
+  // Create → media handoff: Branding tab + prize upload first (ads create→media parity).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handoff once per open; re-run when media chrome mounts
+  useEffect(() => {
+    if (!open || !event) return;
+    if (!focusPrizeMedia && !initialTab) return;
+    void dropzoneChrome;
+    const nextTab: TabId = focusPrizeMedia ? "branding" : (initialTab as TabId);
+    setTab(nextTab);
+    if (nextTab === "branding") {
+      setDescription(event.description || "");
+      setSponsorName(event.sponsor_name || "");
+      setBrandColor(event.brand_color || "");
+      setMediaFirstInBranding(Boolean(focusPrizeMedia));
+    }
+    if (!focusPrizeMedia) {
+      onMediaHandoffConsumed?.();
+      return;
+    }
+    const id = window.setTimeout(() => {
+      const el = prizeMediaRef.current;
+      if (!el) return;
+      const scroller = el.closest(".overflow-y-auto");
+      if (scroller instanceof HTMLElement) scroller.scrollTop = 0;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      onMediaHandoffConsumed?.();
+    }, 80);
+    return () => window.clearTimeout(id);
+  }, [open, event?.id, focusPrizeMedia, initialTab, onMediaHandoffConsumed, dropzoneChrome]);
 
   useEffect(() => {
     if (!open || !event) return;
@@ -2148,62 +2195,82 @@ export function ManageEventDialog({ open, onOpenChange, event, chrome, token, cl
 
               {tab === "branding" ? (
                 <div className="space-y-4 text-sm">
-                  <Field id="manage-description" label={chrome.description_label}>
-                    <textarea
-                      id="manage-description"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      rows={4}
-                      placeholder={chrome.description_placeholder}
-                      className={cn(
-                        "flex w-full rounded-md border border-[var(--dama-border)] bg-[var(--dama-input)] px-3 py-2 text-sm text-[var(--dama-text)] transition-colors",
-                        "placeholder:text-[var(--dama-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--dama-brand)]",
-                        "disabled:cursor-not-allowed disabled:opacity-50",
-                      )}
-                    />
-                  </Field>
-                  <div className="space-y-2 border-b border-[var(--dama-border)] pb-4">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--dama-text)]">
-                        {chrome.prize_media_section_title}
-                      </p>
-                      <p className="text-xs text-[var(--dama-muted)]">
-                        {chrome.prize_media_section_blurb}
-                      </p>
-                    </div>
-                    {dropzoneChrome ? (
-                      <EntityMediaEditor
-                        chrome={{
-                          thumbnail_label: chrome.thumbnail_label,
-                          gallery_label: chrome.gallery_label,
-                          gallery_empty: chrome.gallery_empty,
-                          gallery_add_action: chrome.gallery_add_action,
-                          gallery_max_slots: chrome.gallery_max_slots,
-                          gallery_slots_fmt: chrome.gallery_slots_fmt,
-                          thumbnail_main_badge: chrome.thumbnail_main_badge,
-                          thumbnail_empty_hint: chrome.thumbnail_empty_hint,
-                          thumbnail_hint: chrome.thumbnail_hint,
-                          gallery_limit_reached: chrome.gallery_limit_reached,
-                          uploading_label: dropzoneChrome.uploading_label,
-                          remove_action: dropzoneChrome.remove_action,
-                        }}
-                        thumbnailUrl={(event.prize_image_url || "").trim()}
-                        galleryUrls={(event.gallery ?? []).filter(
-                          (u) => (u || "").trim().length > 0,
+                  {(() => {
+                    const descriptionField = (
+                      <Field id="manage-description" label={chrome.description_label}>
+                        <textarea
+                          id="manage-description"
+                          value={description}
+                          onChange={(e) => setDescription(e.target.value)}
+                          rows={4}
+                          placeholder={chrome.description_placeholder}
+                          className={cn(
+                            "flex w-full rounded-md border border-[var(--dama-border)] bg-[var(--dama-input)] px-3 py-2 text-sm text-[var(--dama-text)] transition-colors",
+                            "placeholder:text-[var(--dama-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--dama-brand)]",
+                            "disabled:cursor-not-allowed disabled:opacity-50",
+                          )}
+                        />
+                      </Field>
+                    );
+                    const prizeMediaBlock = (
+                      <div
+                        ref={prizeMediaRef}
+                        className="scroll-mt-4 space-y-2 border-b border-[var(--dama-border)] pb-4"
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-[var(--dama-text)]">
+                            {chrome.prize_media_section_title}
+                          </p>
+                          <p className="text-xs text-[var(--dama-muted)]">
+                            {chrome.prize_media_section_blurb}
+                          </p>
+                        </div>
+                        {dropzoneChrome ? (
+                          <EntityMediaEditor
+                            chrome={{
+                              thumbnail_label: chrome.thumbnail_label,
+                              gallery_label: chrome.gallery_label,
+                              gallery_empty: chrome.gallery_empty,
+                              gallery_add_action: chrome.gallery_add_action,
+                              gallery_max_slots: chrome.gallery_max_slots,
+                              gallery_slots_fmt: chrome.gallery_slots_fmt,
+                              thumbnail_main_badge: chrome.thumbnail_main_badge,
+                              thumbnail_empty_hint: chrome.thumbnail_empty_hint,
+                              thumbnail_hint: chrome.thumbnail_hint,
+                              gallery_limit_reached: chrome.gallery_limit_reached,
+                              uploading_label: dropzoneChrome.uploading_label,
+                              remove_action: dropzoneChrome.remove_action,
+                            }}
+                            thumbnailUrl={(event.prize_image_url || "").trim()}
+                            galleryUrls={(event.gallery ?? []).filter(
+                              (u) => (u || "").trim().length > 0,
+                            )}
+                            busyThumbnail={uploadPrizeImage.isPending || clearPrizeImage.isPending}
+                            busyGallery={uploadGallery.isPending || removeGallery.isPending}
+                            onThumbnail={(file) => uploadPrizeImage.mutate({ id: event.id, file })}
+                            onClearThumbnail={() => clearPrizeImage.mutate({ id: event.id })}
+                            onGalleryFiles={(files) =>
+                              uploadGallery.mutate({ id: event.id, files })
+                            }
+                            onRemoveGallery={(index) =>
+                              removeGallery.mutate({ id: event.id, index })
+                            }
+                          />
+                        ) : (
+                          <p className="text-sm text-[var(--dama-danger)]" role="alert">
+                            {(mediaUploadChromeQuery.data?.media_upload_unavailable || "").trim()}
+                          </p>
                         )}
-                        busyThumbnail={uploadPrizeImage.isPending || clearPrizeImage.isPending}
-                        busyGallery={uploadGallery.isPending || removeGallery.isPending}
-                        onThumbnail={(file) => uploadPrizeImage.mutate({ id: event.id, file })}
-                        onClearThumbnail={() => clearPrizeImage.mutate({ id: event.id })}
-                        onGalleryFiles={(files) => uploadGallery.mutate({ id: event.id, files })}
-                        onRemoveGallery={(index) => removeGallery.mutate({ id: event.id, index })}
-                      />
-                    ) : (
-                      <p className="text-sm text-[var(--dama-danger)]" role="alert">
-                        {(mediaUploadChromeQuery.data?.media_upload_unavailable || "").trim()}
-                      </p>
-                    )}
-                  </div>
+                      </div>
+                    );
+                    return (
+                      <>
+                        {mediaFirstInBranding ? prizeMediaBlock : null}
+                        {descriptionField}
+                        {!mediaFirstInBranding ? prizeMediaBlock : null}
+                      </>
+                    );
+                  })()}
                   <Field id="manage-sponsor" label={chrome.sponsor_name_label}>
                     <Input
                       id="manage-sponsor"

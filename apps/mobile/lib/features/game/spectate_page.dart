@@ -25,6 +25,7 @@ import 'package:dama_mobile/features/game/match_pause_overlay.dart';
 import 'package:dama_mobile/features/game/match_vote_panel.dart';
 import 'package:dama_mobile/features/game/official_pause_activity_strip.dart';
 import 'package:dama_mobile/features/game/play_board_frame.dart';
+import 'package:dama_mobile/features/game/smart_board_shell.dart';
 import 'package:dama_mobile/features/player/match_seat_avatars.dart';
 import 'package:dama_mobile/features/player/open_create_game_challenge.dart';
 import 'package:dama_mobile/widgets/player_rail_menu_leading.dart';
@@ -1213,123 +1214,138 @@ class _SpectatePageState extends State<SpectatePage> {
                 refreshToken: _pauseActivityRefresh,
               ),
             const SizedBox(height: 12),
-            Expanded(
-              child: _busy
-                  ? const BoardGridSkeleton()
-                  : _displayBoard == null || _boardSize <= 0
-                      ? Center(
-                          child: Text(
-                            _connected
-                                ? chrome.waitingBoard
-                                : chrome.boardAfterConnect,
-                            style: TextStyle(color: tokens.onSurfaceMuted),
-                          ),
-                        )
-                      : PlayBoardFrame(
-                          vsLabel: _railChrome?.vsSeparator ?? '',
-                          coverOverlay: _spectatePauseCoverOverlay(),
-                          topSeat: MatchSeatAvatars(
-                            layout: MatchSeatBarLayout.sideColumn,
-                            sideSlot: MatchSideSeatSlot.top,
-                            yourPlayer: 1,
-                            player1Id: _player1Id,
-                            player2Id: _player2Id,
-                            whitePieces: _whitePieces,
-                            blackPieces: _blackPieces,
-                            piecesPerSide: _piecesPerSide,
-                            labelWhite: chrome.labelWhite,
-                            labelBlack: chrome.labelBlack,
-                            seatMetaSeparator: chrome.seatMetaSeparator,
-                            clockLabel: p2ClockLabel,
-                            clockActive: _outcome == null &&
-                                !_draw &&
-                                !_gamePaused &&
-                                _endReason != 'clock_flag' &&
-                                _endReason != 'clock_draw' &&
-                                _activeClockPlayer == 2,
-                            ratingParenOpen: _railChrome?.ratingParenOpen,
-                            ratingParenClose: _railChrome?.ratingParenClose,
-                            trailing: _railChrome != null
-                                ? CompactBoardViewToggle(
-                                    selected: _boardView,
-                                    onChanged: _setBoardView,
-                                    label2d: _railChrome!.boardView2d,
-                                    label3d: _railChrome!.boardView3d,
-                                  )
-                                : null,
-                            onChallenge: (req) =>
-                                openCreateGameChallenge(context, req),
-                          ),
-                          bottomSeat: MatchSeatAvatars(
-                            layout: MatchSeatBarLayout.sideColumn,
-                            sideSlot: MatchSideSeatSlot.bottom,
-                            yourPlayer: 1,
-                            player1Id: _player1Id,
-                            player2Id: _player2Id,
-                            whitePieces: _whitePieces,
-                            blackPieces: _blackPieces,
-                            piecesPerSide: _piecesPerSide,
-                            labelWhite: chrome.labelWhite,
-                            labelBlack: chrome.labelBlack,
-                            seatMetaSeparator: chrome.seatMetaSeparator,
-                            clockLabel: p1ClockLabel,
-                            clockActive: _outcome == null &&
-                                !_draw &&
-                                !_gamePaused &&
-                                _endReason != 'clock_flag' &&
-                                _endReason != 'clock_draw' &&
-                                _activeClockPlayer == 1,
-                            ratingParenOpen: _railChrome?.ratingParenOpen,
-                            ratingParenClose: _railChrome?.ratingParenClose,
-                            onChallenge: (req) =>
-                                openCreateGameChallenge(context, req),
-                          ),
-                          // MatchBoardPage parity: shared palette + ply animation props.
-                          board: BoardPaletteScope(
-                            board: boardPaletteById(_boardPaletteId),
-                            piece: piecePaletteById(_piecePaletteId),
-                            child: _boardView == BoardViewMode.flat2d
-                                ? DraughtsBoard2D(
-                                    board: _displayBoard!,
-                                    boardSize: _boardSize,
-                                    legalMoves: const [],
-                                    selectedRow: null,
-                                    selectedCol: null,
-                                    onSelectSquare: (_, __) {},
-                                    interactive: false,
-                                    yourPlayer: 1,
-                                    flipBoard: _flipBoard,
-                                    moveHistory: _replayIndex != null
-                                        ? const []
-                                        : _moveHistory,
-                                    replayMode: _replayIndex != null,
-                                    onPlyAnimated: _replayIndex == null
-                                        ? (boardAfter) {
-                                            setState(() => _board = boardAfter);
-                                          }
-                                        : null,
-                                  )
-                                : DraughtsBoard3D(
-                                    board: _displayBoard!,
-                                    boardSize: _boardSize,
-                                    legalMoves: const [],
-                                    selectedRow: null,
-                                    selectedCol: null,
-                                    onSelectSquare: (_, __) {},
-                                    interactive: false,
-                                    yourPlayer: 1,
-                                    flipBoard: _flipBoard,
-                                    moveHistory: _replayIndex != null
-                                        ? const []
-                                        : _moveHistory,
-                                    onPlyAnimated: _replayIndex == null
-                                        ? (boardAfter) {
-                                            setState(() => _board = boardAfter);
-                                          }
-                                        : null,
-                                  ),
-                          ),
-                        ),
+            Builder(
+              builder: (context) {
+                final boardLive = _outcome == null &&
+                    !_draw &&
+                    _endReason != 'clock_flag' &&
+                    _endReason != 'clock_draw';
+                if (_busy) {
+                  return const Expanded(child: BoardGridSkeleton());
+                }
+                if (_displayBoard == null || _boardSize <= 0) {
+                  return Expanded(
+                    child: Center(
+                      child: Text(
+                        _connected
+                            ? chrome.waitingBoard
+                            : chrome.boardAfterConnect,
+                        style: TextStyle(color: tokens.onSurfaceMuted),
+                      ),
+                    ),
+                  );
+                }
+                final shell = SmartBoardShell(
+                  active: boardLive,
+                  child: PlayBoardFrame(
+                    vsLabel: _railChrome?.vsSeparator ?? '',
+                    coverOverlay: _spectatePauseCoverOverlay(),
+                    topSeat: MatchSeatAvatars(
+                      layout: MatchSeatBarLayout.sideColumn,
+                      sideSlot: MatchSideSeatSlot.top,
+                      yourPlayer: 1,
+                      player1Id: _player1Id,
+                      player2Id: _player2Id,
+                      whitePieces: _whitePieces,
+                      blackPieces: _blackPieces,
+                      piecesPerSide: _piecesPerSide,
+                      labelWhite: chrome.labelWhite,
+                      labelBlack: chrome.labelBlack,
+                      seatMetaSeparator: chrome.seatMetaSeparator,
+                      clockLabel: p2ClockLabel,
+                      clockActive: _outcome == null &&
+                          !_draw &&
+                          !_gamePaused &&
+                          _endReason != 'clock_flag' &&
+                          _endReason != 'clock_draw' &&
+                          _activeClockPlayer == 2,
+                      ratingParenOpen: _railChrome?.ratingParenOpen,
+                      ratingParenClose: _railChrome?.ratingParenClose,
+                      trailing: _railChrome != null
+                          ? CompactBoardViewToggle(
+                              selected: _boardView,
+                              onChanged: _setBoardView,
+                              label2d: _railChrome!.boardView2d,
+                              label3d: _railChrome!.boardView3d,
+                            )
+                          : null,
+                      onChallenge: (req) =>
+                          openCreateGameChallenge(context, req),
+                    ),
+                    bottomSeat: MatchSeatAvatars(
+                      layout: MatchSeatBarLayout.sideColumn,
+                      sideSlot: MatchSideSeatSlot.bottom,
+                      yourPlayer: 1,
+                      player1Id: _player1Id,
+                      player2Id: _player2Id,
+                      whitePieces: _whitePieces,
+                      blackPieces: _blackPieces,
+                      piecesPerSide: _piecesPerSide,
+                      labelWhite: chrome.labelWhite,
+                      labelBlack: chrome.labelBlack,
+                      seatMetaSeparator: chrome.seatMetaSeparator,
+                      clockLabel: p1ClockLabel,
+                      clockActive: _outcome == null &&
+                          !_draw &&
+                          !_gamePaused &&
+                          _endReason != 'clock_flag' &&
+                          _endReason != 'clock_draw' &&
+                          _activeClockPlayer == 1,
+                      ratingParenOpen: _railChrome?.ratingParenOpen,
+                      ratingParenClose: _railChrome?.ratingParenClose,
+                      onChallenge: (req) =>
+                          openCreateGameChallenge(context, req),
+                    ),
+                    // MatchBoardPage parity: shared palette + ply animation props.
+                    board: BoardPaletteScope(
+                      board: boardPaletteById(_boardPaletteId),
+                      piece: piecePaletteById(_piecePaletteId),
+                      child: _boardView == BoardViewMode.flat2d
+                          ? DraughtsBoard2D(
+                              board: _displayBoard!,
+                              boardSize: _boardSize,
+                              legalMoves: const [],
+                              selectedRow: null,
+                              selectedCol: null,
+                              onSelectSquare: (_, __) {},
+                              interactive: false,
+                              yourPlayer: 1,
+                              flipBoard: _flipBoard,
+                              moveHistory: _replayIndex != null
+                                  ? const []
+                                  : _moveHistory,
+                              replayMode: _replayIndex != null,
+                              onPlyAnimated: _replayIndex == null
+                                  ? (boardAfter) {
+                                      setState(() => _board = boardAfter);
+                                    }
+                                  : null,
+                            )
+                          : DraughtsBoard3D(
+                              board: _displayBoard!,
+                              boardSize: _boardSize,
+                              legalMoves: const [],
+                              selectedRow: null,
+                              selectedCol: null,
+                              onSelectSquare: (_, __) {},
+                              interactive: false,
+                              yourPlayer: 1,
+                              flipBoard: _flipBoard,
+                              moveHistory: _replayIndex != null
+                                  ? const []
+                                  : _moveHistory,
+                              onPlyAnimated: _replayIndex == null
+                                  ? (boardAfter) {
+                                      setState(() => _board = boardAfter);
+                                    }
+                                  : null,
+                            ),
+                    ),
+                  ),
+                );
+                if (boardLive) return shell;
+                return Expanded(child: shell);
+              },
             ),
             if (_moveHistory.isNotEmpty) ...[
               const SizedBox(height: 10),

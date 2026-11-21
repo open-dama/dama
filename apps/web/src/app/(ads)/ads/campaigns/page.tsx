@@ -151,15 +151,6 @@ export default function AdsCampaignsPage() {
     [detailDialog.openWith],
   );
 
-  useEffect(() => {
-    if (!detailDialog.open || !focusMediaAfterOpen) return;
-    const id = window.setTimeout(() => {
-      mediaSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      setFocusMediaAfterOpen(false);
-    }, 80);
-    return () => window.clearTimeout(id);
-  }, [detailDialog.open, focusMediaAfterOpen]);
-
   const [skip, setSkip] = useUrlSkip("skip");
   const playbackQuery = useAdPlaybackQuery(Boolean(token));
   const pageChrome = playbackQuery.data?.schedule_chrome;
@@ -179,6 +170,28 @@ export default function AdsCampaignsPage() {
   const dropzoneChrome = isMediaUploadChromeReady(mediaUploadChromeQuery.data)
     ? mediaUploadChromeQuery.data
     : undefined;
+
+  useEffect(() => {
+    if (!detailDialog.open || !focusMediaAfterOpen) return;
+    void mediaChrome;
+    void dropzoneChrome;
+    void viewportCreativesChrome;
+    const id = window.setTimeout(() => {
+      const el = mediaSectionRef.current;
+      if (!el) return;
+      const scroller = el.closest(".overflow-y-auto");
+      if (scroller instanceof HTMLElement) scroller.scrollTop = 0;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setFocusMediaAfterOpen(false);
+    }, 80);
+    return () => window.clearTimeout(id);
+  }, [
+    detailDialog.open,
+    focusMediaAfterOpen,
+    mediaChrome,
+    dropzoneChrome,
+    viewportCreativesChrome,
+  ]);
   const mapChrome = isAdMapChromeReady(pageChrome) ? pageChrome : undefined;
   const pricingQuery = useAdPricingQuery(geoLat, geoLng);
   const createFee =

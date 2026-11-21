@@ -79,17 +79,27 @@ function useChessBoardStack(hasHead: boolean, hasFoot: boolean, maxLg: boolean) 
     // Height-budgeted host (locked mobile/tablet shell, or desktop): fit seats + square.
     if (h >= 48) {
       const availH = h - headReserve - footReserve - gaps;
-      const next = Math.max(0, Math.floor(Math.min(w, Math.max(0, availH))));
+      const heightFit = Math.max(0, Math.floor(Math.min(w, Math.max(0, availH))));
+      // Content-hug / auto-height ancestors (smart-board live + expanded portal):
+      // host height tracks the stack, so the first pass often sees a short host and
+      // would shrink the square to a postage stamp. Prefer full width whenever the
+      // host cannot already fit a near-square.
+      if (maxLg && heightFit < Math.floor(w * 0.9)) {
+        const next = Math.max(0, Math.floor(w));
+        setFitHost(false);
+        setSide((prev) => (prev === next ? prev : next));
+        return;
+      }
       setFitHost(true);
       setSide((prev) => {
-        if (prev === next) return prev;
+        if (prev === heightFit) return prev;
         // Content-sized host tracks our stack height. Shrinking the board then
         // shrinks the host → availH → side again (infinite loop). Ignore that.
-        if (maxLg && prev > 0 && next < prev) {
+        if (maxLg && prev > 0 && heightFit < prev) {
           const stackIfPrev = prev + headReserve + footReserve + gaps;
           if (Math.abs(h - stackIfPrev) <= 2) return prev;
         }
-        return next;
+        return heightFit;
       });
       return;
     }
@@ -164,13 +174,16 @@ export function PlayBoardColumn({
               ? fitHost || !maxLg
                 ? { width: side }
                 : { width: "100%", maxWidth: side }
-              : { width: "100%", visibility: "hidden", pointerEvents: "none" }
+              : // Keep a visible square while measuring - visibility:hidden looked like
+                // the board “minimized and vanished” on remount / game start.
+                { width: "100%", maxWidth: "100%" }
           }
           aria-hidden={!ready}
         >
           {top ? (
             <div
               ref={headRef}
+              data-dama-board-chrome=""
               className="w-full min-w-0 shrink-0 overflow-hidden"
               style={{ marginBottom: SEAT_GAP_PX }}
             >
@@ -179,7 +192,9 @@ export function PlayBoardColumn({
           ) : (
             <div ref={headRef} className="hidden" />
           )}
+          {/* Playing surface only - smart-board toggle must NOT bind here. */}
           <div
+            data-dama-board-plane=""
             className="relative w-full shrink-0 overflow-hidden"
             style={
               ready
@@ -197,6 +212,7 @@ export function PlayBoardColumn({
           {bottom ? (
             <div
               ref={footRef}
+              data-dama-board-chrome=""
               className="w-full min-w-0 shrink-0 overflow-hidden"
               style={{ marginTop: SEAT_GAP_PX }}
             >

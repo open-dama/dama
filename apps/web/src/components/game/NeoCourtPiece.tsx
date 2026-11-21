@@ -28,7 +28,8 @@ export function NeoCourtPiece({
   className,
   base,
   shade,
-  outline = "#2B2B2B",
+  // Soft shade-edge only - hard #2B2B2B strokes read as black borders vs 3D mesh.
+  outline,
 }: Props) {
   const uid = useId().replace(/:/g, "");
   const isLight = player === 1;
@@ -46,6 +47,13 @@ export function NeoCourtPiece({
   const highlightFill = isLight
     ? "color-mix(in srgb, var(--dama-piece-light, #F0F0F0) 70%, #ffffff)"
     : "color-mix(in srgb, var(--dama-piece-dark, #4A4A4A) 55%, #9A9A9A)";
+  // 3D PieceMesh has no contour stroke - shade volume defines the edge.
+  // Keep a very soft AO rim only when an explicit outline is passed (pickers).
+  const edgeStroke =
+    outline ??
+    (isLight
+      ? "color-mix(in srgb, var(--dama-piece-light, #F0F0F0) 72%, #8A8A8A)"
+      : "color-mix(in srgb, var(--dama-piece-dark, #4A4A4A) 65%, #1a1a1a)");
 
   const kind = neoKind(role);
   const scale = role === "daughter" ? 0.92 : 1;
@@ -67,7 +75,8 @@ export function NeoCourtPiece({
         <MaskLayer src={`/pieces/neo/${kind}-body.png`} color={fill} />
         <MaskLayer src={`/pieces/neo/${kind}-shade.png`} color={shadeFill} />
         <MaskLayer src={`/pieces/neo/${kind}-highlight.png`} color={highlightFill} />
-        <MaskLayer src={`/pieces/neo/${kind}-outline.png`} color={outline} />
+        {/* Soft AO rim (not hard black) - same language as 3D mesh edges. */}
+        <MaskLayer src={`/pieces/neo/${kind}-outline.png`} color={edgeStroke} />
       </span>
 
       {/* Son: compact 3-peak heir crown in Neo outline language */}
@@ -96,8 +105,8 @@ export function NeoCourtPiece({
           <path
             d="M14.2 11.2 L16.6 4.8 L19.0 10.4 L22.5 2.6 L26.0 10.4 L28.4 4.8 L30.8 11.2 Z"
             fill="none"
-            stroke={outline}
-            strokeWidth="1.7"
+            stroke={edgeStroke}
+            strokeWidth="1.2"
             strokeLinejoin="round"
           />
         </svg>

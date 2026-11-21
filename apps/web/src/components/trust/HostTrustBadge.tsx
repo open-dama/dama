@@ -11,8 +11,8 @@ type Props = {
   tier?: string | null;
   className?: string;
   /**
-   * High-contrast tones for badges on brand/media overlays (match intro, etc.).
-   * Does not invent colors - still uses --dama-verified / brand tokens.
+   * High-contrast solid chip for brand/media overlays (match intro VS, etc.).
+   * Uses --dama-verified-on-media-* so the badge stays clear on light and dark.
    */
   onMedia?: boolean;
 };
@@ -32,7 +32,7 @@ export function HostTrustBadge({ label, tier, className, onMedia }: Props) {
   const tone =
     code === "document_verified"
       ? onMedia
-        ? "border-[color-mix(in_srgb,var(--dama-verified)_55%,transparent)] bg-[color-mix(in_srgb,var(--dama-verified)_22%,transparent)] text-[var(--dama-verified)]"
+        ? "border-[var(--dama-verified-on-media-border)] bg-[var(--dama-verified-on-media-bg)] text-[var(--dama-verified-on-media-fg)]"
         : "border-[var(--dama-verified-border)] bg-[var(--dama-verified-bg)] text-[var(--dama-verified)]"
       : code === "phone_verified"
         ? onMedia

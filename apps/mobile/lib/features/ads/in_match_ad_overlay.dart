@@ -193,7 +193,8 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
       );
       if (!mounted) return;
       if (res.statusCode >= 300) {
-        final backoff = _intervalMin != null && _intervalMin! > 0 ? _intervalMin! : 30;
+        final backoff =
+            _intervalMin != null && _intervalMin! > 0 ? _intervalMin! : 30;
         _schedule(backoff < 30 ? 30 : backoff);
         return;
       }
@@ -278,7 +279,8 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
       }
     } catch (_) {
       // Fail closed with backoff so eligibility never spins during live play.
-      final backoff = _intervalMin != null && _intervalMin! > 0 ? _intervalMin! : 30;
+      final backoff =
+          _intervalMin != null && _intervalMin! > 0 ? _intervalMin! : 30;
       _schedule(backoff < 30 ? 30 : backoff);
     } finally {
       _checking = false;

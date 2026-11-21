@@ -65,6 +65,8 @@ type ActiveAnimation = {
   duration: number;
   boardAfter?: BoardGrid;
   boardApplied?: boolean;
+  /** One land SFX per animation (land phase + finish must not double). */
+  soundPlayed?: boolean;
 };
 
 function isDark(row: number, col: number) {
@@ -296,12 +298,15 @@ export default function DraughtsBoard2D({
   }, [illegalShakeKey]);
 
   const commitBoardAfter = useCallback((anim: ActiveAnimation) => {
-    if (anim.boardApplied || !anim.boardAfter?.length) return;
-    anim.boardApplied = true;
-    setRenderBoard(anim.boardAfter);
-    onPlyAnimatedRef.current?.(anim.boardAfter);
-    // Put-down only - Chess.com move / capture / promote samples.
-    if (!replayModeRef.current) {
+    if (!anim.boardAfter?.length) return;
+    if (!anim.boardApplied) {
+      anim.boardApplied = true;
+      setRenderBoard(anim.boardAfter);
+      onPlyAnimatedRef.current?.(anim.boardAfter);
+    }
+    // Put-down only once per ply - Chess.com move / capture / promote samples.
+    if (!anim.soundPlayed && !replayModeRef.current) {
+      anim.soundPlayed = true;
       void playPieceLandSound(
         pieceLandKind({ isCapture: anim.isCapture, isPromotion: anim.isPromotion }),
       );
@@ -537,7 +542,14 @@ export default function DraughtsBoard2D({
       aria-rowcount={size}
       aria-colcount={size}
     >
-      <div className="grid h-full w-full" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+      {/* Opaque board plane under cells - same continuous surface idea as 3D mesh. */}
+      <div
+        className="grid h-full w-full"
+        style={{
+          gridTemplateColumns: `repeat(${size}, 1fr)`,
+          backgroundColor: "var(--dama-board-dark)",
+        }}
+      >
         {cells.map(({ row, col }) => {
           const cell = display[row]?.[col] ?? null;
           const dark = isDark(row, col);
@@ -553,6 +565,18 @@ export default function DraughtsBoard2D({
             isSelected || isLegalTarget || isMust || (!selected && legalOrigins.has(key));
           const hidePiece = hiddenKeys.has(key);
           const canClick = Boolean(interactive && dark && !activeFly);
+          // Always opaque fill (3D meshStandardMaterial parity). The old quiet-square
+          // `background:` shorthand cleared background-color to transparent, so
+          // subpixel seams between lime highlights and neighbors composited against
+          // the near-black card and read as black borders around cues.
+          const squareFill = squareHighlighted
+            ? "var(--dama-board-highlight)"
+            : isLastMove
+              ? "var(--dama-last-move)"
+              : dark
+                ? "var(--dama-board-dark)"
+                : "var(--dama-board-light)";
+          const quietShade = !squareHighlighted && !isLastMove;
 
           return (
             <button
@@ -563,18 +587,29 @@ export default function DraughtsBoard2D({
               aria-selected={isSelected || undefined}
               disabled={!canClick}
               className={cn(
-                // Explicit square cells - never inherit global button radius.
-                "relative flex items-center justify-center rounded-none",
-                squareHighlighted
-                  ? "bg-[var(--dama-board-highlight)]"
-                  : isLastMove
-                    ? "bg-[var(--dama-last-move)]"
-                    : dark
-                      ? "bg-[var(--dama-board-dark)]"
-                      : "bg-[var(--dama-board-light)]",
+                // Explicit square cells - no UA/global button border or radius.
+                // Quiet squares use 3D-parity lighting (meshStandardMaterial soft shade).
+                "relative flex appearance-none items-center justify-center rounded-none border-0 outline-none focus-visible:outline-none",
                 canClick && "cursor-pointer",
                 !canClick && "cursor-default",
               )}
+              style={{
+                backgroundColor: squareFill,
+                ...(quietShade
+                  ? {
+                      backgroundImage: dark
+                        ? "linear-gradient(160deg, color-mix(in srgb, var(--dama-board-dark) 82%, white) 0%, var(--dama-board-dark) 42%, color-mix(in srgb, var(--dama-board-dark) 88%, black) 100%)"
+                        : "linear-gradient(160deg, color-mix(in srgb, var(--dama-board-light) 72%, white) 0%, var(--dama-board-light) 48%, color-mix(in srgb, var(--dama-board-light) 90%, #9a9a7a) 100%)",
+                      boxShadow: dark
+                        ? "inset 0 1px 0 color-mix(in srgb, white 10%, transparent)"
+                        : "inset 0 1px 0 color-mix(in srgb, white 35%, transparent)",
+                    }
+                  : {
+                      // Flat select/last-move fill like 3D SquareMesh (no inset rim).
+                      backgroundImage: "none",
+                      boxShadow: "none",
+                    }),
+              }}
               onClick={() => {
                 if (!canClick) return;
                 onSelectSquare(row, col);
@@ -590,9 +625,9 @@ export default function DraughtsBoard2D({
               {/* 3D destination disc; lighten so it reads on the same highlight fill. */}
               {isLegalTarget ? (
                 <span
-                  className="absolute inset-[28%] z-[1] rounded-full opacity-95 shadow-[0_0_12px_var(--dama-board-highlight)]"
+                  className="absolute inset-[28%] z-[1] rounded-full border-0 opacity-95 shadow-[0_0_12px_var(--dama-board-highlight)]"
                   style={{
-                    background: "color-mix(in srgb, var(--dama-board-highlight) 55%, white)",
+                    backgroundColor: "color-mix(in srgb, var(--dama-board-highlight) 55%, white)",
                   }}
                   aria-hidden
                 />

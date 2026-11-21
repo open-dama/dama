@@ -404,17 +404,33 @@ class _EventsPageState extends State<EventsPage> {
             : null,
       ),
     );
+    // Ads create→media parity: open manage on Branding with prize uploads first.
+    if (!mounted) return;
+    await _openManage(
+      created,
+      initialTabIndex: _kManageBrandingTabIndex,
+      focusPrizeMedia: true,
+    );
   }
 
-  Future<void> _openManage(HostedEvent ev) async {
+  Future<void> _openManage(
+    HostedEvent ev, {
+    int? initialTabIndex,
+    bool? focusPrizeMedia,
+  }) async {
     final chrome = _chrome;
     if (chrome == null) return;
+    final missingPrize = (ev.prizeImageUrl ?? '').trim().isEmpty;
+    final focusMedia = focusPrizeMedia ?? missingPrize;
+    final tab = initialTabIndex ?? (focusMedia ? _kManageBrandingTabIndex : 0);
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _ManageEventPage(
           accessToken: widget.accessToken,
           chrome: chrome,
           eventId: ev.id,
+          initialTabIndex: tab,
+          focusPrizeMedia: focusMedia,
         ),
       ),
     );
@@ -2787,11 +2803,15 @@ class _ManageEventPage extends StatefulWidget {
     required this.accessToken,
     required this.chrome,
     required this.eventId,
+    this.initialTabIndex = 0,
+    this.focusPrizeMedia = false,
   });
 
   final String accessToken;
   final EventsOrganizerChrome chrome;
   final String eventId;
+  final int initialTabIndex;
+  final bool focusPrizeMedia;
 
   @override
   State<_ManageEventPage> createState() => _ManageEventPageState();
@@ -2799,6 +2819,7 @@ class _ManageEventPage extends StatefulWidget {
 
 /// Manage TabBar/IndexedStack order: overview, join, players, bracket, live, branding, payments, results.
 const int _kManageLiveTabIndex = 4;
+const int _kManageBrandingTabIndex = 5;
 
 class _ManageEventPageState extends State<_ManageEventPage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
@@ -2809,6 +2830,8 @@ class _ManageEventPageState extends State<_ManageEventPage>
 
   late final TabController _tabs;
   int _tabIndex = 0;
+  final GlobalKey _prizeMediaKey = GlobalKey();
+  bool _prizeMediaFocusPending = false;
   HostedEvent? _event;
 
   /// Full unpaged roster for Results (and legacy helpers). Players/Payments use [_rosterEntries].
@@ -2915,8 +2938,10 @@ class _ManageEventPageState extends State<_ManageEventPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabs = TabController(length: 8, vsync: this);
+    final initial = widget.initialTabIndex.clamp(0, 7);
+    _tabs = TabController(length: 8, vsync: this, initialIndex: initial);
     _tabIndex = _tabs.index;
+    _prizeMediaFocusPending = widget.focusPrizeMedia;
     _tabs.addListener(() {
       if (!mounted || _closing || _tabs.indexIsChanging) return;
       if (_tabIndex == _tabs.index) return;
@@ -2934,6 +2959,23 @@ class _ManageEventPageState extends State<_ManageEventPage>
       }
       if (_bracket.isEmpty) return;
       unawaited(_refreshOfficialPauseStates(_bracket));
+    });
+  }
+
+  void _scrollToPrizeMediaIfNeeded() {
+    if (!_prizeMediaFocusPending || !mounted) return;
+    // Wait until manage shell + prize uploader are painted.
+    if (_loading || !_prizeMediaChromeReady) return;
+    _prizeMediaFocusPending = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _prizeMediaKey.currentContext;
+      if (ctx == null || !mounted) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.05,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
     });
   }
 
@@ -3143,6 +3185,7 @@ class _ManageEventPageState extends State<_ManageEventPage>
         _catalog = catalog;
         _loading = false;
       });
+      _scrollToPrizeMediaIfNeeded();
       unawaited(_ensureOfficialPauseChrome());
       unawaited(_refreshOfficialPauseStates(bracket));
       unawaited(_loadRosterPage(skip: _rosterSkip));
@@ -3513,6 +3556,7 @@ class _ManageEventPageState extends State<_ManageEventPage>
       final chrome = MediaUploadChrome.fromJson(body);
       if (!mounted || chrome == null) return;
       setState(() => _dropzoneChrome = chrome);
+      _scrollToPrizeMediaIfNeeded();
     } catch (_) {}
   }
 
@@ -5777,11 +5821,9 @@ class _ManageEventPageState extends State<_ManageEventPage>
     final ev = _event!;
     final prizeThumb = (ev.prizeImageUrl ?? '').trim();
     final prizeGallery = ev.gallery;
-    return ListView(
-      padding: _pagePad!,
-      children: [
-        if (chrome.descriptionLabel.isNotEmpty)
-          TextField(
+    final mediaFirst = widget.focusPrizeMedia;
+    final descriptionField = chrome.descriptionLabel.isNotEmpty
+        ? TextField(
             controller: _descriptionCtrl,
             maxLines: 5,
             decoration: InputDecoration(
@@ -5789,55 +5831,77 @@ class _ManageEventPageState extends State<_ManageEventPage>
               hintText: chrome.descriptionPlaceholder,
               border: const OutlineInputBorder(),
             ),
+          )
+        : null;
+    final prizeMediaInner = <Widget>[
+      if (chrome.prizeMediaSectionTitle.isNotEmpty)
+        Text(
+          chrome.prizeMediaSectionTitle,
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
-        if (chrome.descriptionLabel.isNotEmpty) const SizedBox(height: 16),
-        if (chrome.prizeMediaSectionTitle.isNotEmpty)
-          Text(
-            chrome.prizeMediaSectionTitle,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-              color: Theme.of(context).colorScheme.onSurface,
+        ),
+      if (chrome.prizeMediaSectionBlurb.isNotEmpty) ...[
+        if (chrome.prizeMediaSectionTitle.isNotEmpty) const SizedBox(height: 4),
+        Text(
+          chrome.prizeMediaSectionBlurb,
+          style: TextStyle(
+            fontSize: 13,
+            color: tokens.onSurfaceMuted,
+            height: 1.4,
+          ),
+        ),
+      ],
+      if (_prizeMediaChromeReady) ...[
+        const SizedBox(height: 12),
+        EntityMediaEditor(
+          thumbnailLabel: chrome.thumbnailLabel,
+          galleryLabel: chrome.galleryLabel,
+          galleryEmpty: chrome.galleryEmpty,
+          galleryAddAction: chrome.galleryAddAction,
+          galleryMaxSlots: chrome.galleryMaxSlots,
+          gallerySlotsFmt: chrome.gallerySlotsFmt,
+          thumbnailMainBadge: chrome.thumbnailMainBadge,
+          thumbnailEmptyHint: chrome.thumbnailEmptyHint,
+          thumbnailHint: chrome.thumbnailHint,
+          dropzoneChrome: _dropzoneChrome!,
+          thumbnailUrl: prizeThumb.isNotEmpty ? prizeThumb : null,
+          galleryUrls: prizeGallery,
+          busyThumbnail: _busy && _prizeMediaUploadSlot == 'prize',
+          busyGallery: _busy && _prizeMediaUploadSlot == 'gallery',
+          enabled: !_busy ||
+              _prizeMediaUploadSlot == 'prize' ||
+              _prizeMediaUploadSlot == 'gallery',
+          onThumbnail: _uploadPrizeImage,
+          onClearThumbnail: _clearPrizeImage,
+          onGalleryFiles: _uploadEventGallery,
+          onRemoveGallery: _removeEventGalleryAt,
+        ),
+      ],
+    ];
+    final prizeMediaSection = prizeMediaInner.isEmpty
+        ? const <Widget>[]
+        : <Widget>[
+            KeyedSubtree(
+              key: _prizeMediaKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: prizeMediaInner,
+              ),
             ),
-          ),
-        if (chrome.prizeMediaSectionBlurb.isNotEmpty) ...[
-          if (chrome.prizeMediaSectionTitle.isNotEmpty)
-            const SizedBox(height: 4),
-          Text(
-            chrome.prizeMediaSectionBlurb,
-            style: TextStyle(
-              fontSize: 13,
-              color: tokens.onSurfaceMuted,
-              height: 1.4,
-            ),
-          ),
-        ],
-        if (_prizeMediaChromeReady) ...[
-          const SizedBox(height: 12),
-          EntityMediaEditor(
-            thumbnailLabel: chrome.thumbnailLabel,
-            galleryLabel: chrome.galleryLabel,
-            galleryEmpty: chrome.galleryEmpty,
-            galleryAddAction: chrome.galleryAddAction,
-            galleryMaxSlots: chrome.galleryMaxSlots,
-            gallerySlotsFmt: chrome.gallerySlotsFmt,
-            thumbnailMainBadge: chrome.thumbnailMainBadge,
-            thumbnailEmptyHint: chrome.thumbnailEmptyHint,
-            thumbnailHint: chrome.thumbnailHint,
-            dropzoneChrome: _dropzoneChrome!,
-            thumbnailUrl: prizeThumb.isNotEmpty ? prizeThumb : null,
-            galleryUrls: prizeGallery,
-            busyThumbnail: _busy && _prizeMediaUploadSlot == 'prize',
-            busyGallery: _busy && _prizeMediaUploadSlot == 'gallery',
-            enabled: !_busy ||
-                _prizeMediaUploadSlot == 'prize' ||
-                _prizeMediaUploadSlot == 'gallery',
-            onThumbnail: _uploadPrizeImage,
-            onClearThumbnail: _clearPrizeImage,
-            onGalleryFiles: _uploadEventGallery,
-            onRemoveGallery: _removeEventGalleryAt,
-          ),
-        ],
+          ];
+    return ListView(
+      padding: _pagePad!,
+      children: [
+        if (mediaFirst) ...prizeMediaSection,
+        if (mediaFirst &&
+            (descriptionField != null || prizeMediaSection.isNotEmpty))
+          const SizedBox(height: 16),
+        if (descriptionField != null) descriptionField,
+        if (!mediaFirst && descriptionField != null) const SizedBox(height: 16),
+        if (!mediaFirst) ...prizeMediaSection,
         const SizedBox(height: 16),
         TextField(
           controller: _sponsorCtrl,

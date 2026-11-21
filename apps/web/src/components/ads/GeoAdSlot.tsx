@@ -28,8 +28,13 @@ function viewerKey(): string {
   return v;
 }
 
+type GeoAdSlotProps = {
+  /** When true, render nothing until a real creative is ready (no skeleton band under the board). */
+  hideUntilReady?: boolean;
+};
+
 /** Player-facing geo ad slot: serves from API, records impression once, click on creative. */
-export function GeoAdSlot() {
+export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
   const geoQuery = usePlayerGeoQuery();
   const geo = geoQuery.data ?? null;
   const geoReady = geoQuery.isFetched && !geoQuery.isLoading;
@@ -76,7 +81,7 @@ export function GeoAdSlot() {
   }, [ad, lobbyPlacement, recordImpression]);
 
   if (!geoReady || serveQuery.isLoading) {
-    return <GeoAdSlotSkeleton />;
+    return hideUntilReady ? null : <GeoAdSlotSkeleton />;
   }
 
   if (!ad?.title || !breakpoints || !slot) {
