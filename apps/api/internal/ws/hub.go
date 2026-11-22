@@ -18,7 +18,7 @@ type clientMeta struct {
 	GameID  string
 	UserID  string
 	Role    string
-	Room    string // "game" | "matchmaking" | "spectate"
+	Room    string      // "game" | "matchmaking" | "spectate"
 	writeMu *sync.Mutex // one writer per conn (gorilla/websocket requirement)
 }
 

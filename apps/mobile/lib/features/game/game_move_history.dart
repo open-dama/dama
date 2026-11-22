@@ -211,7 +211,11 @@ class _GameMoveHistoryBarState extends State<GameMoveHistoryBar> {
           leading: Icon(
             Icons.radio_button_checked,
             size: 14,
-            color: isLive ? colors.onGold : colors.onSurfaceMuted,
+            color: isLive
+                ? (Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : colors.onGold)
+                : colors.onSurfaceMuted,
           ),
         ),
         const SizedBox(height: 8),
@@ -341,7 +345,11 @@ class _GameMoveHistoryBarState extends State<GameMoveHistoryBar> {
                     leading: Icon(
                       Icons.radio_button_checked,
                       size: 14,
-                      color: isLive ? colors.onGold : colors.onSurfaceMuted,
+                      color: isLive
+                          ? (Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white
+                              : colors.onGold)
+                          : colors.onSurfaceMuted,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -417,12 +425,14 @@ class _PlyCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = damaColorsOf(context);
     final ink = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Dark active: dark fill + white label (web Live/chip dark-mode parity).
     final bg = active
-        ? ink
+        ? (isDark ? const Color(0xFF08090A) : ink)
         : capture
             ? colors.brand.withValues(alpha: 0.12)
             : Colors.transparent;
-    final fg = active ? colors.onGold : ink;
+    final fg = active ? (isDark ? Colors.white : colors.onGold) : ink;
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(4),
@@ -469,12 +479,15 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = damaColorsOf(context);
     final ink = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = active
-        ? ink
+        ? (isDark ? const Color(0xFF08090A) : ink)
         : capture
             ? colors.brand.withValues(alpha: 0.12)
             : Colors.transparent;
-    final fg = active ? colors.onGold : colors.onSurfaceMuted;
+    final fg = active
+        ? (isDark ? Colors.white : colors.onGold)
+        : colors.onSurfaceMuted;
     final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -482,7 +495,7 @@ class _Chip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: active
-              ? ink
+              ? (isDark ? colors.borderSubtle : ink)
               : capture
                   ? colors.brand.withValues(alpha: 0.4)
                   : colors.borderSubtle,

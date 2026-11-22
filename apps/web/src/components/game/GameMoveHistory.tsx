@@ -34,10 +34,19 @@ const HISTORY_PAGE = 12;
 
 function moveChipClass(active: boolean, captured: boolean): string {
   if (active) {
-    return "border-[var(--dama-text)] bg-[var(--dama-text)] text-[var(--dama-bg)]";
+    // Light: ink-filled chip. Dark: dark fill + white label/icon (not washed-out text-on-bg).
+    return "border-[var(--dama-text)] bg-[var(--dama-text)] text-[var(--dama-bg)] dark:border-[var(--dama-border)] dark:bg-[var(--dama-bg)] dark:text-white";
   }
   if (captured) {
     return "border-[var(--dama-brand)]/40 text-[var(--dama-text)] hover:border-[var(--dama-brand)]";
+  }
+  return "border-[var(--dama-border)] text-[var(--dama-muted)] hover:border-[var(--dama-text)] hover:text-[var(--dama-text)]";
+}
+
+/** Active Live control - same dark-mode treatment as active chips. */
+function liveButtonClass(isLive: boolean): string {
+  if (isLive) {
+    return "border-[var(--dama-text)] bg-[var(--dama-text)] text-[var(--dama-bg)] dark:border-[var(--dama-border)] dark:bg-[var(--dama-bg)] dark:text-white";
   }
   return "border-[var(--dama-border)] text-[var(--dama-muted)] hover:border-[var(--dama-text)] hover:text-[var(--dama-text)]";
 }
@@ -125,11 +134,7 @@ export function GameMoveHistory({
         </div>
         <button
           type="button"
-          className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
-            isLive
-              ? "border-[var(--dama-text)] bg-[var(--dama-text)] text-[var(--dama-bg)]"
-              : "border-[var(--dama-border)] text-[var(--dama-muted)] hover:border-[var(--dama-text)] hover:text-[var(--dama-text)]"
-          }`}
+          className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${liveButtonClass(isLive)}`}
           onClick={onSelectLive}
           aria-pressed={isLive}
         >
@@ -207,7 +212,7 @@ export function GameMoveHistory({
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${moveChipClass(isLive, false)}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${liveButtonClass(isLive)}`}
           onClick={onSelectLive}
           aria-pressed={isLive}
         >

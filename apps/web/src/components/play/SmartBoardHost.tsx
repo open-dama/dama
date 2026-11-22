@@ -250,9 +250,9 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
 
   const live = Boolean(maxLg && active);
   const topped = Boolean(live && expanded);
-  // Minimized smart board: width-square hug (no height feedback loop).
-  // Idle budget + expanded overlay: height-fit into a definite max host.
-  const layoutMode: BoardStackLayoutMode = live && !topped ? "hug" : "budget";
+  // Live min + expanded: ALWAYS width-square hug. Never budget-measure host height
+  // into side (that feedback is the infinite zoom / postage-stamp collapse).
+  const layoutMode: BoardStackLayoutMode = live ? "hug" : "budget";
 
   // Spacer = painted board card bottom (not FAB overhang) so rail sits flush
   // under seats; FAB floats half into the grid gap / rail top.
@@ -267,7 +267,6 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       const host = hostRef.current;
       const wrap = wrapRef.current;
       if (!host || !wrap) return;
-      // Prefer the seats+square stack height (not the full fixed overlay shell).
       const stack = host.querySelector<HTMLElement>("[data-smart-board-stack]") ?? host;
       if (typeof ResizeObserver !== "undefined" && observed !== stack) {
         ro?.disconnect();
@@ -275,9 +274,13 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
         ro.observe(stack);
         observed = stack;
       }
+      // Document spacer = stack bottom − wrap top (not raw stackH). Fixed pop
+      // starts above the wrap (covers header); stackH alone leaves a gap under
+      // the seat that shows as a green/empty band before the rail.
       const stackBottom = Math.round(stack.getBoundingClientRect().bottom);
       const wrapTop = Math.max(0, Math.round(wrap.getBoundingClientRect().top));
       const next = Math.max(0, stackBottom - wrapTop);
+      if (next < 1) return;
       setSpacerPx((prev) => (Math.abs(prev - next) <= 2 ? prev : next));
     };
     sync();
@@ -360,13 +363,12 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       <div
         ref={hostRef}
         className={cn(
-          // max-lg:px-3 keeps rank/file coords inside the screen (L/R clip on phones).
-          "relative flex min-h-0 w-full min-w-0 flex-col max-lg:box-border max-lg:px-3",
+          "relative flex min-h-0 w-full min-w-0 flex-col max-lg:box-border",
+          // Inline/hug: full section width. Pop only: regular side inset (not edge-to-edge).
+          !topped && "max-lg:px-0",
           topped
-            ? // Explicit height (not h-auto): children use h-full for budget measure.
-              // Below sticky header (z-50); svh avoids iOS URL-bar zoom thrash.
-              // z-[45] under header (z-50) so chrome never covers the top rank.
-              "pointer-events-none fixed inset-x-0 top-[var(--dama-mobile-header-height,3.5rem)] z-[45] w-full max-w-none overflow-hidden bg-[var(--dama-card)] pb-0 h-[calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-2.75rem)]"
+            ? // Pop covers sticky header (z-50). Hug height; regular px inset for width.
+              "pointer-events-none fixed inset-x-0 top-0 z-[60] w-full max-w-none overflow-hidden bg-transparent pb-0 h-auto max-h-[calc(100svh-var(--dama-bottom-nav-height,0px)-2.75rem)] pt-[env(safe-area-inset-top,0px)] max-lg:px-3"
             : live
               ? "h-auto overflow-visible"
               : "h-full overflow-hidden",
@@ -386,7 +388,8 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
           className={cn(
             "relative z-10 flex min-h-0 w-full min-w-0 flex-col",
             topped
-              ? "pointer-events-auto mx-auto h-full min-h-0 w-full max-w-full overflow-hidden"
+              ? // Opaque card only around seats+square so the pop covers the header cleanly.
+                "pointer-events-auto mx-auto h-auto min-h-0 w-full max-w-full overflow-hidden bg-[var(--dama-card)]"
               : live
                 ? "h-auto overflow-visible"
                 : "h-full flex-1 overflow-hidden",
@@ -404,19 +407,26 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       className={cn(
         className,
         live && "relative max-lg:!overflow-visible",
+        // Kill parent 52svh max-height when smart is live (idle letterbox source).
+        // Minimized: !h-auto hug. Expanded: spacer via CSS var (!important-safe).
         live && !topped && "max-lg:!h-auto max-lg:!max-h-none max-lg:!min-h-0 max-lg:shrink-0",
-        topped && "max-lg:!max-h-none max-lg:!min-h-0 max-lg:shrink-0",
+        topped &&
+          "max-lg:!h-[var(--dama-smart-spacer,auto)] max-lg:!max-h-[var(--dama-smart-spacer,none)] max-lg:!min-h-0 max-lg:shrink-0",
       )}
       style={
-        topped && spacerPx > 0
-          ? ({ height: spacerPx, maxHeight: spacerPx, minHeight: 0 } as CSSProperties)
+        topped
+          ? ({
+              // !h-[var] above wins over parent 52svh; var tracks stack height.
+              ["--dama-smart-spacer" as string]: spacerPx > 0 ? `${spacerPx}px` : "auto",
+              minHeight: 0,
+            } as CSSProperties)
           : undefined
       }
       data-smart-board-wrap={topped ? "expanded" : live ? "hug" : "idle"}
     >
       {topped && portalReady ? (
         <>
-          <div className="h-full w-full" aria-hidden />
+          <div className="h-auto w-full" aria-hidden />
           {createPortal(boardFrame, document.body)}
         </>
       ) : (

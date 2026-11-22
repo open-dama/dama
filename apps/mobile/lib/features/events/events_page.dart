@@ -773,10 +773,10 @@ class _EventsPageState extends State<EventsPage> {
               Expanded(
                 child: Text(
                   softHostingListTitle(chrome.listTitle),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
+          ),
               ),
               HostTrustBadge(
                 label: _hostStats?.hostTrustBadge,
@@ -799,7 +799,7 @@ class _EventsPageState extends State<EventsPage> {
                 s.hostOpenReports != null;
           }()) ...[
             const SizedBox(height: 6),
-            Text(
+          Text(
               [
                 '${chrome.hostRepFinishedLabel.trim()} ${_hostStats!.hostFinishedPaidCups}',
                 '${chrome.hostRepCancelledLabel.trim()} ${_hostStats!.hostCancelledPaidCups}',
@@ -816,7 +816,7 @@ class _EventsPageState extends State<EventsPage> {
             constraints: BoxConstraints(maxWidth: blurbMax),
             child: Text(
               softHostingListBlurb(chrome.listBlurb),
-              style: TextStyle(color: tokens.onSurfaceMuted),
+            style: TextStyle(color: tokens.onSurfaceMuted),
             ),
           ),
           const SizedBox(height: 12),
@@ -864,13 +864,13 @@ class _EventsPageState extends State<EventsPage> {
           ConstrainedBox(
             constraints: BoxConstraints(maxWidth: searchMax),
             child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
+            controller: _searchCtrl,
+            decoration: InputDecoration(
                 labelText: softHostingSearchLabel(chrome.searchLabel),
                 hintText:
                     softHostingSearchPlaceholder(chrome.searchPlaceholder),
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.search),
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.search),
                   onPressed: _loading
@@ -1082,14 +1082,14 @@ class _EventsPageState extends State<EventsPage> {
                                 return '$left ${chrome.playersCountSuffix}'
                                     .trim();
                               }(),
-                              ev.joinCode,
+                      ev.joinCode,
                               ...poolLines,
-                            ].join(chrome.metaSeparator),
-                            style: TextStyle(
-                              color: tokens.onSurfaceMuted,
-                              fontSize: 12,
-                            ),
-                          ),
+                    ].join(chrome.metaSeparator),
+                    style: TextStyle(
+                      color: tokens.onSurfaceMuted,
+                      fontSize: 12,
+                    ),
+                  ),
                         ],
                       );
                     },
@@ -1141,8 +1141,8 @@ class _EventsPageState extends State<EventsPage> {
                         itemBuilder: (context) => [
                           PopupMenuItem(
                             value: 'manage',
-                            child: Text(chrome.manageAction),
-                          ),
+                    child: Text(chrome.manageAction),
+                  ),
                           if ((ev.shareUrl ?? '').trim().isNotEmpty &&
                               chrome.copyLinkAction.isNotEmpty)
                             PopupMenuItem(
@@ -1180,7 +1180,7 @@ class _EventsPageState extends State<EventsPage> {
               meta: meta,
               busy: _softFetching,
               onSkip: (skip) => unawaited(_load(skip: skip)),
-            ),
+              ),
         ],
       ),
     );
@@ -1876,8 +1876,8 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
           constraints: shellConstraints,
           child: SizedBox(
             height: shell.loadingHeight,
-            child: Center(
-              child: CircularProgressIndicator(color: tokens.gold),
+          child: Center(
+            child: CircularProgressIndicator(color: tokens.gold),
             ),
           ),
         ),
@@ -1927,8 +1927,8 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
             state.checkoutMessage ?? state.error,
           );
           if (msg != null) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text(msg)));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
           }
           final bal = state.balance;
           final fee = hostFee;
@@ -2011,7 +2011,7 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                         if (id == null) return '';
                         for (final f in catalog.formats) {
                           if (f.id == id) return f.label;
-                        }
+                          }
                         return '';
                       }(),
                       onTap: () async {
@@ -2022,10 +2022,10 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                           options: [
                             for (final f in catalog.formats)
                               if (f.label.isNotEmpty)
-                                ChromeSelectOption(
-                                  value: f.id,
+                              ChromeSelectOption(
+                                value: f.id,
                                   label: f.label,
-                                ),
+                              ),
                           ],
                         );
                         if (picked != null) {
@@ -2134,7 +2134,7 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                       onTap: () async {
                         final fmt = _formatId;
                         final sizeOptions = [
-                          for (final s in catalog.sizes)
+                            for (final s in catalog.sizes)
                             if (s.label.isNotEmpty &&
                                 fmt != null &&
                                 s.allowedFormatIds.contains(fmt))
@@ -2300,11 +2300,11 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                                 ? chrome.publicRatedOnBlurb
                                 : chrome.publicRatedOffBlurb,
                           ),
-                          style: TextStyle(
-                            color: tokens.onSurfaceMuted,
-                            fontSize: 12,
-                          ),
+                        style: TextStyle(
+                          color: tokens.onSurfaceMuted,
+                          fontSize: 12,
                         ),
+                      ),
                       ],
                     ],
                     SwitchListTile(
@@ -2657,8 +2657,8 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const SizedBox(height: 8),
-                            Text(
+                      const SizedBox(height: 8),
+                      Text(
                               () {
                                 // Prefight: if fee alone fits but fee+guarantee does not, show guarantee chrome.
                                 final fee = hostFee ?? 0.0;
@@ -2674,72 +2674,72 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                                 }
                                 return chrome.insufficientHostFee;
                               }(),
-                              style: TextStyle(color: tokens.danger),
-                            ),
-                            if (pay != null &&
-                                wallet.routeProvider != 'manual_transfer') ...[
-                              const SizedBox(height: 8),
-                              TextField(
-                                controller: _amountCtrl,
+                        style: TextStyle(color: tokens.danger),
+                      ),
+                      if (pay != null &&
+                          wallet.routeProvider != 'manual_transfer') ...[
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _amountCtrl,
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
+                            decimal: true,
+                          ),
+                          inputFormatters: [
                                   FilteringTextInputFormatter.allow(
                                     RegExp(r'[\d.]'),
                                   ),
-                                ],
-                                decoration: InputDecoration(
-                                  labelText: pay.amountLabel,
-                                  hintText: pay.amountPlaceholder,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                onChanged: (v) {
-                                  final s = sanitizeDecimalInput(v);
-                                  if (s != v) {
-                                    _amountCtrl.value = TextEditingValue(
-                                      text: s,
+                          ],
+                          decoration: InputDecoration(
+                            labelText: pay.amountLabel,
+                            hintText: pay.amountPlaceholder,
+                            border: const OutlineInputBorder(),
+                          ),
+                          onChanged: (v) {
+                            final s = sanitizeDecimalInput(v);
+                            if (s != v) {
+                              _amountCtrl.value = TextEditingValue(
+                                text: s,
                                       selection: TextSelection.collapsed(
                                         offset: s.length,
                                       ),
-                                    );
-                                  }
-                                  context.read<WalletCubit>().setAmountText(s);
-                                  setState(() {});
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              FilledButton(
-                                onPressed: wallet.loading ||
-                                        wallet.country.trim().isEmpty ||
+                              );
+                            }
+                            context.read<WalletCubit>().setAmountText(s);
+                            setState(() {});
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          onPressed: wallet.loading ||
+                                  wallet.country.trim().isEmpty ||
                                         parsePositiveDecimal(
                                               _amountCtrl.text,
                                             ) ==
                                             null
-                                    ? null
+                              ? null
                                     : () =>
                                         context.read<WalletCubit>().checkout(),
-                                child: Text(pay.checkoutAction),
-                              ),
-                            ],
+                          child: Text(pay.checkoutAction),
+                        ),
+                      ],
                             if (chrome.portalWalletHref.trim().isNotEmpty &&
                                 chrome.topUpAction.trim().isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              OutlinedButton(
-                                onPressed: () {
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: () {
                                   // Web parity: portal_wallet_href + focus=topup.
                                   final href = withWalletFocusParam(
                                     chrome.portalWalletHref.trim(),
                                     'topup',
                                   );
-                                  Navigator.of(context).pop();
+                          Navigator.of(context).pop();
                                   if (isWalletHrefPath(href)) {
                                     final focus =
                                         portalWalletFocusFromHref(href);
                                     final base = moneyBasePathFromHref(href);
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
                                         builder: (_) => WalletPage(
                                           token: widget.accessToken,
                                           moneyBasePath: base,
@@ -2757,8 +2757,8 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                                       accessToken: widget.accessToken,
                                     );
                                   }
-                                },
-                                child: Text(chrome.topUpAction),
+                        },
+                        child: Text(chrome.topUpAction),
                               ),
                             ],
                           ],
@@ -3458,21 +3458,21 @@ class _ManageEventPageState extends State<_ManageEventPage>
           body['prize_place_percents'] = <String, num>{};
         }
       } else {
-        if (visibility != null && visibility.trim().isNotEmpty) {
-          body['visibility'] = visibility.trim();
-        }
+      if (visibility != null && visibility.trim().isNotEmpty) {
+        body['visibility'] = visibility.trim();
+      }
         final defStatus = (_catalog?.hostedEventDefaultStatus ?? '').trim();
         // Fail-closed: missing catalog default status locks title (no invent unlock).
         final titleLocked = defStatus.isEmpty || ev.status.trim() != defStatus;
-        final title = _titleCtrl.text.trim();
+      final title = _titleCtrl.text.trim();
         if (!titleLocked && title.isNotEmpty && title != ev.title) {
           body['title'] = title;
         }
-        final sponsor = _sponsorCtrl.text.trim();
-        body['sponsor_name'] = sponsor;
+      final sponsor = _sponsorCtrl.text.trim();
+      body['sponsor_name'] = sponsor;
         body['description'] = _descriptionCtrl.text.trim();
-        final color = _brandColorCtrl.text.trim();
-        if (color.isNotEmpty) body['brand_color'] = color;
+      final color = _brandColorCtrl.text.trim();
+      if (color.isNotEmpty) body['brand_color'] = color;
       }
       final res = await http.patch(
         Uri.parse('${ApiConfig.baseUrl}/api/v1/events/${ev.id}'),
@@ -4609,7 +4609,7 @@ class _ManageEventPageState extends State<_ManageEventPage>
         if (didPop) _beginClose();
       },
       child: Scaffold(
-        appBar: AppBar(
+      appBar: AppBar(
           title: Row(
             children: [
               Expanded(
@@ -4627,34 +4627,34 @@ class _ManageEventPageState extends State<_ManageEventPage>
             ],
           ),
           actions: const [NotificationAppBarActions()],
-          bottom: TabBar(
-            controller: _tabs,
-            isScrollable: true,
-            tabs: [for (final l in labels) Tab(text: l)],
-          ),
+        bottom: TabBar(
+          controller: _tabs,
+          isScrollable: true,
+          tabs: [for (final l in labels) Tab(text: l)],
         ),
-        body: _loading
-            ? const WalletSkeleton()
-            : _event == null
-                ? Center(
-                    child: Text(_error, style: TextStyle(color: tokens.danger)),
-                  )
+      ),
+      body: _loading
+          ? const WalletSkeleton()
+          : _event == null
+              ? Center(
+                  child: Text(_error, style: TextStyle(color: tokens.danger)),
+                )
                 // IndexedStack keeps every tab mounted (web fixed-shell parity - no rebuild flicker).
                 : IndexedStack(
                     index: _tabIndex,
                     sizing: StackFit.expand,
-                    children: [
-                      _overviewTab(tokens),
-                      _joinTab(tokens),
-                      _playersTab(tokens),
-                      _bracketTab(),
-                      _liveBoardTab(),
-                      _brandingTab(tokens),
-                      _paymentsTab(tokens),
-                      _resultsTab(),
-                    ],
+                  children: [
+                    _overviewTab(tokens),
+                    _joinTab(tokens),
+                    _playersTab(tokens),
+                    _bracketTab(),
+                    _liveBoardTab(),
+                    _brandingTab(tokens),
+                    _paymentsTab(tokens),
+                    _resultsTab(),
+                  ],
                   ),
-      ),
+                ),
     );
   }
 
@@ -4686,8 +4686,8 @@ class _ManageEventPageState extends State<_ManageEventPage>
             ),
           if (showRep) ...[
             if (hostBadge.isNotEmpty) const SizedBox(height: 6),
-            Text(
-              [
+        Text(
+          [
                 '${chrome.hostRepFinishedLabel.trim()} ${ev.organizerFinishedPaidCups}',
                 '${chrome.hostRepCancelledLabel.trim()} ${ev.organizerCancelledPaidCups}',
                 '${chrome.hostRepReportsLabel.trim()} ${ev.organizerOpenReports}',
@@ -4737,18 +4737,18 @@ class _ManageEventPageState extends State<_ManageEventPage>
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
-                  controller: _titleCtrl,
+        TextField(
+          controller: _titleCtrl,
                   enabled: !titleLocked && !_busy,
-                  decoration: InputDecoration(
+          decoration: InputDecoration(
                     labelText: softHostingTitleLabel(chrome.titleLabel),
-                    border: const OutlineInputBorder(),
+            border: const OutlineInputBorder(),
                     helperText: titleLocked
                         ? softHostingPatchTitleLocked(chrome.patchTitleLocked)
                         : null,
-                  ),
-                ),
-                const SizedBox(height: 8),
+          ),
+        ),
+        const SizedBox(height: 8),
               ],
             );
           },
@@ -4816,8 +4816,8 @@ class _ManageEventPageState extends State<_ManageEventPage>
             if ((ev.startedAt ?? '').trim().isEmpty &&
                 (ev.finishedAt ?? '').trim().isEmpty &&
                 (ev.cancelledAt ?? '').trim().isEmpty)
-              FilledButton(
-                onPressed: _busy ? null : _start,
+            FilledButton(
+              onPressed: _busy ? null : _start,
                 child: Text(softHostingStartAction(chrome.startAction)),
               ),
             if (_isArenaCup(ev) && chrome.arenaFinishAction.isNotEmpty)
@@ -4850,8 +4850,8 @@ class _ManageEventPageState extends State<_ManageEventPage>
             if ((ev.startedAt ?? '').isEmpty &&
                 (ev.finishedAt ?? '').isEmpty &&
                 (ev.cancelledAt ?? '').isEmpty)
-              OutlinedButton(
-                onPressed: _busy ? null : _cancel,
+            OutlinedButton(
+              onPressed: _busy ? null : _cancel,
                 child: Text(softHostingCloseAction(chrome.closeAction)),
               ),
             if ((ev.cancelledAt ?? '').isNotEmpty &&
@@ -4861,7 +4861,7 @@ class _ManageEventPageState extends State<_ManageEventPage>
               OutlinedButton(
                 onPressed: _busy ? null : _reopen,
                 child: Text(softHostingReopenAction(chrome.reopenAction)),
-              ),
+            ),
           ],
         ),
       ],
@@ -4989,13 +4989,13 @@ class _ManageEventPageState extends State<_ManageEventPage>
                   }
                   final openLabel = chrome.playersOpenPlayerLabel.trim();
                   return Card(
-                    child: ListTile(
+                child: ListTile(
                       title: Text(
                         e.username.isNotEmpty ? e.username : chrome.emptyValue,
                       ),
                       subtitle: Text(subtitle),
                       onTap: e.userId.trim().isEmpty
-                          ? null
+                              ? null
                           : () => unawaited(
                                 showPlayerInspectSheet(
                                     context, e.userId.trim()),
@@ -5005,7 +5005,7 @@ class _ManageEventPageState extends State<_ManageEventPage>
                         children: [
                           if (openLabel.isNotEmpty &&
                               e.userId.trim().isNotEmpty)
-                            TextButton(
+                        TextButton(
                               onPressed: () => unawaited(
                                 showPlayerInspectSheet(
                                   context,
@@ -5013,17 +5013,17 @@ class _ManageEventPageState extends State<_ManageEventPage>
                                 ),
                               ),
                               child: Text(openLabel),
-                            ),
-                          if (canKick)
-                            TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => _entryAction(e.userId, 'kick'),
-                              child: Text(chrome.kickAction),
-                            ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      if (canKick)
+                        TextButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _entryAction(e.userId, 'kick'),
+                          child: Text(chrome.kickAction),
+                        ),
+                    ],
+                  ),
+                ),
                   );
                 },
               ),
@@ -5518,7 +5518,7 @@ class _ManageEventPageState extends State<_ManageEventPage>
             meta: _liveMeta!,
             busy: _liveSoftFetching,
             onSkip: (skip) => unawaited(_loadLiveBoardsPage(skip: skip)),
-          ),
+        ),
       ],
     );
   }
@@ -5567,12 +5567,12 @@ class _ManageEventPageState extends State<_ManageEventPage>
             gross == null ||
             net == null ||
             commissionSum == null) ...[
-          Text(
-            chrome.entryFeesCollectedLabel,
-            style: TextStyle(color: tokens.onSurfaceMuted),
-          ),
-          const SizedBox(height: 4),
-          Text(
+        Text(
+          chrome.entryFeesCollectedLabel,
+          style: TextStyle(color: tokens.onSurfaceMuted),
+        ),
+        const SizedBox(height: 4),
+        Text(
             empty,
             style: TextStyle(
               color: tokens.gold,
@@ -5587,12 +5587,12 @@ class _ManageEventPageState extends State<_ManageEventPage>
           const SizedBox(height: 4),
           Text(
             '$gross$sep$cur',
-            style: TextStyle(
-              color: tokens.gold,
-              fontWeight: FontWeight.w600,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+          style: TextStyle(
+            color: tokens.gold,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
+        ),
           const SizedBox(height: 12),
           Text(
             chrome.paymentsCommissionLabel,
@@ -5936,20 +5936,20 @@ class _ManageEventPageState extends State<_ManageEventPage>
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if ((ev.logoUrl ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+        if ((ev.logoUrl ?? '').isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
                     child: Image.network(ev.logoUrl!, height: previewH),
-                  ),
-                OutlinedButton(
+          ),
+        OutlinedButton(
                   onPressed:
                       _busy ? null : () => _upload('logo', sponsor: false),
-                  child: Text(chrome.uploadLogoAction),
-                ),
-                const SizedBox(height: 8),
-                if ((ev.sponsorLogoUrl ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+          child: Text(chrome.uploadLogoAction),
+        ),
+        const SizedBox(height: 8),
+        if ((ev.sponsorLogoUrl ?? '').isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
                     child: ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: previewMaxW),
                       child: Image.network(
@@ -5958,14 +5958,14 @@ class _ManageEventPageState extends State<_ManageEventPage>
                         fit: BoxFit.contain,
                       ),
                     ),
-                  ),
-                OutlinedButton(
+          ),
+        OutlinedButton(
                   onPressed: _busy
                       ? null
                       : () => _upload('sponsor-logo', sponsor: true),
-                  child: Text(chrome.uploadSponsorAction),
-                ),
-                const SizedBox(height: 12),
+          child: Text(chrome.uploadSponsorAction),
+        ),
+        const SizedBox(height: 12),
               ],
             );
           },
@@ -6136,9 +6136,9 @@ class _ManageEventPageState extends State<_ManageEventPage>
             ],
           ),
         if (ev != null)
-          EventWinnersBoard(
+        EventWinnersBoard(
             title: softCommunityWinnersTitle(chrome.winnersTitle),
-            entries: _entries,
+          entries: _entries,
             emptyValue: chrome.emptyValue,
             logoUrl: ev.logoUrl,
             sponsorLogoUrl: ev.sponsorLogoUrl,

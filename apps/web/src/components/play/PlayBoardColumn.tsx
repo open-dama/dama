@@ -200,16 +200,30 @@ export function PlayBoardColumn({
   );
   const ready = side > 0;
 
+  const hug = layoutMode === "hug";
+
   return (
-    <div className={cn("flex h-full min-h-0 w-full flex-col overflow-hidden", className)}>
+    <div
+      className={cn(
+        // Hug (smart min/expanded pop): shrink-wrap so the fixed overlay has no tall white band.
+        // Budget hosts still need h-full to measure a definite height.
+        "flex min-h-0 w-full flex-col overflow-hidden",
+        hug ? "h-auto" : "h-full",
+        className,
+      )}
+    >
       <div
         ref={hostRef}
         className={cn(
           "flex w-full min-w-0 flex-col overflow-hidden",
-          // Phone/tablet: top-align stack (lobby parity). Desktop: center in the column.
-          fitHost || !maxLg
-            ? cn("min-h-0 flex-1 items-center", maxLg ? "justify-start" : "justify-center")
-            : "items-stretch",
+          // Hug (smart live): always explicit pixel square + h-auto. Never rely on
+          // aspect-ratio inside a height-constrained flex parent - that collapses
+          // into a wide postage-stamp strip (infinite zoom look).
+          hug && maxLg
+            ? "h-auto items-center justify-start"
+            : fitHost || !maxLg
+              ? cn("min-h-0 items-center", "flex-1", maxLg ? "justify-start" : "justify-center")
+              : "items-stretch",
         )}
       >
         <div
@@ -217,9 +231,11 @@ export function PlayBoardColumn({
           className="flex max-h-full w-full max-w-full flex-col overflow-hidden bg-[var(--dama-card)]"
           style={
             ready
-              ? fitHost || !maxLg
+              ? hug && maxLg
                 ? { width: side, maxWidth: "100%" }
-                : { width: "100%", maxWidth: "100%" }
+                : fitHost || !maxLg
+                  ? { width: side, maxWidth: "100%" }
+                  : { width: "100%", maxWidth: "100%" }
               : // Keep a visible square while measuring - visibility:hidden looked like
                 // the board “minimized and vanished” on remount / game start.
                 { width: "100%", maxWidth: "100%" }
@@ -244,9 +260,11 @@ export function PlayBoardColumn({
             className="relative w-full max-w-full shrink-0 overflow-hidden"
             style={
               ready
-                ? fitHost || !maxLg
+                ? hug && maxLg
                   ? { width: side, height: side, maxWidth: "100%" }
-                  : { width: "100%", maxWidth: "100%", aspectRatio: "1" }
+                  : fitHost || !maxLg
+                    ? { width: side, height: side, maxWidth: "100%" }
+                    : { width: "100%", maxWidth: "100%", aspectRatio: "1" }
                 : { width: "100%", maxWidth: "100%", aspectRatio: "1" }
             }
           >
