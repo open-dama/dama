@@ -837,17 +837,14 @@ export default function SpectateHub({
   const showBoardSkeleton =
     (connected && !showLiveBoard && !hydrateQuery.data) ||
     (hydrateQuery.isLoading && connected && !game && !hydrateQuery.data);
-  // Idle empty 3D preview: full seats+board column (never plane-only under 52svh stamp).
-  const idlePreviewEmpty =
-    !showLiveBoard && !showBoardSkeleton && boardView !== "2d" && previewBoard.length === 0;
-  /** 3D canvas still covering with BoardAreaSkeleton under a 52svh host = stamp. */
+  /** 3D first paint: full-column HEIGHT only - do not swap a second column skeleton. */
   const boardPlaneHydrating =
     boardView === "3d" &&
     ((showLiveBoard && Boolean(displayBoard?.length)) ||
       (!showLiveBoard && !showBoardSkeleton && previewBoard.length > 0)) &&
     !boardPlaneReady;
-  // Skeleton swap (seats+board bars) vs height-only gate while visible Scene3D paints.
-  const fullColumnShimmer = showBoardSkeleton || idlePreviewEmpty;
+  // Skeleton swap only while bootstrapping - empty 3D preview uses board-slot skeleton (2D parity).
+  const fullColumnShimmer = showBoardSkeleton;
   const fullColumnHost = fullColumnShimmer || boardPlaneHydrating;
 
   // Fill PlayBoardColumn’s square host (LivePlayHub parity) - never stack extra chrome

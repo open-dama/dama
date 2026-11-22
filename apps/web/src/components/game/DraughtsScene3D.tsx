@@ -1139,6 +1139,9 @@ export default function DraughtsScene3D(props: Props) {
     return <BoardAreaSkeleton />;
   }
 
+  // No in-canvas BoardAreaSkeleton overlay: parents already own the one shimmer
+  // (BoardColumnSkeleton / board-slot skeleton). A second card shell on refresh
+  // read as "shimmer twice" vs 2D which paints the plane with no overlay.
   return (
     <div
       className={`relative aspect-square w-full bg-transparent${rejectShake ? " dama-board-reject" : ""}`}
@@ -1147,12 +1150,8 @@ export default function DraughtsScene3D(props: Props) {
         // Unlock on pick (not only on put) so land SFX works after ads / first gesture.
         void unlockGameAudio();
       }}
+      aria-busy={!glReady}
     >
-      {!glReady ? (
-        <div className="pointer-events-none absolute inset-0 z-[1]">
-          <BoardAreaSkeleton />
-        </div>
-      ) : null}
       <Canvas
         key={size}
         // Pulled-back default framing (more margin around the board than the prior 12.8/9.2 @ fov 37).

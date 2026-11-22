@@ -125,15 +125,16 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   Timer? _stallWatch;
   bool _finishQueued = false;
 
-  /// Board size whose first paint finished - mismatch keeps checker shimmer (web 3D parity).
-  int? _paintedSize;
+  /// Board size whose first paint notified parent (height gates; no overlay).
+  int? _paintReadyForSize;
 
   void _schedulePaintReady() {
     final forSize = widget.boardSize;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || widget.boardSize != forSize) return;
-        setState(() => _paintedSize = forSize);
+        if (_paintReadyForSize == forSize) return;
+        _paintReadyForSize = forSize;
         widget.onPaintReady?.call(true);
       });
     });
@@ -378,7 +379,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   void didUpdateWidget(covariant DraughtsBoard3D oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.boardSize != oldWidget.boardSize) {
-      _paintedSize = null;
+      _paintReadyForSize = null;
       _schedulePaintReady();
     }
     if (widget.illegalShakeKey != oldWidget.illegalShakeKey &&
@@ -609,7 +610,6 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     final tokens = damaColorsOf(context);
     if (widget.boardSize <= 0) return const BoardAreaSkeleton();
 
-    final paintReady = _paintedSize == widget.boardSize;
     final display = (_holdSync || _active != null || _queue.isNotEmpty)
         ? _renderBoard
         : widget.board;
@@ -756,10 +756,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
                     : boardPaint,
               ),
             ),
-            if (!paintReady)
-              const Positioned.fill(
-                child: IgnorePointer(child: BoardAreaSkeleton()),
-              ),
+            // No BoardAreaSkeleton overlay: parent owns the single shimmer (web 2D/3D parity).
+            // A second shell on refresh looked like shimmer showing twice.
           ],
         ),
       ),

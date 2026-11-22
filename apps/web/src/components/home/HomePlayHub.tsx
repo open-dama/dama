@@ -1073,15 +1073,13 @@ export function HomePlayHub({
           !live?.game ||
           live?.boardHydrating,
       );
-    // Non-playing 3D: empty board OR WebGL not painted yet → full column host.
-    // Never leave BoardAreaSkeleton alone inside the idle 52svh stamp.
-    const idlePreviewEmpty =
-      !liveActive && !centerBrowse && boardView !== "2d" && previewBoard.length === 0;
+    // Non-playing 3D: keep seats+board slot mounted (2D parity) - never swap a full
+    // BoardColumnSkeleton then another BoardAreaSkeleton inside Scene3D (double flash).
     const idle3dHydrating = !liveActive && !centerBrowse && boardView !== "2d" && !preview3dPainted;
     // Live 3D still painting: full-column HEIGHT only (keep real seats + Scene3D mounted).
     const live3dHydrating =
       liveActive && boardView !== "2d" && live?.boardPlaneReady === false && Boolean(live?.game);
-    const fullColumnShimmer = liveBoardPending || idlePreviewEmpty;
+    const fullColumnShimmer = liveBoardPending;
     const fullColumnHost = fullColumnShimmer || idle3dHydrating || live3dHydrating;
 
     const isPlayBoard = !centerBrowse;
