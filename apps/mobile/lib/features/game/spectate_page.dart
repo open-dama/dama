@@ -1216,10 +1216,6 @@ class _SpectatePageState extends State<SpectatePage> {
             const SizedBox(height: 12),
             Builder(
               builder: (context) {
-                final boardLive = _outcome == null &&
-                    !_draw &&
-                    _endReason != 'clock_flag' &&
-                    _endReason != 'clock_draw';
                 if (_busy) {
                   return const Expanded(child: BoardGridSkeleton());
                 }
@@ -1235,8 +1231,12 @@ class _SpectatePageState extends State<SpectatePage> {
                     ),
                   );
                 }
+                final hasBoard = true;
+                final compact = MediaQuery.sizeOf(context).width <=
+                    kSmartBoardCompactMaxWidth;
                 final shell = SmartBoardShell(
-                  active: boardLive,
+                  active: hasBoard,
+                  popSignal: _connected && _board != null,
                   child: PlayBoardFrame(
                     vsLabel: _railChrome?.vsSeparator ?? '',
                     coverOverlay: _spectatePauseCoverOverlay(),
@@ -1343,7 +1343,7 @@ class _SpectatePageState extends State<SpectatePage> {
                     ),
                   ),
                 );
-                if (boardLive) return shell;
+                if (hasBoard && compact) return shell;
                 return Expanded(child: shell);
               },
             ),

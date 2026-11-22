@@ -143,7 +143,7 @@ export function PlayHubSkeleton() {
         className={cn(
           "order-1 flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full lg:flex-1 lg:justify-center lg:order-none",
           // Keep in sync with mobilePlayBoardMaxHeightClass (home / live / spectate).
-          "max-lg:h-[min(52dvh,calc(100dvh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:max-h-[min(52dvh,calc(100dvh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden",
+          "max-lg:h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:max-h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden",
         )}
       >
         <BoardColumnSkeleton showTopTrailing bottomClockActive />

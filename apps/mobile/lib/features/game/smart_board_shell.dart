@@ -7,6 +7,26 @@ import 'package:flutter/services.dart';
 /// Phone/tablet width gate - aligns with web Tailwind `lg` (1023px).
 const double kSmartBoardCompactMaxWidth = 1023;
 
+/// Web `BoardStackLayoutMode` parity: hug = width-square only (no height feedback).
+class BoardStackLayoutScope extends InheritedWidget {
+  const BoardStackLayoutScope({
+    super.key,
+    required this.hug,
+    required super.child,
+  });
+
+  final bool hug;
+
+  static BoardStackLayoutScope? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<BoardStackLayoutScope>();
+  }
+
+  @override
+  bool updateShouldNotify(covariant BoardStackLayoutScope oldWidget) {
+    return hug != oldWidget.hug;
+  }
+}
+
 /// Provides chrome double-tap toggle to [PlayBoardFrame] seat rows (not the board plane).
 class SmartBoardChromeScope extends InheritedWidget {
   const SmartBoardChromeScope({
@@ -40,10 +60,15 @@ class SmartBoardShell extends StatefulWidget {
   const SmartBoardShell({
     super.key,
     required this.active,
+    this.popSignal = false,
     required this.child,
   });
 
   final bool active;
+
+  /// Rising edge while [active] forces maximize (match/spectate start).
+  /// Web `SmartBoardHost.popSignal` parity.
+  final bool popSignal;
   final Widget child;
 
   @override
@@ -58,6 +83,7 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   bool _collapsed = false;
   bool _overlayOwnsBoard = false;
   bool? _lastCompact;
+  bool _prevPopSignal = false;
   DateTime _toggleLockUntil = DateTime.fromMillisecondsSinceEpoch(0);
   double _spacerH = 0;
   Offset? _fabPos;
@@ -148,7 +174,8 @@ class _SmartBoardShellState extends State<SmartBoardShell>
       final box = _boardKey.currentContext?.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize) return;
       final next = box.size.height;
-      if ((next - _spacerH).abs() <= 1) return;
+      // Wider epsilon stops 1px layout oscillation (zoom thrash on real devices).
+      if ((next - _spacerH).abs() <= 2) return;
       setState(() => _spacerH = next);
     });
   }
@@ -164,11 +191,23 @@ class _SmartBoardShellState extends State<SmartBoardShell>
       final box = _boardKey.currentContext?.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize) return;
       final origin = box.localToGlobal(Offset.zero);
-      final next = Offset(
+      final media = MediaQuery.sizeOf(context);
+      final padding = MediaQuery.paddingOf(context);
+      final raw = Offset(
         origin.dx + box.size.width - 44,
         origin.dy + box.size.height + 4,
       );
-      if (_fabPos != next) setState(() => _fabPos = next);
+      // Keep FAB on-screen (web visualViewport clamp parity).
+      final next = Offset(
+        raw.dx.clamp(8.0, media.width - 48),
+        raw.dy.clamp(padding.top + 8, media.height - padding.bottom - 56),
+      );
+      final prev = _fabPos;
+      if (prev != null && (prev - next).distance <= 1.5) {
+        if (!_fabPortal.isShowing) _fabPortal.show();
+        return;
+      }
+      setState(() => _fabPos = next);
       if (!_fabPortal.isShowing) _fabPortal.show();
     });
   }
@@ -195,15 +234,25 @@ class _SmartBoardShellState extends State<SmartBoardShell>
     super.didUpdateWidget(oldWidget);
     if (widget.active && !oldWidget.active) {
       _collapsed = false;
+      _prevPopSignal = widget.popSignal;
       _toggleLockUntil = DateTime.now().add(_toggleLock);
       _syncPortal(force: true);
       return;
     }
     if (!widget.active && oldWidget.active) {
       _collapsed = false;
+      _prevPopSignal = false;
       _toggleLockUntil = DateTime.fromMillisecondsSinceEpoch(0);
       _syncPortal(force: true);
+      return;
     }
+    // Match/spectate start while shell was already active+minimized.
+    if (widget.active && widget.popSignal && !_prevPopSignal) {
+      _collapsed = false;
+      _toggleLockUntil = DateTime.now().add(_toggleLock);
+      _syncPortal(force: true);
+    }
+    _prevPopSignal = widget.popSignal;
   }
 
   @override
@@ -215,11 +264,15 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   }
 
   Widget _scoped(Widget child, {required bool expanded}) {
-    return SmartBoardChromeScope(
-      onChromeDoubleTap: _toggle,
-      onToggleButton: _toggle,
-      expanded: expanded,
-      child: child,
+    // Minimized smart board: hug (width square). Expanded: budget height-fit.
+    return BoardStackLayoutScope(
+      hug: !expanded,
+      child: SmartBoardChromeScope(
+        onChromeDoubleTap: _toggle,
+        onToggleButton: _toggle,
+        expanded: expanded,
+        child: child,
+      ),
     );
   }
 
@@ -260,9 +313,13 @@ class _SmartBoardShellState extends State<SmartBoardShell>
 
   Widget _boardColumn({required bool expanded}) {
     // No in-tree FAB - portaled below board so it cannot be cropped or cover clocks.
+    // Horizontal inset keeps rank/file coords inside the screen (L/R clip parity).
     return KeyedSubtree(
       key: _boardKey,
-      child: _scoped(widget.child, expanded: expanded),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: _scoped(widget.child, expanded: expanded),
+      ),
     );
   }
 
@@ -319,6 +376,13 @@ class _SmartBoardShellState extends State<SmartBoardShell>
         controller: _portal,
         overlayChildBuilder: (context) {
           if (!boardInOverlay) return const SizedBox.shrink();
+          // Height-budget under status/app chrome so the square never clips
+          // under the browser/app header (web header-offset + svh parity).
+          final pad = MediaQuery.paddingOf(context);
+          final stableH =
+              media.height; // MediaQuery size is stable vs viewInsets churn
+          final maxBoardH =
+              (stableH - pad.top - pad.bottom - 56).clamp(280.0, stableH);
           return Align(
             alignment: Alignment.topCenter,
             child: FadeTransition(
@@ -332,8 +396,14 @@ class _SmartBoardShellState extends State<SmartBoardShell>
                   child: SafeArea(
                     bottom: false,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-                      child: _boardColumn(expanded: true),
+                      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: media.width,
+                          maxHeight: maxBoardH,
+                        ),
+                        child: _boardColumn(expanded: true),
+                      ),
                     ),
                   ),
                 ),

@@ -2469,7 +2469,11 @@ export function LivePlayHub({
 
       {/* Match seats: opponent above board, you below; 2D/3D beside top seat (desktop). */}
       <SmartBoardHost
-        active={phase === "playing"}
+        // Menu / finished / playing - same maximize FAB + pop flow as home idle.
+        // Gate on surfaceActive so keep-alive hidden hubs do not portal a second FAB.
+        active={surfaceActive}
+        // Rising edge only on match start (surface enter already pops via `active`).
+        popSignal={surfaceActive && phase === "playing"}
         className={cn(
           // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
           "order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:flex-1 lg:justify-center",

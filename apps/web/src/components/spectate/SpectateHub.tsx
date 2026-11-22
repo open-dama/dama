@@ -260,13 +260,21 @@ function formatSpectateEventLine(msg: GameWsMessage, boardSize: number): string 
 export type SpectateHubProps = {
   /** When true (marketing `/` shell), fill parent height instead of 100dvh calc. */
   fillHeight?: boolean;
+  /**
+   * When false, smart maximize FAB/overlay stay off (keep-alive under other views).
+   * Standalone `/spectate` defaults true.
+   */
+  surfaceActive?: boolean;
 };
 
 /**
  * Spectate in the same Chess.com Play shell as HomePlayHub:
  * left-rail seats + board (2D/3D) + flat connect/history panel.
  */
-export default function SpectateHub({ fillHeight = false }: SpectateHubProps = {}) {
+export default function SpectateHub({
+  fillHeight = false,
+  surfaceActive = true,
+}: SpectateHubProps = {}) {
   const hydrated = useAuthHydrated();
   const token = useAuthStore((s) => s.token);
   const myId = useAuthStore((s) => s.user?.id);
@@ -942,7 +950,10 @@ export default function SpectateHub({ fillHeight = false }: SpectateHubProps = {
     >
       {/* Match seats: opponent above board, you below; 2D/3D beside top seat (desktop). */}
       <SmartBoardHost
-        active={Boolean(game && !gameFinished)}
+        // Preview + live spectate - same maximize FAB + pop flow as play hubs.
+        // Gate on surfaceActive so keep-alive under Play does not portal a second FAB.
+        active={surfaceActive}
+        popSignal={surfaceActive && Boolean(game)}
         className={cn(
           // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
           "order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:flex-1 lg:justify-center",

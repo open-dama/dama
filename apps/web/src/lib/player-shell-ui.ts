@@ -29,17 +29,18 @@ export const mobilePlayBoardColumnClass =
  * Standalone play / spectate max-lg: fill remaining viewport under player chrome.
  */
 export const mobilePlayBoardStandaloneHeightClass =
-  "max-lg:min-h-[calc(100dvh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px))]";
+  "max-lg:min-h-[calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px))]";
 
 /**
  * Standalone play / spectate: fit viewport on desktop.
  * Home lobby uses `playHubFillHeightClass` inside the marketing shell instead.
+ * Prefer svh so tablet browser chrome cannot thrash board measure.
  */
-export const playHubDesktopHeightClass = "lg:h-[calc(100dvh-1rem)] lg:max-h-[calc(100dvh-1rem)]";
+export const playHubDesktopHeightClass = "lg:h-[calc(100svh-1rem)] lg:max-h-[calc(100svh-1rem)]";
 
 /**
  * Home play hub height (locked marketing shell, all breakpoints).
- * Shell is `h-dvh overflow-hidden`; hub fills; rail body scrolls under frozen tabs.
+ * Shell is `h-svh overflow-hidden`; hub fills; rail body scrolls under frozen tabs.
  */
 export const playHubFillHeightClass = "min-h-0 h-full max-h-full flex-1 overflow-hidden";
 
@@ -142,6 +143,8 @@ export const tournamentBrowseGridClass =
  * Phone/tablet board host: definite height budget so PlayBoardColumn can fit
  * top seat + square + bottom seat (never clip the bottom player bar).
  * Remaining hub height goes to the scrollable rail.
+ * Use `svh` (not `dvh`) so iOS Safari URL-bar show/hide cannot resize the
+ * board in a measure loop (infinite zoom on real phones).
  */
 export const mobilePlayBoardMaxHeightClass =
-  "max-lg:h-[min(52dvh,calc(100dvh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:max-h-[min(52dvh,calc(100dvh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden";
+  "max-lg:h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:max-h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden";

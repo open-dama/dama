@@ -869,6 +869,9 @@ export function HomePlayHub({
   const leavePlayBrowse =
     publicView === "tournaments" || publicView === "events" || showMatchmakingPage;
   const embedAiActive = Boolean(aiLive && !leavePlayBrowse && !playBoardVisible);
+  // Lobby owns the preview SmartBoard FAB only while it is the visible surface.
+  const lobbySurfaceVisible =
+    !playBoardVisible && !spectateVisible && !showMatchmakingPage && !embedAiActive;
   // Play + Spectate: hide instead of unmount (matchmaking keep-alive parity).
   const showPlayKeepAlive = playBoardLatched && !embedAiActive;
   const boardsKeepAlive = (
@@ -892,7 +895,7 @@ export function HomePlayHub({
           aria-hidden={!spectateVisible}
         >
           <Suspense fallback={null}>
-            <SpectateHub fillHeight />
+            <SpectateHub fillHeight surfaceActive={spectateVisible} />
           </Suspense>
         </div>
       ) : null}
@@ -1266,13 +1269,17 @@ export function HomePlayHub({
           )}
         >
           <SmartBoardHost
-            active={Boolean(liveActive && live?.phase === "playing")}
+            // Same smart maximize / FAB / pop flow for idle preview and live play.
+            // Lobby visible OR embedded live: keep-alive hidden surfaces must not portal FABs.
+            active={isPlayBoard && (lobbySurfaceVisible || liveActive)}
+            // Re-pop on lobby enter + match start (even if shell stayed active+minimized).
+            popSignal={Boolean(liveActive || lobbySurfaceVisible)}
             className={cn(
               // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
               "dama-home-board-enter order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:order-none",
               centerBrowse
                 ? "justify-start pt-1"
-                : // Phone/tablet: definite height budget so measure cannot shrink-loop; rail scrolls below.
+                : // Phone/tablet: definite height budget while collapsed; smart hug overrides when live.
                   cn(
                     mobilePlayBoardMaxHeightClass,
                     "lg:h-full lg:min-h-0 lg:flex-1 lg:justify-center",
@@ -1428,9 +1435,6 @@ export function HomePlayHub({
   // Remounting on every `/?view=match` nav was the flicker vs tournaments (center swap only).
   // Embedded AI unmounts on tournaments/events/matchmaking same-render; resume boards stay latched.
   // Lobby stays mounted (hidden) under board/spectate so Play nav-back never remount-shimmers.
-  const lobbySurfaceVisible =
-    !playBoardVisible && !spectateVisible && !showMatchmakingPage && !embedAiActive;
-
   if (embedAiActive && aiLive) {
     return (
       <>
