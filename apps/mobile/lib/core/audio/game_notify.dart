@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
 
@@ -41,17 +43,18 @@ class GameNotify {
   }
 
   /// First board tap: warm pool so Autoplay / codec init does not drop the first land.
-  static Future<void> unlock() async {
-    if (_audioWarmed) return;
-    _audioWarmed = true;
+  /// Pass [force] after fullscreen ads / app resume when OS may have revoked audio focus.
+  static Future<void> unlock({bool force = false}) async {
+    if (_audioWarmed && !force) return;
     try {
       await _ensureLandPool();
       for (final p in _landPlayers) {
         await p.setVolume(0.001);
         await p.play(AssetSource('sounds/move.mp3'));
-        await p.stop();
+        unawaited(p.stop());
         await p.setVolume(0.8);
       }
+      _audioWarmed = true;
     } catch (_) {
       _audioWarmed = false;
     }
@@ -65,7 +68,7 @@ class GameNotify {
     _lastMessageAt = now;
     try {
       final player = _messagePlayer ??= AudioPlayer();
-      await player.stop();
+      unawaited(player.stop());
       await player.setVolume(0.72);
       await player.play(AssetSource('sounds/message.wav'));
     } catch (_) {
@@ -77,21 +80,35 @@ class GameNotify {
   /// Call only when the piece lands - never during travel.
   /// No global time debounce: multi-jump lands are often <18ms apart and were going silent.
   /// Overlap is handled by the player pool; boards gate with soundPlayed per animation.
+  static Future<void> _playLandAsset(String asset, double volume) async {
+    final player = await _nextLandPlayer();
+    await player.setVolume(volume);
+    // Avoid awaiting stop(): on some devices it stalls the land tick and swallows SFX.
+    unawaited(player.stop());
+    await player.play(AssetSource(asset));
+  }
+
   static Future<void> playPieceLand(String kind) async {
     final asset = switch (kind) {
       'capture' => 'sounds/capture.mp3',
       'promote' => 'sounds/promote.mp3',
       _ => 'sounds/move.mp3',
     };
+    final volume = kind == 'capture' ? 0.9 : 0.8;
     try {
-      final player = await _nextLandPlayer();
-      await player.setVolume(kind == 'capture' ? 0.9 : 0.8);
-      await player.stop();
-      await player.play(AssetSource(asset));
-      await HapticFeedback.selectionClick();
+      await _playLandAsset(asset, volume);
+      unawaited(HapticFeedback.selectionClick());
     } catch (_) {
-      await SystemSound.play(SystemSoundType.click);
-      await HapticFeedback.selectionClick();
+      // After ads / focus loss: re-warm once then retry before falling back.
+      _audioWarmed = false;
+      try {
+        await unlock(force: true);
+        await _playLandAsset(asset, volume);
+        unawaited(HapticFeedback.selectionClick());
+      } catch (_) {
+        await SystemSound.play(SystemSoundType.click);
+        unawaited(HapticFeedback.selectionClick());
+      }
     }
   }
 
@@ -127,12 +144,12 @@ class GameNotify {
         try {
           final player = await _ensureGameStartPlayer();
           await player.setVolume(0.85);
-          await player.stop();
+          unawaited(player.stop());
           await player.play(AssetSource('sounds/game-start.mp3'));
-          await HapticFeedback.mediumImpact();
+          unawaited(HapticFeedback.mediumImpact());
         } catch (_) {
           await SystemSound.play(SystemSoundType.click);
-          await HapticFeedback.mediumImpact();
+          unawaited(HapticFeedback.mediumImpact());
         }
         return;
       case 'win':

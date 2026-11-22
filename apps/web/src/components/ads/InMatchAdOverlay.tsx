@@ -10,6 +10,7 @@ import {
 import { useInMatchEligibilityMutation } from "@/hooks/mutation/useInMatchEligibilityMutation";
 import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { usePlayerGeoQuery } from "@/hooks/query/usePlayerGeoQuery";
+import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
 import {
   parseViewportBreakpoints,
   pickCampaignCreative,
@@ -184,6 +185,10 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
     setCampaign(null);
     setNonSkippable(null);
     setRemaining(null);
+    // Video ads suspend AudioContext / steal autoplay - re-warm so land SFX work again.
+    void resumeGameAudio();
+    // If resume() is blocked until the next gesture, arm capture so the next tap unlocks.
+    armAudioGestureResume();
     const interval = nextIntervalSec.current;
     if (interval != null && interval > 0 && active && gameStartedAtMs != null) {
       scheduleAfter(interval);
@@ -283,6 +288,8 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
               if (videoCompletedRef.current) return;
               videoCompletedRef.current = true;
               videoComplete.mutate(campaign.id);
+              // Warm audio while skip countdown finishes so first put-down after Continue works.
+              void resumeGameAudio();
             }}
           />
         </button>

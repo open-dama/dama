@@ -8,6 +8,7 @@ import {
   type ViewportCreativeSource,
 } from "@/lib/resolve-viewport-creative";
 import type { ViewportCreativeSlot } from "@/types/ads";
+import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
 import { resolvePublicMediaUrl } from "@/lib/resolve-public-media-url";
 import { cn } from "@/lib/utils";
 import type { AdScheduleChrome } from "@/types/ad-playback";
@@ -66,8 +67,17 @@ function YouTubeNoCookieEmbed({
   const videoIdTrim = videoId.trim();
   const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoIdTrim)}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1`;
 
+  // YouTube iframes suspend page AudioContext (board put-down SFX go silent).
+  // Re-arm on unmount the same way in-match overlay does after Continue.
   useEffect(() => {
-    if (!onEnded || !videoIdTrim) return;
+    return () => {
+      void resumeGameAudio();
+      armAudioGestureResume();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!videoIdTrim) return;
     endedRef.current = false;
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== "https://www.youtube-nocookie.com") return;
@@ -92,7 +102,9 @@ function YouTubeNoCookieEmbed({
           (info as Record<string, unknown>).playerState === 0);
       if (ended && !endedRef.current) {
         endedRef.current = true;
-        onEnded();
+        void resumeGameAudio();
+        armAudioGestureResume();
+        onEnded?.();
       }
     };
     window.addEventListener("message", onMessage);

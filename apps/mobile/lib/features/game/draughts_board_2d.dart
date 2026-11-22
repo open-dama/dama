@@ -114,32 +114,34 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     _anim = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
       ..addListener(() {
-        setState(() {
-          final prev = _progress;
-          _progress = _anim.value;
-          final active = _active;
-          if (active != null &&
-              active.boardAfter != null &&
-              active.boardAfter!.isNotEmpty &&
-              prev < _landPhaseStart &&
-              _progress >= _landPhaseStart) {
-            if (!active.boardApplied) {
-              active.boardApplied = true;
+        // Do not setState every tick - fly uses AnimatedBuilder. Only rebuild
+        // on land commit (board + SFX), same idea as web DOM-driven flight.
+        final prev = _progress;
+        _progress = _anim.value;
+        final active = _active;
+        if (active != null &&
+            active.boardAfter != null &&
+            active.boardAfter!.isNotEmpty &&
+            prev < _landPhaseStart &&
+            _progress >= _landPhaseStart) {
+          if (!active.boardApplied) {
+            active.boardApplied = true;
+            setState(() {
               _renderBoard = _cloneBoard(active.boardAfter!);
-              widget.onPlyAnimated?.call(active.boardAfter!);
-            }
-            if (!active.soundPlayed && !widget.replayMode) {
-              active.soundPlayed = true;
-              // Put-down only - Chess.com move / capture / promote.
-              unawaited(
-                GameNotify.playPiecePlace(
-                  captured: active.isCapture,
-                  promoted: active.isPromotion,
-                ),
-              );
-            }
+            });
+            widget.onPlyAnimated?.call(active.boardAfter!);
           }
-        });
+          if (!active.soundPlayed && !widget.replayMode) {
+            active.soundPlayed = true;
+            // Put-down only - Chess.com move / capture / promote.
+            unawaited(
+              GameNotify.playPiecePlace(
+                captured: active.isCapture,
+                promoted: active.isPromotion,
+              ),
+            );
+          }
+        }
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
@@ -149,7 +151,7 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     _shakeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
-    )..addListener(() => setState(() {}));
+    );
   }
 
   void _startNext() {
@@ -432,7 +434,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
 
   Set<String> get _hiddenKeys {
     final a = _active;
-    if (a == null || _progress >= 1) return {};
+    // Hide for the whole flight; progress is AnimatedBuilder-driven.
+    if (a == null) return {};
     final set = <String>{'${a.fromR},${a.fromC}', '${a.toR},${a.toC}'};
     for (final c in a.captures) {
       set.add('${c.$1},${c.$2}');
@@ -485,15 +488,18 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     final origins = _origins;
     final hidden = _hiddenKeys;
     final lastMove = _lastMoveKeys;
-    final shakeT = _shakeCtrl.value;
-    final shakeAmp = (1.0 - shakeT) * 4.0;
-    final shakeDx =
-        shakeAmp > 0.05 ? math.sin(shakeT * math.pi * 10) * shakeAmp : 0.0;
 
     return AspectRatio(
       aspectRatio: 1,
-      child: Transform.translate(
-        offset: Offset(shakeDx, 0),
+      child: AnimatedBuilder(
+        animation: _shakeCtrl,
+        builder: (context, child) {
+          final shakeT = _shakeCtrl.value;
+          final shakeAmp = (1.0 - shakeT) * 4.0;
+          final shakeDx =
+              shakeAmp > 0.05 ? math.sin(shakeT * math.pi * 10) * shakeAmp : 0.0;
+          return Transform.translate(offset: Offset(shakeDx, 0), child: child);
+        },
         // Continuous opaque plane under cells (web/3D parity) so anti-alias
         // seams never composite against the dark scaffold as black borders.
         child: ColoredBox(
@@ -503,41 +509,55 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
               final side =
                   math.min(constraints.maxWidth, constraints.maxHeight);
               final cell = side / size;
-              Widget? fly;
               final active = _active;
-              if (active != null && _progress < 1) {
-                final t = _travelT(_progress);
-                final scale = _flyScale(_progress);
-                final fromR =
-                    widget.flipBoard ? size - 1 - active.fromR : active.fromR;
-                final fromC =
-                    widget.flipBoard ? size - 1 - active.fromC : active.fromC;
-                final toR =
-                    widget.flipBoard ? size - 1 - active.toR : active.toR;
-                final toC =
-                    widget.flipBoard ? size - 1 - active.toC : active.toC;
-                final vr = fromR + (toR - fromR) * t;
-                final vc = fromC + (toC - fromC) * t;
-                final piece = cell * 0.98;
-                fly = Positioned(
-                  left: vc * cell + (cell - piece) / 2,
-                  top: vr * cell + (cell - piece) / 2,
-                  width: piece,
-                  height: piece,
-                  child: Transform.scale(
-                    scale: scale,
-                    child: _PieceDisc(
-                      player: active.player,
-                      king: active.isKing,
-                      light: tokens.pieceLight,
-                      dark: tokens.pieceDark,
-                      darkSplit: tokens.pieceDarkSplit,
-                      border: Colors.transparent,
-                      borderWidth: 0,
-                    ),
-                  ),
-                );
-              }
+              final piece = cell * 0.98;
+              // Fly overlay only - avoids rebuilding the full 10×10 grid every frame.
+              final Widget? fly = active == null
+                  ? null
+                  : AnimatedBuilder(
+                      animation: _anim,
+                      builder: (context, child) {
+                        final progress = _anim.value;
+                        if (progress >= 1) {
+                          return const SizedBox.shrink();
+                        }
+                        final t = _travelT(progress);
+                        final scale = _flyScale(progress);
+                        final fromR = widget.flipBoard
+                            ? size - 1 - active.fromR
+                            : active.fromR;
+                        final fromC = widget.flipBoard
+                            ? size - 1 - active.fromC
+                            : active.fromC;
+                        final toR = widget.flipBoard
+                            ? size - 1 - active.toR
+                            : active.toR;
+                        final toC = widget.flipBoard
+                            ? size - 1 - active.toC
+                            : active.toC;
+                        final vr = fromR + (toR - fromR) * t;
+                        final vc = fromC + (toC - fromC) * t;
+                        return Positioned(
+                          left: vc * cell + (cell - piece) / 2,
+                          top: vr * cell + (cell - piece) / 2,
+                          width: piece,
+                          height: piece,
+                          child: Transform.scale(
+                            scale: scale,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: _PieceDisc(
+                        player: active.player,
+                        king: active.isKing,
+                        light: tokens.pieceLight,
+                        dark: tokens.pieceDark,
+                        darkSplit: tokens.pieceDarkSplit,
+                        border: Colors.transparent,
+                        borderWidth: 0,
+                      ),
+                    );
 
               return Stack(
                 clipBehavior: Clip.hardEdge,

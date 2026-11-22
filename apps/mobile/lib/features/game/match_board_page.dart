@@ -69,7 +69,8 @@ class MatchBoardPage extends StatefulWidget {
   State<MatchBoardPage> createState() => _MatchBoardPageState();
 }
 
-class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
+class _MatchBoardPageState extends State<MatchBoardPage>
+    with RouteAware, WidgetsBindingObserver {
   final _ws = GameWsClient();
   bool _routeAwareSubscribed = false;
 
@@ -1413,6 +1414,7 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final seeded = (widget.gameId ?? '').trim();
     if (seeded.isNotEmpty) _bindActiveBoard(seeded);
     unawaited(_loadPlayChrome());
@@ -1427,6 +1429,14 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
       if (gid == (_gameId ?? '').trim()) unawaited(_refreshChatUnread());
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _bindAvatarRt());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // OS / ads steal audio focus - re-warm land SFX pool on return.
+      unawaited(GameNotify.unlock(force: true));
+    }
   }
 
   Future<void> _refreshChatUnread() async {
@@ -2140,6 +2150,7 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_routeAwareSubscribed) {
       damaRouteObserver.unsubscribe(this);
       _routeAwareSubscribed = false;

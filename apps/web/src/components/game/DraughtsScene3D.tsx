@@ -7,7 +7,7 @@
 
 import { BoardAreaSkeleton } from "@/components/ui/BoardColumnSkeleton";
 import { useDraughtsPerformanceTier } from "@/hooks/useDraughtsPerformanceTier";
-import { pieceLandKind, playPieceLandSound } from "@/lib/audio-notify";
+import { pieceLandKind, playPieceLandSound, unlockGameAudio } from "@/lib/audio-notify";
 import {
   boardCoordUsesLightInk,
   boardFileLetter,
@@ -152,6 +152,9 @@ type ActiveAnimation = {
   boardApplied?: boolean;
   /** One land SFX per animation (land phase + finish must not double). */
   soundPlayed?: boolean;
+  /** Defer React commits out of R3F useFrame (avoids mid-frame setState stalls). */
+  landQueued?: boolean;
+  finishQueued?: boolean;
 };
 
 type AnimationMask = Pick<ActiveAnimation, "from" | "to" | "captures">;
@@ -903,16 +906,32 @@ function BoardScene({
 
   useFrame((_, delta) => {
     const animation = animationRef.current;
-    if (animation) {
-      const prev = animation.progress;
-      animation.progress = Math.min(1, animation.progress + delta / animation.duration);
-      // Commit captures/board the moment the piece starts putting down - not after a long settle.
-      if (prev < LAND_PHASE_START && animation.progress >= LAND_PHASE_START) {
+    if (!animation) return;
+    // Tab/ad blur: freeze clock so return does not fast-forward/glitch the ply.
+    if (typeof document !== "undefined" && document.hidden) return;
+    // Cap hitch deltas (2D parity) so pieces never teleport.
+    const step = Math.min(0.05, delta);
+    const prev = animation.progress;
+    animation.progress = Math.min(1, animation.progress + step / animation.duration);
+    // Never call React setState inside useFrame - schedule microtasks (Chess.com/Lichess style).
+    if (
+      prev < LAND_PHASE_START &&
+      animation.progress >= LAND_PHASE_START &&
+      !animation.landQueued
+    ) {
+      animation.landQueued = true;
+      queueMicrotask(() => {
+        // Still the active ply (or already committed) - sound/board gated by flags.
         commitBoardAfter(animation);
-      }
-      if (animation.progress >= 1) {
+      });
+    }
+    if (animation.progress >= 1 && !animation.finishQueued) {
+      animation.finishQueued = true;
+      queueMicrotask(() => {
+        // Skip if a newer ply already replaced this one (avoids double startNext).
+        if (animationRef.current !== animation) return;
         finishAndAdvance();
-      }
+      });
     }
   });
 
@@ -1095,6 +1114,10 @@ export default function DraughtsScene3D(props: Props) {
     <div
       className={`relative aspect-square w-full bg-transparent${rejectShake ? " dama-board-reject" : ""}`}
       style={{ touchAction: "none" }}
+      onPointerDown={() => {
+        // Unlock on pick (not only on put) so land SFX works after ads / first gesture.
+        void unlockGameAudio();
+      }}
     >
       {!glReady ? (
         <div className="pointer-events-none absolute inset-0 z-[1]">

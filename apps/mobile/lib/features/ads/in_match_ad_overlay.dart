@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/geo/device_locate.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
@@ -307,6 +308,8 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
       _nonSkippable = null;
       _remaining = null;
     });
+    // Video / fullscreen ads steal audio focus - re-warm land SFX pool.
+    unawaited(GameNotify.unlock(force: true));
     final interval = _nextIntervalSec;
     if (interval != null &&
         interval > 0 &&

@@ -133,14 +133,18 @@ function MaximizeFabPortal({
     window.addEventListener("scroll", sync, true);
     window.visualViewport?.addEventListener("resize", sync);
     window.visualViewport?.addEventListener("scroll", sync);
-    const poll = window.setInterval(sync, 200);
+    // One short settle burst after mount only - perpetual 200ms layout polls
+    // contested the main thread during piece flight on production devices.
+    const settle = window.setInterval(sync, 100);
+    const stopSettle = window.setTimeout(() => window.clearInterval(settle), 800);
     return () => {
       ro?.disconnect();
       window.removeEventListener("resize", sync);
       window.removeEventListener("scroll", sync, true);
       window.visualViewport?.removeEventListener("resize", sync);
       window.visualViewport?.removeEventListener("scroll", sync);
-      window.clearInterval(poll);
+      window.clearInterval(settle);
+      window.clearTimeout(stopSettle);
     };
   }, [anchorRef]);
 

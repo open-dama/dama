@@ -19,6 +19,8 @@ const LAND_SRC: Record<PieceLandKind, string> = {
   promote: "/sounds/promote.mp3",
 };
 
+const LAND_KINDS = Object.keys(LAND_SRC) as PieceLandKind[];
+
 const GAME_START_SRC = "/sounds/game-start.mp3";
 /** Soft ClickUp-like delivery ping - recipient-only (original Dama asset). */
 const MESSAGE_SRC = "/sounds/message.wav";
@@ -26,8 +28,13 @@ const MESSAGE_SRC = "/sounds/message.wav";
 let lastMessageNotifyAt = 0;
 
 let ctx: AudioContext | null = null;
+let masterGain: GainNode | null = null;
 
-/** Pool so rapid multi-jump lands never restart a mid-play element (dropout/clip). */
+/** Decoded land buffers (Lichess / Chess.com pattern) - zero HTMLAudio race on put-down. */
+const landBuffers = new Map<PieceLandKind, AudioBuffer>();
+let buffersWarm: Promise<void> | null = null;
+
+/** Pool fallback when WebAudio decode is unavailable. */
 const LAND_POOL = 4;
 const landPools: Partial<Record<PieceLandKind, HTMLAudioElement[]>> = {};
 const landPoolIdx: Partial<Record<PieceLandKind, number>> = {};
@@ -36,22 +43,50 @@ let messagePlayer: HTMLAudioElement | null = null;
 
 let visibilityHooked = false;
 let audioUnlocked = false;
+/** Serialize resume/unlock so tab-visible + ad-close cannot race and leave ctx suspended. */
+let resumeInFlight: Promise<void> | null = null;
+let gestureArmHooked = false;
+
+function makeAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const AC =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  if (!AC) return null;
+  try {
+    return new AC({ latencyHint: "interactive" });
+  } catch {
+    try {
+      return new AC();
+    } catch {
+      return null;
+    }
+  }
+}
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  if (!ctx) {
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    ctx = new AC();
+  if (!ctx) ctx = makeAudioContext();
+  if (!ctx) return null;
+  if (!masterGain) {
+    masterGain = ctx.createGain();
+    masterGain.connect(ctx.destination);
   }
-  // Tab/background suspends AudioContext → land SFX go silent until resumed.
+  // Tab/background + post-video ads suspend AudioContext → land SFX go silent until resumed.
   if (!visibilityHooked) {
     visibilityHooked = true;
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && ctx?.state === "suspended") {
-        void ctx.resume();
+      if (document.visibilityState === "visible") {
+        void resumeGameAudio();
       }
+    });
+    // iOS Safari bfcache / iframe focus: visibility alone is not enough.
+    window.addEventListener("pageshow", () => {
+      void resumeGameAudio();
+    });
+    window.addEventListener("focus", () => {
+      const audio = ctx;
+      if (audio?.state === "suspended") void resumeGameAudio();
     });
   }
   return ctx;
@@ -60,8 +95,76 @@ function getCtx(): AudioContext | null {
 async function ensureCtx(): Promise<AudioContext | null> {
   const audio = getCtx();
   if (!audio) return null;
-  if (audio.state === "suspended") await audio.resume();
+  if (audio.state === "suspended") {
+    try {
+      await audio.resume();
+    } catch {
+      /* autoplay / policy */
+    }
+  }
   return audio;
+}
+
+/**
+ * Warm decoded buffers. Retries when a prior warm finished with missing clips
+ * (first unlock often races Autoplay / suspended ctx on production).
+ */
+async function warmLandBuffers(force = false): Promise<void> {
+  if (!force && landBuffers.size >= LAND_KINDS.length) return;
+  if (buffersWarm) {
+    await buffersWarm;
+    if (!force && landBuffers.size >= LAND_KINDS.length) return;
+  }
+  const run = (async () => {
+    const audio = await ensureCtx();
+    if (!audio || audio.state !== "running") return;
+    await Promise.all(
+      LAND_KINDS.map(async (kind) => {
+        if (!force && landBuffers.has(kind)) return;
+        try {
+          const res = await fetch(LAND_SRC[kind]);
+          if (!res.ok) return;
+          const raw = await res.arrayBuffer();
+          // copy: some browsers detach the buffer on decode
+          const buf = await audio.decodeAudioData(raw.slice(0));
+          landBuffers.set(kind, buf);
+        } catch {
+          /* HTMLAudio pool remains the fallback */
+        }
+      }),
+    );
+  })();
+  buffersWarm = run;
+  try {
+    await run;
+  } finally {
+    // Allow retry if warm left gaps (suspended ctx / network blip).
+    if (landBuffers.size < LAND_KINDS.length) {
+      buffersWarm = null;
+    }
+  }
+}
+
+/**
+ * Sync buffer play. Returns false when ctx is not running so callers can
+ * await resume — never report success for a silent suspended start.
+ */
+function playLandFromBuffer(kind: PieceLandKind, volume: number): boolean {
+  const audio = getCtx();
+  const buf = landBuffers.get(kind);
+  if (!audio || !buf || !masterGain) return false;
+  if (audio.state !== "running") return false;
+  try {
+    const now = audio.currentTime;
+    masterGain.gain.setValueAtTime(volume, now);
+    const src = audio.createBufferSource();
+    src.buffer = buf;
+    src.connect(masterGain);
+    src.start(0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -69,11 +172,20 @@ async function ensureCtx(): Promise<AudioContext | null> {
  * before the first land SFX (avoids intermittent silence).
  */
 export async function unlockGameAudio(): Promise<void> {
-  if (typeof window === "undefined" || audioUnlocked) return;
-  audioUnlocked = true;
+  if (typeof window === "undefined") return;
+  if (audioUnlocked && landBuffers.size >= LAND_KINDS.length) {
+    const audio = getCtx();
+    if (audio?.state === "running") return;
+  }
   try {
-    await ensureCtx();
-    for (const kind of Object.keys(LAND_SRC) as PieceLandKind[]) {
+    const audio = await ensureCtx();
+    // Never claim unlocked while suspended - that left production put-downs silent.
+    if (!audio || audio.state !== "running") {
+      audioUnlocked = false;
+      return;
+    }
+    await warmLandBuffers();
+    for (const kind of LAND_KINDS) {
       const el = nextLandPlayer(kind);
       el.volume = 0.001;
       try {
@@ -86,9 +198,51 @@ export async function unlockGameAudio(): Promise<void> {
       }
       el.volume = 0.8;
     }
+    audioUnlocked = landBuffers.size > 0 || Boolean(landPools.move?.length);
   } catch {
     audioUnlocked = false;
   }
+}
+
+/**
+ * After YouTube/in-match ads, browsers often refuse resume() until the next user
+ * gesture. Arm a one-shot capture listener (Lichess pattern) so the next tap/key
+ * re-warms buffers before the following put-down.
+ */
+export function armAudioGestureResume(): void {
+  if (typeof window === "undefined" || gestureArmHooked) return;
+  gestureArmHooked = true;
+  const once = () => {
+    gestureArmHooked = false;
+    document.removeEventListener("pointerdown", once, true);
+    document.removeEventListener("keydown", once, true);
+    void resumeGameAudio();
+  };
+  document.addEventListener("pointerdown", once, true);
+  document.addEventListener("keydown", once, true);
+}
+
+/**
+ * After in-match video ads / tab return: browsers often suspend AudioContext and
+ * revoke HTMLAudio autoplay. Re-warm so put-down SFX never stay swallowed.
+ */
+export async function resumeGameAudio(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (resumeInFlight) return resumeInFlight;
+  resumeInFlight = (async () => {
+    try {
+      await ensureCtx();
+      await warmLandBuffers(true);
+      audioUnlocked = false;
+      await unlockGameAudio();
+      if (!audioUnlocked) armAudioGestureResume();
+    } catch {
+      armAudioGestureResume();
+    } finally {
+      resumeInFlight = null;
+    }
+  })();
+  return resumeInFlight;
 }
 
 function beep(
@@ -139,21 +293,16 @@ function nextLandPlayer(kind: PieceLandKind): HTMLAudioElement {
 export async function playPieceLandSound(kind: PieceLandKind): Promise<void> {
   if (typeof window === "undefined") return;
   // No global time debounce: multi-jump lands are often <18ms apart and were going silent.
-  // Overlap is handled by the element pool; per-animation boards gate with soundPlayed.
-  try {
-    await ensureCtx();
-    const el = nextLandPlayer(kind);
-    el.volume = kind === "capture" ? 0.9 : kind === "promote" ? 0.85 : 0.8;
-    try {
-      el.currentTime = 0;
-    } catch {
-      /* ignore seek race on some browsers */
-    }
-    await el.play();
-  } catch {
-    // Autoplay / decode failure: soft WebAudio fallback with same roles.
+  // Overlap is handled by BufferSource / element pool; per-animation boards gate with soundPlayed.
+  const volume = kind === "capture" ? 0.9 : kind === "promote" ? 0.85 : 0.8;
+
+  // Hot path: if buffers + running ctx are ready, start sync (no await on land tick).
+  if (playLandFromBuffer(kind, volume)) return;
+  void warmLandBuffers();
+
+  const softBeep = async () => {
     const audio = await ensureCtx();
-    if (!audio) return;
+    if (!audio || audio.state !== "running") return;
     if (kind === "promote") {
       beep(audio, 520, 0.07, "triangle", 0.06);
       window.setTimeout(() => beep(audio, 780, 0.1, "triangle", 0.05), 55);
@@ -165,6 +314,37 @@ export async function playPieceLandSound(kind: PieceLandKind): Promise<void> {
       return;
     }
     beep(audio, 180, 0.05, "sine", 0.05);
+  };
+
+  try {
+    // Lichess pattern: resume + ensure buffers before BufferSource.start.
+    await ensureCtx();
+    if (!landBuffers.has(kind)) {
+      await Promise.race([
+        warmLandBuffers(),
+        new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 80);
+        }),
+      ]);
+    }
+    if (playLandFromBuffer(kind, volume)) return;
+
+    const el = nextLandPlayer(kind);
+    el.volume = volume;
+    try {
+      el.currentTime = 0;
+    } catch {
+      /* ignore seek race on some browsers */
+    }
+    // Cap wait: suspended HTMLAudio after ads used to hang the land path.
+    await Promise.race([
+      el.play(),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("land-sfx-timeout")), 120);
+      }),
+    ]);
+  } catch {
+    await softBeep();
   }
 }
 
