@@ -224,6 +224,40 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
     setPortalReady(true);
   }, []);
 
+  // Board gestures / wheel must not rubber-band or scroll the shell / sticky header.
+  // Always armed on phone/tablet (maxLg) - including idle shimmer / inactive hosts.
+  // Do NOT mutate documentElement overscroll/touchAction here: clearing them on
+  // pointerup was wiping the locked marketing shell and re-enabling header scroll.
+  useEffect(() => {
+    if (!maxLg && !active) return;
+    const isBoardTarget = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(
+        target.closest("[data-dama-board-plane]") ||
+          target.closest("[data-smart-board]") ||
+          target.closest("[data-dama-board-chrome]") ||
+          target.closest("[data-smart-board-stack]") ||
+          target.closest("[data-dama-smart-frame]") ||
+          target.closest("[data-smart-board-wrap]") ||
+          target.closest("canvas"),
+      );
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      if (!isBoardTarget(event.target)) return;
+      if (event.cancelable) event.preventDefault();
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (!isBoardTarget(event.target)) return;
+      if (event.cancelable) event.preventDefault();
+    };
+    window.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener("touchmove", onTouchMove, true);
+      window.removeEventListener("wheel", onWheel, true);
+    };
+  }, [active, maxLg]);
+
   useEffect(() => {
     if (active && !prevActiveRef.current) {
       setExpanded(true);
@@ -367,18 +401,19 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       <div
         ref={hostRef}
         className={cn(
-          "relative flex min-h-0 w-full min-w-0 flex-col max-lg:box-border",
+          "relative flex min-h-0 w-full min-w-0 flex-col overscroll-none max-lg:box-border max-lg:[touch-action:none]",
           // Inline/hug: full section width. Pop only: regular side inset (not edge-to-edge).
           !topped && "max-lg:px-0",
           topped
             ? // Pop covers sticky header (z-50). Hug height; regular px inset for width.
               "pointer-events-none fixed inset-x-0 top-0 z-[60] w-full max-w-none overflow-hidden bg-transparent pb-0 h-auto max-h-[calc(100svh-var(--dama-bottom-nav-height,0px)-2.75rem)] pt-[env(safe-area-inset-top,0px)] max-lg:px-3"
             : live
-              ? "h-auto overflow-visible"
+              ? "h-auto overflow-hidden"
               : "h-full overflow-hidden",
         )}
         data-smart-board={topped ? "expanded" : live ? "hug" : "inline"}
         data-dama-smart-frame=""
+        data-skip-hide-on-scroll=""
         onDoubleClickCapture={onDoubleClick}
         onPointerUp={onPointerUp}
         onClickCapture={(e) => {
@@ -395,7 +430,7 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
               ? // Opaque card only around seats+square so the pop covers the header cleanly.
                 "pointer-events-auto mx-auto h-auto min-h-0 w-full max-w-full overflow-hidden bg-[var(--dama-card)]"
               : live
-                ? "h-auto overflow-visible"
+                ? "h-auto overflow-hidden"
                 : "h-full flex-1 overflow-hidden",
           )}
         >
@@ -410,9 +445,14 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       ref={wrapRef}
       className={cn(
         className,
-        live && "relative max-lg:!overflow-visible",
+        // Never force overflow-visible here - MaximizeFab portals to body; visible overflow
+        // let board pan/orbit rubber-band the sticky/fixed top header on iOS.
+        // touch-none (not touch-pan-x): pan-x left vertical gestures free to rubber-band
+        // the sticky/fixed top header on iOS while orbiting / dragging the board.
+        "overflow-hidden overscroll-none max-lg:touch-none",
         // Kill parent 52svh max-height when smart is live (idle letterbox source).
         // Minimized: !h-auto hug. Expanded: spacer via CSS var (!important-safe).
+        // Idle/shimmer (not live): keep caller height (full-column shimmer must stick).
         live && !topped && "max-lg:!h-auto max-lg:!max-h-none max-lg:!min-h-0 max-lg:shrink-0",
         topped &&
           "max-lg:!h-[var(--dama-smart-spacer,auto)] max-lg:!max-h-[var(--dama-smart-spacer,none)] max-lg:!min-h-0 max-lg:shrink-0",

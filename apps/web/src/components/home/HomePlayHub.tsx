@@ -65,6 +65,7 @@ import { PLAY_SESSION_EVENT, readStoredPlaySession } from "@/lib/play-session-st
 import {
   mobilePlayBoardColumnClass,
   mobilePlayBoardMaxHeightClass,
+  mobilePlayBoardShimmerHeightClass,
   playHubFillHeightClass,
   playRailImmersiveChatFillClass,
   playRailPanelSlotClass,
@@ -304,8 +305,16 @@ export function HomePlayHub({
   const [newSub, setNewSub] = useState<NewSub>("ai");
   const [challengeOpponent, setChallengeOpponent] = useState<ChallengeOpponent | null>(null);
   const [boardView, setBoardView] = useBoardViewMode();
+  /** Idle 3D WebGL first paint - false keeps full-column host (no 52svh board-only stamp). */
+  const [preview3dPainted, setPreview3dPainted] = useState(false);
   const [piecePalette] = usePiecePalette();
   const [colorsOpen, setColorsOpen] = useState(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset paint gate on view flip only
+  useEffect(() => {
+    // Switching 2D↔3D must re-enter full-column host until the new plane paints.
+    setPreview3dPainted(false);
+  }, [boardView]);
   /** Center tournaments grid (not a rail tab). */
   const [showTournaments, setShowTournaments] = useState(false);
   const router = useRouter();
@@ -1049,10 +1058,26 @@ export function HomePlayHub({
       ? (live?.opponentSeatClock ?? live?.seatClock)
       : clockLabel || undefined;
     const bottomClock = liveActive ? live?.seatClock : clockLabel || undefined;
-    // Live boot without seat names yet: full column skeleton (never bare board = old flash).
+    // Live boot / board plane still skeleton: full column shimmer (never hug 52svh stamp).
     const liveBoardPending =
       liveActive &&
-      Boolean(live?.bootstrapping || live?.busy || live?.phase === "menu" || !live?.game);
+      Boolean(
+        live?.bootstrapping ||
+          live?.busy ||
+          live?.phase === "menu" ||
+          !live?.game ||
+          live?.boardHydrating,
+      );
+    // Non-playing 3D: empty board OR WebGL not painted yet → full column host.
+    // Never leave BoardAreaSkeleton alone inside the idle 52svh stamp.
+    const idlePreviewEmpty =
+      !liveActive && !centerBrowse && boardView !== "2d" && previewBoard.length === 0;
+    const idle3dHydrating = !liveActive && !centerBrowse && boardView !== "2d" && !preview3dPainted;
+    // Live 3D still painting: full-column HEIGHT only (keep real seats + Scene3D mounted).
+    const live3dHydrating =
+      liveActive && boardView !== "2d" && live?.boardPlaneReady === false && Boolean(live?.game);
+    const fullColumnShimmer = liveBoardPending || idlePreviewEmpty;
+    const fullColumnHost = fullColumnShimmer || idle3dHydrating || live3dHydrating;
 
     const isPlayBoard = !centerBrowse;
 
@@ -1273,19 +1298,26 @@ export function HomePlayHub({
           <SmartBoardHost
             // Same smart maximize / FAB / pop flow for idle preview and live play.
             // Lobby visible OR embedded live: keep-alive hidden surfaces must not portal FABs.
-            active={isPlayBoard && (lobbySurfaceVisible || liveActive)}
+            // Pending full-column shimmer / 3D hydrate must stay budget-sized (hug = stamp).
+            active={isPlayBoard && (lobbySurfaceVisible || liveActive) && !fullColumnHost}
             // Re-pop on lobby enter + match start (even if shell stayed active+minimized).
             popSignal={Boolean(liveActive || lobbySurfaceVisible)}
             className={cn(
-              // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
-              "dama-home-board-enter order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:order-none",
+              // Always overflow-hidden on phone: MaximizeFab portals to body - overflow-visible
+              // was only letting board gestures rubber-band the top header.
+              "dama-home-board-enter order-1 flex min-h-0 min-w-0 flex-col overflow-hidden overscroll-none lg:order-none",
               centerBrowse
                 ? "justify-start pt-1"
-                : // Phone/tablet: definite height budget while collapsed; smart hug overrides when live.
-                  cn(
-                    mobilePlayBoardMaxHeightClass,
-                    "lg:h-full lg:min-h-0 lg:flex-1 lg:justify-center",
-                  ),
+                : fullColumnHost
+                  ? // Full seats+board column while shimmering / 3D hydrating - never 52svh stamp.
+                    cn(
+                      mobilePlayBoardShimmerHeightClass,
+                      "lg:h-full lg:min-h-0 lg:flex-1 lg:justify-center",
+                    )
+                  : cn(
+                      mobilePlayBoardMaxHeightClass,
+                      "lg:h-full lg:min-h-0 lg:flex-1 lg:justify-center",
+                    ),
             )}
           >
             {centerBrowse ? (
@@ -1294,9 +1326,11 @@ export function HomePlayHub({
                 onOpenOfficialLobby={(id) => cupLobby.openWith(id)}
                 localEnrolledIds={localEnrolledIds}
               />
-            ) : liveBoardPending ? (
+            ) : fullColumnShimmer ? (
               <BoardColumnSkeleton showTopTrailing bottomClockActive={false} />
             ) : (
+              // idle3dHydrating uses fullColumnHost height above + visible Scene3D here
+              // (offscreen WebGL often never paints → infinite shimmer).
               <PlayBoardColumn
                 desktopHeader={
                   topLabel ? (
@@ -1380,6 +1414,7 @@ export function HomePlayHub({
                       moveHistory={[]}
                       yourPlayer={1}
                       replayMode
+                      onPaintReady={setPreview3dPainted}
                     />
                   ) : (
                     <BoardAreaSkeleton />

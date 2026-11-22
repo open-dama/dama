@@ -12,6 +12,7 @@ const buttonVariants = cva(
         default:
           "bg-[var(--dama-cta-bg)] text-[var(--dama-cta-fg)] hover:bg-[var(--dama-cta-bg-hover)]",
         gold: "bg-[var(--dama-cta-bg)] text-[var(--dama-cta-fg)] hover:bg-[var(--dama-cta-bg-hover)] font-semibold",
+        play: "bg-[var(--dama-brand)] text-white hover:bg-[var(--dama-brand-end)] font-semibold",
         brand:
           "bg-[image:var(--dama-brand-gradient)] text-white hover:brightness-110 font-semibold",
         outline:

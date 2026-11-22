@@ -3,22 +3,27 @@
 import { PlayRailAside } from "@/components/play-rail/PlayRailAside";
 import { PlayRailScrollPort } from "@/components/play-rail/PlayRailScrollPort";
 import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
-import { playRailStickyMainClass } from "@/lib/player-shell-ui";
+import { BoardStackLayoutContext } from "@/components/play/board-stack-layout";
+import { mobilePlayBoardShimmerHeightClass, playRailStickyMainClass } from "@/lib/player-shell-ui";
 import { cn } from "@/lib/utils";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
-function ShimmerBlock({ className }: { className?: string }) {
-  return <div className={cn("dama-shimmer", className)} aria-hidden />;
+function ShimmerBlock({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return <div className={cn("dama-shimmer", className)} style={style} aria-hidden />;
 }
 
-/** Live dama board is 10×10 - keep shimmer plane in sync. */
-const BOARD_SKELETON_SIZE = 10;
-
 /**
- * Checkerboard plane for a sized board slot (PlayBoardColumn square).
- * Flush to the plane (no outer border/pad) - matches live 2D/3D board surface.
- * Never use a solid block here - that was the “old” shimmer flash.
+ * Original product shimmer (pre board-dark flush tint): 8×8 card shell.
+ * Cells = `.dama-shimmer` track only - never `--dama-board-dark` / board palette.
  */
+const BOARD_SKELETON_SIZE = 8;
+
 const BOARD_SKELETON_CELLS: { row: number; col: number }[] = (() => {
   const cells: { row: number; col: number }[] = [];
   for (let row = 0; row < BOARD_SKELETON_SIZE; row += 1) {
@@ -31,18 +36,22 @@ const BOARD_SKELETON_CELLS: { row: number; col: number }[] = (() => {
 
 export function BoardAreaSkeleton() {
   return (
-    <div className="h-full w-full min-h-0 overflow-hidden bg-[var(--dama-board-dark)]" aria-hidden>
+    <div
+      className="h-full w-full min-h-0 overflow-hidden rounded-sm border border-[var(--dama-border)] bg-[var(--dama-card)] p-1"
+      aria-hidden
+    >
       <div
-        className="grid h-full w-full"
+        className="grid h-full w-full gap-0.5"
         style={{ gridTemplateColumns: `repeat(${BOARD_SKELETON_SIZE}, 1fr)` }}
       >
         {BOARD_SKELETON_CELLS.map((cell) => (
           <ShimmerBlock
             key={`${cell.row}-${cell.col}`}
             className={cn(
-              "h-full w-full min-h-0",
-              (cell.row + cell.col) % 2 === 1 ? "opacity-90" : "opacity-50",
+              "h-full w-full min-h-0 rounded-[1px]",
+              (cell.row + cell.col) % 2 === 1 ? "opacity-90" : "opacity-55",
             )}
+            style={{ borderRadius: 1 }}
           />
         ))}
       </div>
@@ -88,8 +97,10 @@ export function BoardPlaneLoading() {
 }
 
 /**
- * Chess.com board column shimmer: flush top seat + square board + bottom seat.
- * Uses PlayBoardColumn so budget/hug follows SmartBoardHost (live hug, idle 52svh).
+ * Chess.com board column shimmer: top seat + square board + bottom seat.
+ * Hosts that show this MUST use mobilePlayBoardShimmerHeightClass (not 52svh).
+ * This wrapper is h-full only - absolute viewport height on the child was clipped
+ * by overflow:hidden parents into a board-only stamp.
  */
 export function BoardColumnSkeleton({
   showTopTrailing = true,
@@ -99,11 +110,15 @@ export function BoardColumnSkeleton({
   bottomClockActive?: boolean;
 }) {
   return (
-    <PlayBoardColumn
-      header={<BoardSeatBarSkeleton showTrailing={showTopTrailing} clockActive={false} />}
-      footer={<BoardSeatBarSkeleton clockActive={bottomClockActive} />}
-      board={<BoardAreaSkeleton />}
-    />
+    <BoardStackLayoutContext.Provider value="budget">
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
+        <PlayBoardColumn
+          header={<BoardSeatBarSkeleton showTrailing={showTopTrailing} clockActive={false} />}
+          footer={<BoardSeatBarSkeleton clockActive={bottomClockActive} />}
+          board={<BoardAreaSkeleton />}
+        />
+      </div>
+    </BoardStackLayoutContext.Provider>
   );
 }
 
@@ -131,7 +146,7 @@ function PlayHubRailSkeleton() {
   );
 }
 
-/** Home / live / spectate hub: Chess.com column (flush seats) + scrollable rail. */
+/** Home / live / spectate hub: full column (seats + board) + scrollable rail. */
 export function PlayHubSkeleton() {
   return (
     <div
@@ -140,9 +155,9 @@ export function PlayHubSkeleton() {
     >
       <div
         className={cn(
-          "order-1 flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full lg:flex-1 lg:justify-center lg:order-none",
-          // Keep in sync with mobilePlayBoardMaxHeightClass (home / live / spectate).
-          "max-lg:h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:max-h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden",
+          "order-1 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-lg:w-full max-lg:justify-start lg:h-full lg:justify-center lg:order-none",
+          mobilePlayBoardShimmerHeightClass,
+          "lg:!h-full lg:!max-h-none lg:min-h-0",
         )}
       >
         <BoardColumnSkeleton showTopTrailing bottomClockActive />

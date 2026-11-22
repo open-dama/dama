@@ -257,7 +257,7 @@ export function PlayBoardColumn({
           {/* Playing surface only - smart-board toggle must NOT bind here. */}
           <div
             data-dama-board-plane=""
-            className="relative w-full max-w-full shrink-0 overflow-hidden"
+            className="relative w-full max-w-full shrink-0 overflow-hidden overscroll-none touch-none"
             style={
               ready
                 ? hug && maxLg

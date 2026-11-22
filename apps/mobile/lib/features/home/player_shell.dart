@@ -7,6 +7,7 @@ import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/prefs/play_session_store.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/types.dart';
+import 'package:dama_mobile/core/ui/collapsible_bottom_nav_fab.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:dama_mobile/features/ads/publisher_shell.dart';
 import 'package:dama_mobile/features/auth/auth_cubit.dart';
@@ -652,7 +653,7 @@ class _PlayerShellState extends State<PlayerShell> {
                         )
                       : Scaffold(
                           body: body,
-                          bottomNavigationBar: NavigationBar(
+                          bottomNavigationBar: CollapsibleBottomNavFab(
                             selectedIndex: idx,
                             onDestinationSelected: _onDestinationSelected,
                             destinations: [

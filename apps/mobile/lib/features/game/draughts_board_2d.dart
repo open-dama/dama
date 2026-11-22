@@ -5,6 +5,7 @@ import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/board_square.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/game.dart';
+import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:dama_mobile/features/game/palace_piece.dart';
 import 'package:flutter/material.dart';
 
@@ -84,18 +85,16 @@ class _ActiveAnim {
 }
 
 class _DraughtsBoard2DState extends State<DraughtsBoard2D>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const _pickPhaseEnd = 0.24;
   static const _holdPhaseEnd = 0.34;
   static const _landPhaseStart = 0.72;
-  static const _moveDurationMinMs = 720;
-  static const _captureDurationMinMs = 920;
-  static const _durationPerSquareMs = 160;
-  static const _moveDurationMaxMs = 1650;
-  static const _opponentMoveMinMs = 340;
-  static const _opponentCaptureMinMs = 440;
-  static const _opponentPerSquareMs = 90;
-  static const _opponentMaxMs = 820;
+  /** Snappy product timing (web/3D parity) - same for own + opponent. */
+  static const _moveDurationMinMs = 340;
+  static const _captureDurationMinMs = 440;
+  static const _durationPerSquareMs = 90;
+  static const _moveDurationMaxMs = 820;
+  static const _stallGraceMs = 250;
 
   late final AnimationController _anim;
   late final AnimationController _shakeCtrl;
@@ -105,10 +104,13 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
   final List<_ActiveAnim> _queue = [];
   int _prevHistoryLen = 0;
   bool _holdSync = false;
+  Timer? _stallWatch;
+  bool _finishQueued = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _renderBoard = _cloneBoard(widget.board);
     _prevHistoryLen = widget.moveHistory.length;
     _anim = AnimationController(
@@ -145,16 +147,13 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
+          if (_finishQueued) return;
+          _finishQueued = true;
           try {
             _finishAndAdvance();
           } catch (_) {
             // Never leave the board frozen after a land commit error.
-            setState(() {
-              _active = null;
-              _progress = 0;
-              _holdSync = false;
-              _queue.clear();
-            });
+            _forceRecoverStall();
           }
         }
       });
@@ -164,8 +163,59 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     );
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Web tab-hidden freeze: pause flight clock so resume does not fast-forward.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      if (_anim.isAnimating) _anim.stop(canceled: false);
+    } else if (state == AppLifecycleState.resumed) {
+      if (_active != null && !_anim.isAnimating && _anim.value < 1) {
+        _anim.forward();
+      }
+    }
+  }
+
+  void _cancelStallWatch() {
+    _stallWatch?.cancel();
+    _stallWatch = null;
+  }
+
+  void _armStallWatch(int durationMs) {
+    _cancelStallWatch();
+    _stallWatch = Timer(
+      Duration(milliseconds: durationMs + _stallGraceMs),
+      () {
+        if (!mounted) return;
+        // Still ticking (or lifecycle-paused mid-flight) - wait another grace.
+        if (_anim.isAnimating) {
+          _armStallWatch(_stallGraceMs);
+          return;
+        }
+        // finishQueued / holdSync stuck mid-game - force recover (web 250ms parity).
+        if (_active != null || _holdSync || _finishQueued) {
+          _forceRecoverStall();
+        }
+      },
+    );
+  }
+
+  void _forceRecoverStall() {
+    _cancelStallWatch();
+    _finishQueued = false;
+    _anim.stop();
+    setState(() {
+      _active = null;
+      _progress = 0;
+      _holdSync = false;
+      _queue.clear();
+    });
+  }
+
   void _startNext() {
     if (_queue.isEmpty) {
+      _cancelStallWatch();
+      _finishQueued = false;
       setState(() {
         _active = null;
         _progress = 0;
@@ -177,22 +227,20 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     final dr = (next.toR - next.fromR).toDouble();
     final dc = (next.toC - next.fromC).toDouble();
     final dist = math.sqrt(dr * dr + dc * dc);
-    final yours = widget.yourPlayer;
-    final opponentFast = yours != null && next.player != yours;
-    final base = next.isCapture
-        ? (opponentFast ? _opponentCaptureMinMs : _captureDurationMinMs)
-        : (opponentFast ? _opponentMoveMinMs : _moveDurationMinMs);
-    final perSq = opponentFast ? _opponentPerSquareMs : _durationPerSquareMs;
-    final maxMs = opponentFast ? _opponentMaxMs : _moveDurationMaxMs;
-    final minMs = opponentFast
-        ? (next.isCapture ? _opponentCaptureMinMs : _opponentMoveMinMs)
-        : (next.isCapture ? _captureDurationMinMs : _moveDurationMinMs);
-    final ms = (base + dist * perSq).clamp(minMs, maxMs).round();
+    final base = next.isCapture ? _captureDurationMinMs : _moveDurationMinMs;
+    final ms = (base + dist * _durationPerSquareMs)
+        .clamp(
+          next.isCapture ? _captureDurationMinMs : _moveDurationMinMs,
+          _moveDurationMaxMs,
+        )
+        .round();
+    _finishQueued = false;
     setState(() {
       _active = next;
       _progress = 0;
     });
     _anim.duration = Duration(milliseconds: ms);
+    _armStallWatch(ms);
     _anim.forward(from: 0);
   }
 
@@ -222,9 +270,11 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     }
     _active = null;
     _progress = 0;
+    _finishQueued = false;
     if (_queue.isNotEmpty) {
       _startNext();
     } else {
+      _cancelStallWatch();
       setState(() => _holdSync = false);
     }
   }
@@ -393,6 +443,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cancelStallWatch();
     _anim.dispose();
     _shakeCtrl.dispose();
     super.dispose();
@@ -473,23 +525,24 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     return t < 0.5 ? 4 * t * t * t : 1 - math.pow(-2 * t + 2, 3).toDouble() / 2;
   }
 
+  /// Match 3D piece lift scale (1.035) - larger 2D scale caused pick/put wobble.
   double _flyScale(double progress) {
     if (progress < _pickPhaseEnd) {
       final t = progress / _pickPhaseEnd;
       final ease = t * t * (3 - 2 * t);
-      return 1 + ease * 0.08;
+      return 1 + ease * 0.035;
     }
-    if (progress < _landPhaseStart) return 1.08;
+    if (progress < _landPhaseStart) return 1.035;
     final t = (progress - _landPhaseStart) / (1 - _landPhaseStart);
     final ease = t * t * (3 - 2 * t);
-    return 1.08 - ease * 0.08;
+    return 1.035 - ease * 0.035;
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = damaColorsOf(context);
     final size = widget.boardSize;
-    if (size <= 0) return const SizedBox.shrink();
+    if (size <= 0) return const BoardAreaSkeleton();
 
     final display = (_holdSync || _active != null || _queue.isNotEmpty)
         ? _renderBoard
@@ -521,6 +574,7 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                   math.min(constraints.maxWidth, constraints.maxHeight);
               final cell = side / size;
               final active = _active;
+              // Match resting FractionallySizedBox 0.98 of cell (pick→put size stable).
               final piece = cell * 0.98;
               // Fly overlay only - avoids rebuilding the full 10×10 grid every frame.
               final Widget? fly = active == null
@@ -614,8 +668,13 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                           isLast ||
                           (widget.selectedRow == null && origins.contains(key));
                       final hidePiece = hidden.contains(key);
+                      // 3D/web parity: only lock own piece while still in the air.
+                      final ownAirLocked = _active != null &&
+                          widget.yourPlayer != null &&
+                          _active!.player == widget.yourPlayer &&
+                          !_active!.boardApplied;
                       final canTap =
-                          widget.interactive && dark && _active == null;
+                          widget.interactive && dark && !ownAirLocked;
                       final hi = tokens.boardSelected;
                       final lastHi = tokens.lastMove;
                       final disc = Color.lerp(hi, Colors.white, 0.45) ?? hi;
@@ -681,7 +740,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                                     border: Colors.transparent,
                                     borderWidth: 0,
                                     glow: selected || must ? hi : null,
-                                    scale: selected || must ? 1.1 : 1.0,
+                                    // No CSS/Flutter scale on select - 3D uses mesh cue only (web parity).
+                                    scale: 1.0,
                                   ),
                                 ),
                             ],

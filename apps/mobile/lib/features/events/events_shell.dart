@@ -5,7 +5,7 @@ import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/theme/theme_toggle_button.dart';
 import 'package:dama_mobile/core/types/types.dart';
-import 'package:dama_mobile/core/ui/scrollable_portal_bottom_nav.dart';
+import 'package:dama_mobile/core/ui/collapsible_bottom_nav_fab.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:dama_mobile/features/events/analytics_page.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
@@ -348,7 +348,7 @@ class _EventsShellState extends State<EventsShell> {
           for (final tab in _tabs) _pageFor(tab.routeKey),
         ],
       ),
-      bottomNavigationBar: ScrollablePortalBottomNav(
+      bottomNavigationBar: CollapsibleBottomNavFab(
         selectedIndex: selected,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: [

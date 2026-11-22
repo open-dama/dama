@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/select";
 import {
   BoardAreaSkeleton,
-  BoardSeatBarSkeleton,
+  BoardColumnSkeleton,
   FormCardSkeleton,
   PlayHubSkeleton,
   ShimmerBlock,
@@ -107,6 +107,7 @@ import {
 import {
   mobilePlayBoardColumnClass,
   mobilePlayBoardMaxHeightClass,
+  mobilePlayBoardShimmerHeightClass,
   mobilePlayBoardStandaloneHeightClass,
   playHubDesktopHeightClass,
   playHubFillHeightClass,
@@ -294,6 +295,10 @@ export type LivePlayEmbedApi = {
   game: GamePayload | null;
   busy: boolean;
   bootstrapping: boolean;
+  /** True while the board plane is still a skeleton (full-column shimmer required). */
+  boardHydrating?: boolean;
+  /** False while 3D WebGL has not painted - keep full-column host height (not 52svh stamp). */
+  boardPlaneReady?: boolean;
   yourName: string;
   opponentName: string;
   /** Seat hover card player (avatar+name); null when no public id (e.g. AI). */
@@ -430,6 +435,8 @@ export function LivePlayHub({
   const progressionQuery = useProgressionQuery();
   const boardRulesQuery = useBoardRulesQuery();
   const [boardView, setBoardView] = useBoardViewMode();
+  /** 3D WebGL first paint - false keeps full-column host (never 52svh plane shimmer stamp). */
+  const [boardPlaneReady, setBoardPlaneReady] = useState(boardView === "2d");
   /** Manual flip overrides seat-based orientation (Chess.com flip control). */
   const [flipManual, setFlipManual] = useState<boolean | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
@@ -444,6 +451,12 @@ export function LivePlayHub({
     setImmersiveChat(watchTab === "chat");
     return () => setImmersiveChat(false);
   }, [watchTab, setImmersiveChat]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset paint gate on view/game flip
+  useEffect(() => {
+    setBoardPlaneReady(boardView === "2d");
+  }, [boardView, gameIdParam]);
+
   const [matchIntroActive, setMatchIntroActive] = useState(false);
   const [matchResultActive, setMatchResultActive] = useState(false);
   const matchIntroSeenRef = useRef<string | null>(null);
@@ -1699,6 +1712,7 @@ export function LivePlayHub({
             game: null,
             busy: true,
             bootstrapping: true,
+            boardHydrating: true,
             yourName: "",
             opponentName: "",
             yourTurnHint: "",
@@ -1762,6 +1776,7 @@ export function LivePlayHub({
             game: null,
             busy: true,
             bootstrapping: true,
+            boardHydrating: true,
             yourName: "",
             opponentName: "",
             yourTurnHint: "",
@@ -1951,6 +1966,9 @@ export function LivePlayHub({
         !game &&
         !flagsQuery.isLoading,
     );
+  /** 3D canvas still covering with BoardAreaSkeleton under a 52svh host = stamp. */
+  const boardPlaneHydrating =
+    boardView === "3d" && Boolean(displayBoard && displayBoard.length > 0) && !boardPlaneReady;
 
   // Standalone only: keep the SAME PlayHubSkeleton until a real board can paint.
   // Swapping PlayHubSkeleton → BoardColumnSkeleton remounted the column at a new size (old→new flash).
@@ -2101,6 +2119,7 @@ export function LivePlayHub({
             onPlyAnimated={
               replayIndex == null && phase === "playing" ? handlePlyAnimated : undefined
             }
+            onPaintReady={setBoardPlaneReady}
           />
         )}
         {phase === "playing" && showMoveHighlights && game.must_continue ? (
@@ -2113,6 +2132,8 @@ export function LivePlayHub({
         ) : null}
       </div>
     ) : showBoardSkeleton ? (
+      // Standalone host swaps the whole column to BoardColumnSkeleton; embedded
+      // HomePlayHub uses boardHydrating → full BoardColumnSkeleton (never this stamp alone).
       <BoardAreaSkeleton />
     ) : (
       <div className="flex aspect-square w-full items-center justify-center border border-dashed border-[var(--dama-border)] bg-[var(--dama-card)]">
@@ -2398,6 +2419,8 @@ export function LivePlayHub({
           game,
           busy,
           bootstrapping: practiceBootstrapping || startGameMutation.isPending,
+          boardHydrating: showBoardSkeleton,
+          boardPlaneReady: boardView === "2d" || boardPlaneReady,
           yourName,
           opponentName,
           yourHoverPlayer,
@@ -2484,89 +2507,92 @@ export function LivePlayHub({
       <SmartBoardHost
         // Menu / finished / playing - same maximize FAB + pop flow as home idle.
         // Gate on surfaceActive so keep-alive hidden hubs do not portal a second FAB.
-        active={surfaceActive}
+        // Skeleton stays budget/full-column (never hug stamp while seats+board shimmer).
+        active={surfaceActive && !showBoardSkeleton && !boardPlaneHydrating}
         // Rising edge only on match start (surface enter already pops via `active`).
         popSignal={surfaceActive && phase === "playing"}
         className={cn(
-          // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
-          "order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:flex-1 lg:justify-center",
-          mobilePlayBoardMaxHeightClass,
+          // Always overflow-hidden: FAB is body-portaled; overflow-visible was rubber-banding the header.
+          "order-1 flex min-h-0 min-w-0 flex-col overflow-hidden overscroll-none lg:flex-1 lg:justify-center",
+          showBoardSkeleton || boardPlaneHydrating
+            ? cn(mobilePlayBoardShimmerHeightClass, "lg:h-full lg:min-h-0")
+            : mobilePlayBoardMaxHeightClass,
         )}
       >
         <FetchProgressBar active={busy || startGameMutation.isPending} />
-        <PlayBoardColumn
-          desktopHeader={
-            game && phase !== "menu" ? (
-              <BoardSeatBar
-                label={opponentName}
-                hint={oppTurnHint}
-                rating={game?.mode === "pvp" ? oppPlayerQuery.data?.player?.rating : undefined}
-                ratingParenOpen={railChrome?.rating_paren_open}
-                ratingParenClose={railChrome?.rating_paren_close}
-                clock={opponentSeatClock}
-                tone="muted"
-                clockActive={opponentClockActive}
-                pieceSide={yourPlayer === 2 ? "light" : "dark"}
-                avatarThumbUrl={
-                  game?.mode === "pvp" ? oppPlayerQuery.data?.player?.avatar_thumb_url : undefined
-                }
-                countryCode={
-                  game?.mode === "pvp" ? oppPlayerQuery.data?.player?.country_code : undefined
-                }
-                captures={
-                  game && (phase === "playing" || phase === "finished")
-                    ? opponentCaptures
-                    : undefined
-                }
-                online={game?.mode === "pvp" ? oppPlayerQuery.data?.player?.online : undefined}
-                playing={
-                  game?.mode === "pvp"
-                    ? (oppPlayerQuery.data?.player?.playing ??
-                      (phase === "playing" && Boolean(oppSeatId) ? true : undefined))
-                    : undefined
-                }
-                trailing={boardViewToggle}
-                hoverPlayer={opponentHoverPlayer}
-                railChrome={railChrome}
-                signedIn={isAccount}
-              />
-            ) : showBoardSkeleton ? (
-              <BoardSeatBarSkeleton showTrailing clockActive={false} />
-            ) : null
-          }
-          desktopFooter={
-            game && phase !== "menu" ? (
-              <BoardSeatBar
-                label={yourName}
-                hint={yourTurnHint || undefined}
-                rating={youPlayerQuery.data?.player?.rating}
-                ratingParenOpen={railChrome?.rating_paren_open}
-                ratingParenClose={railChrome?.rating_paren_close}
-                clock={seatClock}
-                tone="muted"
-                clockActive={yourClockActive}
-                pieceSide={yourPlayer === 2 ? "dark" : "light"}
-                avatarThumbUrl={youPlayerQuery.data?.player?.avatar_thumb_url}
-                countryCode={youPlayerQuery.data?.player?.country_code}
-                captures={
-                  game && (phase === "playing" || phase === "finished") ? yourCaptures : undefined
-                }
-                online={youPlayerQuery.data?.player?.online}
-                playing={
-                  youPlayerQuery.data?.player?.playing ??
-                  (phase === "playing" && Boolean(youSeatId) ? true : undefined)
-                }
-                hoverPlayer={yourHoverPlayer}
-                railChrome={railChrome}
-                signedIn={isAccount}
-              />
-            ) : showBoardSkeleton ? (
-              <BoardSeatBarSkeleton clockActive={false} />
-            ) : null
-          }
-          board={boardNode}
-          coverOverlay={boardCoverOverlay}
-        />
+        {showBoardSkeleton ? (
+          <BoardColumnSkeleton showTopTrailing bottomClockActive={false} />
+        ) : (
+          <PlayBoardColumn
+            desktopHeader={
+              game && phase !== "menu" ? (
+                <BoardSeatBar
+                  label={opponentName}
+                  hint={oppTurnHint}
+                  rating={game?.mode === "pvp" ? oppPlayerQuery.data?.player?.rating : undefined}
+                  ratingParenOpen={railChrome?.rating_paren_open}
+                  ratingParenClose={railChrome?.rating_paren_close}
+                  clock={opponentSeatClock}
+                  tone="muted"
+                  clockActive={opponentClockActive}
+                  pieceSide={yourPlayer === 2 ? "light" : "dark"}
+                  avatarThumbUrl={
+                    game?.mode === "pvp" ? oppPlayerQuery.data?.player?.avatar_thumb_url : undefined
+                  }
+                  countryCode={
+                    game?.mode === "pvp" ? oppPlayerQuery.data?.player?.country_code : undefined
+                  }
+                  captures={
+                    game && (phase === "playing" || phase === "finished")
+                      ? opponentCaptures
+                      : undefined
+                  }
+                  online={game?.mode === "pvp" ? oppPlayerQuery.data?.player?.online : undefined}
+                  playing={
+                    game?.mode === "pvp"
+                      ? (oppPlayerQuery.data?.player?.playing ??
+                        (phase === "playing" && Boolean(oppSeatId) ? true : undefined))
+                      : undefined
+                  }
+                  trailing={boardViewToggle}
+                  hoverPlayer={opponentHoverPlayer}
+                  railChrome={railChrome}
+                  signedIn={isAccount}
+                />
+              ) : null
+            }
+            desktopFooter={
+              game && phase !== "menu" ? (
+                <BoardSeatBar
+                  label={yourName}
+                  hint={yourTurnHint || undefined}
+                  rating={youPlayerQuery.data?.player?.rating}
+                  ratingParenOpen={railChrome?.rating_paren_open}
+                  ratingParenClose={railChrome?.rating_paren_close}
+                  clock={seatClock}
+                  tone="muted"
+                  clockActive={yourClockActive}
+                  pieceSide={yourPlayer === 2 ? "dark" : "light"}
+                  avatarThumbUrl={youPlayerQuery.data?.player?.avatar_thumb_url}
+                  countryCode={youPlayerQuery.data?.player?.country_code}
+                  captures={
+                    game && (phase === "playing" || phase === "finished") ? yourCaptures : undefined
+                  }
+                  online={youPlayerQuery.data?.player?.online}
+                  playing={
+                    youPlayerQuery.data?.player?.playing ??
+                    (phase === "playing" && Boolean(youSeatId) ? true : undefined)
+                  }
+                  hoverPlayer={yourHoverPlayer}
+                  railChrome={railChrome}
+                  signedIn={isAccount}
+                />
+              ) : null
+            }
+            board={boardNode}
+            coverOverlay={boardCoverOverlay}
+          />
+        )}
       </SmartBoardHost>
 
       {/* lg+: frozen chrome. max-lg: tabs scroll with the rail body. */}

@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { ShimmerBlock } from "@/components/ui/shimmer-skeletons";
 import { useClientNavFullQuery } from "@/hooks/query/useClientNavFullQuery";
 import { useDetectBrowserCountryQuery } from "@/hooks/query/useDetectBrowserCountryQuery";
@@ -22,6 +23,7 @@ import {
   resolvePlayerNavHref,
 } from "@/lib/player-nav";
 import { DAMA_BOTTOM_NAV_HEIGHT_VAR, DAMA_BOTTOM_PAD_EXTRA_VAR } from "@/lib/player-shell-ui";
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 import { useShellChromeStore } from "@/store/shell-chrome";
 import {
@@ -42,6 +44,7 @@ import {
   type LucideIcon,
   Medal,
   Megaphone,
+  Menu,
   Play,
   PlusCircle,
   Receipt,
@@ -50,6 +53,7 @@ import {
   User,
   Users,
   Wallet,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -101,56 +105,17 @@ function iconForRouteKey(routeKey: string): LucideIcon {
   return ROUTE_ICONS[routeKey] ?? Home;
 }
 
-const navShellClass =
-  "fixed inset-x-0 bottom-0 z-40 border-t border-[var(--dama-border)]/50 bg-[var(--dama-card)]/75 shadow-[0_-12px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[var(--dama-card)]/55 md:hidden";
-
-function BottomNavSkeleton({
-  navRef,
-  scrollable,
-}: {
-  navRef: RefObject<HTMLElement | null>;
-  /** Ads / events: horizontal scroll chips (many items). Player: equal flex tabs. */
-  scrollable: boolean;
-}) {
-  return (
-    <nav
-      ref={navRef}
-      className={navShellClass}
-      style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
-      aria-hidden
-    >
-      <div
-        className={
-          scrollable
-            ? "mx-auto flex min-h-16 max-w-full items-stretch gap-1 overflow-x-auto overscroll-x-contain px-2 pt-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            : "mx-auto flex min-h-16 w-full max-w-full items-stretch gap-1 px-2 pt-1.5"
-        }
-      >
-        {(["bn-sk-0", "bn-sk-1", "bn-sk-2", "bn-sk-3", "bn-sk-4"] as const).map((id) => (
-          <div
-            key={id}
-            className={
-              scrollable
-                ? "flex w-auto shrink-0 flex-col items-center justify-center gap-1 px-2.5 py-1.5"
-                : "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-1.5"
-            }
-          >
-            <ShimmerBlock className="h-6 w-6 rounded-md" />
-            <ShimmerBlock className="h-2 w-10 rounded" />
-          </div>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-/** Fixed mobile bottom nav from client_nav.bottom_nav (+ play Continue/Playing resume). */
+/**
+ * Mobile bottom nav: collapsed brand FAB (play-button styling) by default.
+ * Tap expands menu chips left → right; tap again / outside collapses.
+ */
 export function BottomNavBar({ surface }: BottomNavBarProps) {
   const pathname = usePathname() || "";
   const searchParams = useSearchParams();
   const view = searchParams.get("view");
   const mode = searchParams.get("mode");
   const gameId = searchParams.get("gameId") || searchParams.get("game_id");
+  const shellRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const token = useAuthStore((s) => s.token);
   const navQuery = useClientNavFullQuery(true);
@@ -184,6 +149,7 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
   const [storedMode, setStoredMode] = useState<string | null>(null);
   const [storedPhase, setStoredPhase] = useState<"playing" | "finished" | null>(null);
   const [storedPaused, setStoredPaused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const mounted = useClientMounted();
   const immersiveChat = useShellChromeStore((s) => s.immersiveChat);
   usePublishHeightCssVar(navRef, DAMA_BOTTOM_NAV_HEIGHT_VAR, !immersiveChat);
@@ -191,7 +157,6 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (immersiveChat) {
-      // Zero nav height + extra pad so chat composer sits flush (no white band).
       root.style.setProperty(DAMA_BOTTOM_NAV_HEIGHT_VAR, "0px");
       root.style.setProperty(DAMA_BOTTOM_PAD_EXTRA_VAR, "0px");
       return () => {
@@ -224,8 +189,26 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
     };
   }, [pathname]);
 
+  // Collapse on route / query change (home stays `/` when view flips).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional collapse on nav change
+  useEffect(() => {
+    setExpanded(false);
+  }, [pathname, searchParams]);
+
+  // Click / tap outside collapses the tray.
+  useEffect(() => {
+    if (!expanded) return;
+    const onPointer = (event: PointerEvent) => {
+      const root = shellRef.current;
+      if (!root) return;
+      if (event.target instanceof Node && root.contains(event.target)) return;
+      setExpanded(false);
+    };
+    document.addEventListener("pointerdown", onPointer, true);
+    return () => document.removeEventListener("pointerdown", onPointer, true);
+  }, [expanded]);
+
   const onPlayPage = isPlayerPlaySurface(pathname, searchParams);
-  // Leave-board auto-pause lives in LeaveBoardPauseHost (all breakpoints; BottomNav is md:hidden).
   const playNavState =
     onPlayPage && storedPhase === "playing"
       ? ("playing" as const)
@@ -233,105 +216,130 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
         ? ("continue" as const)
         : ("play" as const);
 
-  // Keep a visible shell while mounting / loading / failed - never unmount the bar
-  // (except immersive chat tab, where the composer owns the bottom edge).
   if (immersiveChat) {
     return null;
   }
 
   const showSkeleton =
     !mounted || navQuery.isPending || navQuery.isError || !ready || links.length === 0;
-  // Ads / events dashboards: many items → horizontal scroll + full labels (never truncate).
-  // Player public nav keeps equal flex tabs (untouched).
-  const scrollableSurface = surface === "ads" || surface === "events";
 
-  const node = showSkeleton ? (
-    <BottomNavSkeleton navRef={navRef} scrollable={scrollableSurface} />
-  ) : (
-    <nav
-      ref={navRef}
-      className={navShellClass}
-      style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
+  const node = (
+    <div
+      ref={shellRef}
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 md:hidden"
+      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
     >
-      <div
-        className={
-          scrollableSurface
-            ? "mx-auto flex min-h-16 max-w-full items-stretch gap-1 overflow-x-auto overscroll-x-contain px-2 pt-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            : "mx-auto flex min-h-16 w-full max-w-full items-stretch gap-1 px-2 pt-1.5"
-        }
+      <nav
+        ref={navRef as RefObject<HTMLElement | null>}
+        className="pointer-events-auto flex w-full items-end gap-2 px-3 pb-1 pt-1"
+        aria-label="Primary"
       >
-        {links.map((item) => {
-          const baseHref = resolvePlayerNavHref(item);
-          if (!baseHref) return null;
-          const Icon = iconForRouteKey(item.route_key);
-          const isPlayResume = item.route_key === "play" || item.route_key === "home";
-          const href =
-            isPlayResume && storedGameId && playNavState !== "play"
-              ? buildPlayResumeHref(storedGameId, storedMode || undefined)
-              : baseHref;
-          const active = isPlayerNavActive(pathname, baseHref, view, {
-            mode,
-            gameId,
-            mine: searchParams.get("mine"),
-            create: searchParams.get("create"),
-          });
-          const playingLabel = (playChrome?.nav_playing_label || "").trim();
-          const continueLabel = (playChrome?.nav_continue_label || "").trim();
-          const pausedLabel = (playChrome?.nav_paused_label || "").trim();
-          const label =
-            isPlayResume && storedPaused && pausedLabel
-              ? pausedLabel
-              : isPlayResume && playNavState === "playing" && playingLabel
-                ? playingLabel
-                : isPlayResume && playNavState === "continue" && continueLabel
-                  ? continueLabel
-                  : item.title;
-          const showPulse = isPlayResume && playNavState === "continue" && !onPlayPage;
-          const emphasized = active || (isPlayResume && playNavState === "playing");
-          return (
-            <Link
-              key={`${item.route_key}-${item.href}`}
-              href={href}
-              className={
-                scrollableSurface
-                  ? `relative flex w-auto shrink-0 flex-col items-center justify-center gap-1 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-[11px] font-medium leading-tight tracking-wide transition-colors sm:text-xs ${
-                      emphasized
-                        ? "text-[var(--dama-text)]"
-                        : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]"
-                    }`
-                  : `relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-1.5 text-[11px] font-medium leading-tight tracking-wide transition-colors sm:text-xs ${
-                      emphasized
-                        ? "text-[var(--dama-text)]"
-                        : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]"
-                    }`
-              }
-              aria-label={label}
-              aria-current={active ? "page" : undefined}
-            >
-              <span className="relative">
-                <Icon
-                  className="h-6 w-6 shrink-0"
-                  strokeWidth={emphasized ? 2.25 : 1.75}
-                  aria-hidden
-                />
-                {showPulse ? (
-                  <span
-                    className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[var(--dama-text)] ring-2 ring-[var(--dama-card)]"
-                    aria-hidden
-                  />
-                ) : null}
-              </span>
-              <span className={scrollableSurface ? "px-0.5" : "max-w-full truncate px-0.5"}>
-                {label}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
+        <Button
+          type="button"
+          variant="play"
+          size="icon"
+          className="h-12 w-12 shrink-0 rounded-full shadow-lg"
+          aria-label={expanded ? "Close menu" : "Open menu"}
+          aria-expanded={expanded}
+          aria-controls="dama-bottom-nav-tray"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? (
+            <X className="h-5 w-5" aria-hidden />
+          ) : (
+            <Menu className="h-5 w-5" aria-hidden />
+          )}
+        </Button>
+
+        <div
+          id="dama-bottom-nav-tray"
+          className={cn(
+            "min-w-0 overflow-hidden transition-[max-width,opacity] duration-300 ease-out",
+            expanded ? "max-w-[calc(100vw-4.5rem)] opacity-100" : "max-w-0 opacity-0",
+          )}
+          aria-hidden={!expanded}
+        >
+          <div
+            className={cn(
+              "flex min-h-12 items-stretch gap-0.5 rounded-full border border-[var(--dama-border)]/50 bg-[var(--dama-card)]/80 px-1.5 py-1 shadow-[0_8px_28px_rgba(0,0,0,0.12)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[var(--dama-card)]/60",
+              "overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+            )}
+          >
+            {showSkeleton
+              ? (["bn-sk-0", "bn-sk-1", "bn-sk-2", "bn-sk-3"] as const).map((id) => (
+                  <div
+                    key={id}
+                    className="flex w-auto shrink-0 flex-col items-center justify-center gap-1 px-2.5 py-1"
+                  >
+                    <ShimmerBlock className="h-5 w-5 rounded-md" />
+                    <ShimmerBlock className="h-2 w-8 rounded" />
+                  </div>
+                ))
+              : links.map((item) => {
+                  const baseHref = resolvePlayerNavHref(item);
+                  if (!baseHref) return null;
+                  const Icon = iconForRouteKey(item.route_key);
+                  const isPlayResume = item.route_key === "play" || item.route_key === "home";
+                  const href =
+                    isPlayResume && storedGameId && playNavState !== "play"
+                      ? buildPlayResumeHref(storedGameId, storedMode || undefined)
+                      : baseHref;
+                  const active = isPlayerNavActive(pathname, baseHref, view, {
+                    mode,
+                    gameId,
+                    mine: searchParams.get("mine"),
+                    create: searchParams.get("create"),
+                  });
+                  const playingLabel = (playChrome?.nav_playing_label || "").trim();
+                  const continueLabel = (playChrome?.nav_continue_label || "").trim();
+                  const pausedLabel = (playChrome?.nav_paused_label || "").trim();
+                  const label =
+                    isPlayResume && storedPaused && pausedLabel
+                      ? pausedLabel
+                      : isPlayResume && playNavState === "playing" && playingLabel
+                        ? playingLabel
+                        : isPlayResume && playNavState === "continue" && continueLabel
+                          ? continueLabel
+                          : item.title;
+                  const showPulse = isPlayResume && playNavState === "continue" && !onPlayPage;
+                  const emphasized = active || (isPlayResume && playNavState === "playing");
+                  return (
+                    <Link
+                      key={`${item.route_key}-${item.href}`}
+                      href={href}
+                      onClick={() => setExpanded(false)}
+                      className={cn(
+                        "relative flex w-auto shrink-0 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-medium leading-tight tracking-wide transition-colors sm:text-[11px]",
+                        emphasized
+                          ? "bg-[var(--dama-brand)]/15 text-[var(--dama-text)]"
+                          : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]",
+                      )}
+                      aria-label={label}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      <span className="relative">
+                        <Icon
+                          className="h-5 w-5 shrink-0"
+                          strokeWidth={emphasized ? 2.25 : 1.75}
+                          aria-hidden
+                        />
+                        {showPulse ? (
+                          <span
+                            className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[var(--dama-text)] ring-2 ring-[var(--dama-card)]"
+                            aria-hidden
+                          />
+                        ) : null}
+                      </span>
+                      <span className="px-0.5">{label}</span>
+                    </Link>
+                  );
+                })}
+          </div>
+        </div>
+      </nav>
+    </div>
   );
 
-  // Portal out of home `overflow-hidden` shells so fixed bottom bar is never clipped.
   if (!mounted || typeof document === "undefined") {
     return node;
   }

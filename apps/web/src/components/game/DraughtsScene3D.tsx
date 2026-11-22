@@ -20,7 +20,7 @@ import type { BoardCell, LegalMove, MoveHistoryEntry } from "@/types/game";
 import { OrbitControls, Text } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Group } from "three";
+import { ACESFilmicToneMapping, type Group, PCFSoftShadowMap, SRGBColorSpace } from "three";
 
 const PIECE_REST_Y = 0.12;
 const PICK_HEIGHT = 0.5;
@@ -28,14 +28,11 @@ const CAPTURE_PICK_HEIGHT = 0.52;
 const PICK_PHASE_END = 0.24;
 const HOLD_PHASE_END = 0.34;
 const LAND_PHASE_START = 0.72;
-const MOVE_DURATION_MIN = 0.72;
-const CAPTURE_DURATION_MIN = 0.92;
-const DURATION_PER_SQUARE = 0.16;
-const MOVE_DURATION_MAX = 1.65;
-const OPPONENT_MOVE_DURATION_MIN = 0.34;
-const OPPONENT_CAPTURE_DURATION_MIN = 0.44;
-const OPPONENT_DURATION_PER_SQUARE = 0.09;
-const OPPONENT_MOVE_DURATION_MAX = 0.82;
+/** Snappy product timing - identical for own + opponent (2D parity). */
+const MOVE_DURATION_MIN = 0.34;
+const CAPTURE_DURATION_MIN = 0.44;
+const DURATION_PER_SQUARE = 0.09;
+const MOVE_DURATION_MAX = 0.82;
 
 /** Fallbacks = Forest + White & black (product defaults). */
 const SQ_LIGHT = "#eeeed2";
@@ -155,6 +152,8 @@ type ActiveAnimation = {
   /** Defer React commits out of R3F useFrame (avoids mid-frame setState stalls). */
   landQueued?: boolean;
   finishQueued?: boolean;
+  /** performance.now() when finish was queued - stall recovery gate. */
+  finishQueuedAt?: number;
 };
 
 type AnimationMask = Pick<ActiveAnimation, "from" | "to" | "captures">;
@@ -186,25 +185,10 @@ function moveDurationSeconds(
   from: [number, number],
   to: [number, number],
   isCapture: boolean,
-  opts?: { opponentMove?: boolean; fast?: boolean },
 ): number {
   const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
-  const opponentFast = Boolean(opts?.opponentMove);
-  const ownFast = Boolean(opts?.fast);
-  const base = isCapture
-    ? opponentFast
-      ? OPPONENT_CAPTURE_DURATION_MIN
-      : ownFast
-        ? OPPONENT_CAPTURE_DURATION_MIN
-        : CAPTURE_DURATION_MIN
-    : opponentFast
-      ? OPPONENT_MOVE_DURATION_MIN
-      : ownFast
-        ? OPPONENT_MOVE_DURATION_MIN
-        : MOVE_DURATION_MIN;
-  const perSq = opponentFast || ownFast ? OPPONENT_DURATION_PER_SQUARE : DURATION_PER_SQUARE;
-  const max = opponentFast || ownFast ? OPPONENT_MOVE_DURATION_MAX : MOVE_DURATION_MAX;
-  return Math.min(max, base + dist * perSq);
+  const base = isCapture ? CAPTURE_DURATION_MIN : MOVE_DURATION_MIN;
+  return Math.min(MOVE_DURATION_MAX, base + dist * DURATION_PER_SQUARE);
 }
 
 function computePieceTransform(
@@ -359,7 +343,7 @@ function ShadeCyl({
   };
 }) {
   return (
-    <mesh>
+    <mesh castShadow receiveShadow>
       <cylinderGeometry args={args} />
       <meshStandardMaterial {...mat} />
     </mesh>
@@ -413,7 +397,8 @@ function PieceMesh({
     metalness: 0.1,
     roughness: 0.52,
   } as const;
-  const segs = 32;
+  // High-quality radial tessellation (product bar - not low-poly phone stubs).
+  const segs = 72;
   // Neo physical Staunton: flared base → stem → collar → head (+ cross for king).
   const baseH = 0.09;
   const stemH = crowned ? 0.32 : 0.22;
@@ -424,9 +409,9 @@ function PieceMesh({
   const headR = crowned ? 0.135 : 0.125;
   const headY = collarY + 0.085 + headR * 0.5;
   return (
-    <group position={[0, y, 0]} scale={scale}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0]}>
-        <circleGeometry args={[0.3, 24]} />
+    <group position={[0, y, 0]} scale={scale} castShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0]} receiveShadow>
+        <circleGeometry args={[0.3, 64]} />
         <meshBasicMaterial color="#000000" transparent opacity={0.32} depthWrite={false} />
       </mesh>
 
@@ -450,12 +435,12 @@ function PieceMesh({
 
       {/* Head */}
       <group position={[0, headY, 0]}>
-        <mesh>
-          <sphereGeometry args={[headR, 24, 18, 0, Math.PI]} />
+        <mesh castShadow>
+          <sphereGeometry args={[headR, 64, 48, 0, Math.PI]} />
           <meshStandardMaterial {...matL} />
         </mesh>
-        <mesh>
-          <sphereGeometry args={[headR, 24, 18, Math.PI, Math.PI]} />
+        <mesh castShadow>
+          <sphereGeometry args={[headR, 64, 48, Math.PI, Math.PI]} />
           <meshStandardMaterial {...matR} />
         </mesh>
       </group>
@@ -469,15 +454,15 @@ function PieceMesh({
           </group>
           {/* Neo king cross */}
           <group position={[0, headY + headR + 0.13, 0]}>
-            <mesh>
+            <mesh castShadow>
               <boxGeometry args={[0.034, 0.15, 0.034]} />
               <meshStandardMaterial {...matL} />
             </mesh>
-            <mesh position={[0, 0.025, 0]}>
+            <mesh position={[0, 0.025, 0]} castShadow>
               <boxGeometry args={[0.11, 0.034, 0.034]} />
               <meshStandardMaterial {...matL} />
             </mesh>
-            <mesh position={[0.045, 0.025, 0]}>
+            <mesh position={[0.045, 0.025, 0]} castShadow>
               <boxGeometry args={[0.03, 0.034, 0.034]} />
               <meshStandardMaterial {...matR} />
             </mesh>
@@ -546,6 +531,7 @@ function SquareMesh({
       <mesh
         position={[x, playable ? 0.004 : 0.002, z]}
         rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
         {...(playable ? interactiveProps(onSelect) : {})}
       >
         <planeGeometry args={[1, 1]} />
@@ -675,7 +661,7 @@ function CaptureBursts({
     <group ref={groupRef}>
       {animation.captures.map(([r, c]) => (
         <mesh key={`${r}-${c}`}>
-          <sphereGeometry args={[0.14, 12, 12]} />
+          <sphereGeometry args={[0.14, 20, 16]} />
           <meshStandardMaterial color={KING_ACCENT} emissive={HIGHLIGHT} emissiveIntensity={0.6} />
         </mesh>
       ))}
@@ -706,12 +692,13 @@ type Props = {
    * Captures must NOT shake/tilt the board.
    */
   illegalShakeKey?: number;
+  /** Hub sizing: true after first WebGL paint (idle full-column shimmer gate). */
+  onPaintReady?: (ready: boolean) => void;
 };
 
 function animationFromHistoryEntry(
   entry: MoveHistoryEntry,
-  yourPlayer: number | null | undefined,
-  performanceTier: "high" | "low",
+  _yourPlayer: number | null | undefined,
   prevBoard?: BoardGrid | null,
 ): ActiveAnimation | null {
   if (!entry?.from || !entry?.to) return null;
@@ -723,7 +710,6 @@ function animationFromHistoryEntry(
   const isCapture = captures.length > 0;
   const wasKing = Boolean(prevBoard?.[from[0]]?.[from[1]]?.k);
   const isPromotion = Boolean(dest?.k) && !wasKing;
-  const opponentMove = yourPlayer != null && player !== yourPlayer;
   return {
     from,
     to,
@@ -733,10 +719,7 @@ function animationFromHistoryEntry(
     isPromotion,
     progress: 0,
     isCapture,
-    duration: moveDurationSeconds(from, to, isCapture, {
-      opponentMove,
-      fast: performanceTier === "low" && !opponentMove,
-    }),
+    duration: moveDurationSeconds(from, to, isCapture),
     boardAfter: entry.board_after,
   };
 }
@@ -753,8 +736,7 @@ function BoardScene({
   yourPlayer = null,
   replayMode = false,
   onPlyAnimated,
-  performanceTier,
-}: Props & { performanceTier: "high" | "low" }) {
+}: Props) {
   const size = board.length > 0 ? board.length : 0;
   const [renderBoard, setRenderBoard] = useState<BoardGrid>(board);
   const animationRef = useRef<ActiveAnimation | null>(null);
@@ -801,6 +783,7 @@ function BoardScene({
     const next = queueRef.current.shift();
     if (!next) {
       animationRef.current = null;
+      holdSyncRef.current = false;
       setAnimMask(null);
       setIsAnimating(false);
       return;
@@ -867,13 +850,13 @@ function BoardScene({
               ? moveHistory[start - 1]?.board_after
               : undefined
             : newEntries[i - 1]?.board_after;
-        const anim = animationFromHistoryEntry(entry, yourPlayer, performanceTier, prevBoard);
+        const anim = animationFromHistoryEntry(entry, yourPlayer, prevBoard);
         if (anim) queueRef.current.push(anim);
       }
       if (!animationRef.current) startNext();
       return;
     }
-  }, [board, size, moveHistory, replayMode, yourPlayer, performanceTier, startNext]);
+  }, [board, size, moveHistory, replayMode, yourPlayer, startNext]);
 
   useLayoutEffect(() => {
     if (!size || replayMode) return;
@@ -925,23 +908,53 @@ function BoardScene({
         commitBoardAfter(animation);
       });
     }
-    if (animation.progress >= 1 && !animation.finishQueued) {
-      animation.finishQueued = true;
-      queueMicrotask(() => {
-        // Skip if a newer ply already replaced this one (avoids double startNext).
-        if (animationRef.current !== animation) return;
-        try {
-          finishAndAdvance();
-        } catch {
-          // Never leave finishQueued stuck with a frozen piece mid-board.
-          animationRef.current = null;
-          holdSyncRef.current = false;
-          setAnimMask(null);
-          setIsAnimating(false);
-        }
-      });
+    if (animation.progress >= 1) {
+      if (!animation.finishQueued) {
+        animation.finishQueued = true;
+        animation.finishQueuedAt = performance.now();
+        // Finish in rAF-adjacent microtask (avoid setState inside useFrame), but
+        // do not race a short force-clear that drops the ply before startNext.
+        queueMicrotask(() => {
+          if (animationRef.current !== animation) return;
+          try {
+            finishAndAdvance();
+          } catch {
+            // Never leave finishQueued stuck with a frozen piece mid-board.
+            animationRef.current = null;
+            holdSyncRef.current = false;
+            setAnimMask(null);
+            setIsAnimating(false);
+          }
+        });
+      } else if (
+        animationRef.current === animation &&
+        performance.now() - (animation.finishQueuedAt ?? 0) > 500
+      ) {
+        // finishQueued but still active after grace - force recover (mid-game stall).
+        animationRef.current = null;
+        holdSyncRef.current = false;
+        queueRef.current = [];
+        setAnimMask(null);
+        setIsAnimating(false);
+      }
     }
   });
+
+  // Mid-game stall recovery: holdSync / isAnimating with no active fly must clear.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (
+        (holdSyncRef.current || isAnimating) &&
+        !animationRef.current &&
+        queueRef.current.length === 0
+      ) {
+        holdSyncRef.current = false;
+        setAnimMask(null);
+        setIsAnimating(false);
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [isAnimating]);
 
   const forcedSquare = mustContinue ? `${mustContinue[0]}:${mustContinue[1]}` : null;
   /** All pieces that can move this turn (quiet + capture) - fastest play cue. */
@@ -1073,7 +1086,7 @@ function BoardScene({
             rotation={[-Math.PI / 2, 0, 0]}
             {...interactiveProps(() => onSquare(row, col))}
           >
-            <circleGeometry args={[0.22, 28]} />
+            <circleGeometry args={[0.22, 48]} />
             <meshStandardMaterial
               color={disc}
               emissive={disc}
@@ -1104,6 +1117,8 @@ export default function DraughtsScene3D(props: Props) {
   const [paintedSize, setPaintedSize] = useState<number | null>(null);
   const glReady = paintedSize === size && size > 0;
   const prevIllegalKey = useRef(0);
+  const onPaintReadyRef = useRef(props.onPaintReady);
+  onPaintReadyRef.current = props.onPaintReady;
 
   useEffect(() => {
     const key = props.illegalShakeKey ?? 0;
@@ -1113,6 +1128,14 @@ export default function DraughtsScene3D(props: Props) {
     const id = window.setTimeout(() => setRejectShake(false), 420);
     return () => window.clearTimeout(id);
   }, [props.illegalShakeKey]);
+
+  useEffect(() => {
+    onPaintReadyRef.current?.(glReady);
+    return () => {
+      // Leaving / remounting: parent must treat plane as not ready again.
+      onPaintReadyRef.current?.(false);
+    };
+  }, [glReady]);
 
   if (size <= 0) {
     return <BoardAreaSkeleton />;
@@ -1136,16 +1159,26 @@ export default function DraughtsScene3D(props: Props) {
         key={size}
         // Pulled-back default framing (more margin around the board than the prior 12.8/9.2 @ fov 37).
         camera={{ position: [0, 15.1, 10.85], fov: 38 }}
-        dpr={performanceTier === "low" ? 1 : [1, 2]}
-        // Chess.com/Lichess-style: prefer discrete GPU, skip MSAA on low tier to avoid mid-match hitch.
+        // High quality product default; low tier (reduced-motion only) still keeps AA.
+        dpr={performanceTier === "low" ? [1, 2] : [1, 3]}
         gl={{
           alpha: true,
-          antialias: performanceTier === "high",
+          antialias: true,
           powerPreference: "high-performance",
           stencil: false,
+          preserveDrawingBuffer: false,
         }}
         style={{ background: "transparent" }}
-        onCreated={() => {
+        onCreated={({ gl }) => {
+          gl.toneMapping = ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1.12;
+          gl.outputColorSpace = SRGBColorSpace;
+          gl.shadowMap.enabled = performanceTier !== "low";
+          gl.shadowMap.type = PCFSoftShadowMap;
+          // Force crisp buffer even when CSS size is large on hi-DPI phones.
+          const cap = performanceTier === "low" ? 2 : 3;
+          gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
+          gl.setClearColor(0x000000, 0);
           const forSize = size;
           // Double rAF: first frame scheduled, second after paint.
           requestAnimationFrame(() => {
@@ -1153,16 +1186,23 @@ export default function DraughtsScene3D(props: Props) {
           });
         }}
       >
-        <ambientLight intensity={1.05} />
-        <directionalLight position={[6, 14, 4]} intensity={1.35} />
-        <directionalLight position={[-4, 12, -6]} intensity={0.55} />
-        <BoardScene {...props} performanceTier={performanceTier} />
+        <ambientLight intensity={1.18} />
+        <directionalLight
+          position={[6, 14, 4]}
+          intensity={1.55}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+        />
+        <directionalLight position={[-4, 12, -6]} intensity={0.7} />
+        <directionalLight position={[0, 10, 8]} intensity={0.34} />
+        <BoardScene {...props} />
         <OrbitControls
           makeDefault
           enablePan={false}
           enableRotate
           enableZoom
-          enableDamping={false}
+          enableDamping
+          dampingFactor={0.08}
           minPolarAngle={0.12}
           maxPolarAngle={Math.PI / 2.05}
           minDistance={7}

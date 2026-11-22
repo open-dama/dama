@@ -21,7 +21,7 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   BoardAreaSkeleton,
-  BoardSeatBarSkeleton,
+  BoardColumnSkeleton,
   MatchVoteSkeleton,
   PlayHubSkeleton,
 } from "@/components/ui/shimmer-skeletons";
@@ -64,6 +64,7 @@ import {
 import {
   mobilePlayBoardColumnClass,
   mobilePlayBoardMaxHeightClass,
+  mobilePlayBoardShimmerHeightClass,
   mobilePlayBoardStandaloneHeightClass,
   playHubDesktopHeightClass,
   playHubFillHeightClass,
@@ -294,6 +295,8 @@ export default function SpectateHub({
   const progressionQuery = useProgressionQuery();
   const boardRulesQuery = useBoardRulesQuery();
   const [boardView, setBoardView] = useBoardViewMode();
+  /** 3D WebGL first paint - false keeps full-column host (never 52svh plane shimmer stamp). */
+  const [boardPlaneReady, setBoardPlaneReady] = useState(boardView === "2d");
   const [watchTab, setWatchTab] = useState<"moves" | "chat" | "info">("moves");
   /** Focus: collapse vote/share so Moves/Chat/Info use the rail; Back restores overview. */
   const [watchFocus, setWatchFocus] = useState(false);
@@ -320,6 +323,12 @@ export default function SpectateHub({
     setImmersiveChat(watchTab === "chat");
     return () => setImmersiveChat(false);
   }, [watchTab, setImmersiveChat]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset paint gate on view/game flip
+  useEffect(() => {
+    setBoardPlaneReady(boardView === "2d");
+  }, [boardView, gameId]);
+
   // Seed from React Query so leave→back paints the board without a forced REST flash.
   const [game, setGame] = useState<GamePayload | null>(() => {
     if (!initialSpectateGameId) return null;
@@ -823,6 +832,18 @@ export default function SpectateHub({
   const showBoardSkeleton =
     (connected && !showLiveBoard && !hydrateQuery.data) ||
     (hydrateQuery.isLoading && connected && !game && !hydrateQuery.data);
+  // Idle empty 3D preview: full seats+board column (never plane-only under 52svh stamp).
+  const idlePreviewEmpty =
+    !showLiveBoard && !showBoardSkeleton && boardView !== "2d" && previewBoard.length === 0;
+  /** 3D canvas still covering with BoardAreaSkeleton under a 52svh host = stamp. */
+  const boardPlaneHydrating =
+    boardView === "3d" &&
+    ((showLiveBoard && Boolean(displayBoard?.length)) ||
+      (!showLiveBoard && !showBoardSkeleton && previewBoard.length > 0)) &&
+    !boardPlaneReady;
+  // Skeleton swap (seats+board bars) vs height-only gate while visible Scene3D paints.
+  const fullColumnShimmer = showBoardSkeleton || idlePreviewEmpty;
+  const fullColumnHost = fullColumnShimmer || boardPlaneHydrating;
 
   // Fill PlayBoardColumn’s square host (LivePlayHub parity) - never stack extra chrome
   // under the board inside the square (that reads as L/R/T/B padding).
@@ -856,6 +877,7 @@ export default function SpectateHub({
           yourPlayer={1}
           replayMode={replayIndex != null}
           onPlyAnimated={replayIndex == null ? handlePlyAnimated : undefined}
+          onPaintReady={setBoardPlaneReady}
         />
       );
   } else if (showBoardSkeleton) {
@@ -875,6 +897,7 @@ export default function SpectateHub({
         moveHistory={[]}
         yourPlayer={1}
         replayMode
+        onPaintReady={setBoardPlaneReady}
       />
     );
   } else {
@@ -952,145 +975,148 @@ export default function SpectateHub({
       <SmartBoardHost
         // Preview + live spectate - same maximize FAB + pop flow as play hubs.
         // Gate on surfaceActive so keep-alive under Play does not portal a second FAB.
-        active={surfaceActive}
+        // Skeleton stays budget/full-column (never hug stamp while seats+board shimmer).
+        active={surfaceActive && !fullColumnHost}
         popSignal={surfaceActive && Boolean(game)}
         className={cn(
-          // max-lg:overflow-visible so the under-board maximize FAB is not clipped.
-          "order-1 flex min-h-0 min-w-0 flex-col max-lg:overflow-visible lg:overflow-hidden lg:flex-1 lg:justify-center",
-          mobilePlayBoardMaxHeightClass,
+          // Always overflow-hidden: FAB is body-portaled; overflow-visible was rubber-banding the header.
+          "order-1 flex min-h-0 min-w-0 flex-col overflow-hidden overscroll-none lg:flex-1 lg:justify-center",
+          fullColumnHost
+            ? cn(mobilePlayBoardShimmerHeightClass, "lg:h-full lg:min-h-0")
+            : mobilePlayBoardMaxHeightClass,
         )}
       >
-        <PlayBoardColumn
-          desktopHeader={
-            game ? (
-              <BoardSeatBar
-                label={blackName}
-                hint={blackHint}
-                rating={p2Query.data?.player?.rating}
-                ratingParenOpen={railChrome?.rating_paren_open}
-                ratingParenClose={railChrome?.rating_paren_close}
-                clock={p2Label}
-                tone="muted"
-                clockActive={Boolean(
-                  !gameFinished && !game?.paused && replayIndex == null && clockPlayer === 2,
-                )}
-                captures={opponentCaptures}
-                pieceSide="dark"
-                online={blackOnline}
-                playing={blackPlaying}
-                avatarThumbUrl={p2Query.data?.player?.avatar_thumb_url}
-                countryCode={p2Query.data?.player?.country_code}
-                trailing={boardViewToggle}
-                hoverPlayer={
-                  game?.player2_id && (p2Query.data?.player?.username || blackName)
-                    ? {
-                        id: game.player2_id,
-                        username: p2Query.data?.player?.username || blackName,
-                        rating:
-                          typeof p2Query.data?.player?.rating === "number"
-                            ? p2Query.data.player.rating
-                            : Number.NaN,
-                        xp:
-                          typeof p2Query.data?.player?.xp === "number"
-                            ? p2Query.data.player.xp
-                            : Number.NaN,
-                        wins:
-                          typeof p2Query.data?.player?.wins === "number"
-                            ? p2Query.data.player.wins
-                            : Number.NaN,
-                        losses:
-                          typeof p2Query.data?.player?.losses === "number"
-                            ? p2Query.data.player.losses
-                            : Number.NaN,
-                        draws:
-                          typeof p2Query.data?.player?.draws === "number"
-                            ? p2Query.data.player.draws
-                            : undefined,
-                        countryCode: p2Query.data?.player?.country_code,
-                        avatarThumbUrl: p2Query.data?.player?.avatar_thumb_url,
-                        avatarFullUrl: p2Query.data?.player?.avatar_full_url,
-                        hostTrustBadge: p2Query.data?.player?.host_trust_badge ?? null,
-                        hostTrustTier: p2Query.data?.player?.host_trust_tier ?? null,
-                        online: blackOnline,
-                        playing: blackPlaying,
-                        playingGameId: game.id,
-                      }
-                    : null
-                }
-                railChrome={railChrome}
-                signedIn={signedIn}
-              />
-            ) : showBoardSkeleton ? (
-              <BoardSeatBarSkeleton showTrailing clockActive={false} />
-            ) : boardViewToggle ? (
-              <div className="flex w-full justify-end">{boardViewToggle}</div>
-            ) : null
-          }
-          desktopFooter={
-            game ? (
-              <BoardSeatBar
-                label={whiteName}
-                hint={whiteHint}
-                rating={p1Query.data?.player?.rating}
-                ratingParenOpen={railChrome?.rating_paren_open}
-                ratingParenClose={railChrome?.rating_paren_close}
-                clock={p1Label}
-                tone="muted"
-                clockActive={Boolean(
-                  !gameFinished && !game?.paused && replayIndex == null && clockPlayer === 1,
-                )}
-                captures={yourCaptures}
-                pieceSide="light"
-                online={whiteOnline}
-                playing={whitePlaying}
-                avatarThumbUrl={p1Query.data?.player?.avatar_thumb_url}
-                countryCode={p1Query.data?.player?.country_code}
-                hoverPlayer={
-                  game?.player1_id && (p1Query.data?.player?.username || whiteName)
-                    ? {
-                        id: game.player1_id,
-                        username: p1Query.data?.player?.username || whiteName,
-                        rating:
-                          typeof p1Query.data?.player?.rating === "number"
-                            ? p1Query.data.player.rating
-                            : Number.NaN,
-                        xp:
-                          typeof p1Query.data?.player?.xp === "number"
-                            ? p1Query.data.player.xp
-                            : Number.NaN,
-                        wins:
-                          typeof p1Query.data?.player?.wins === "number"
-                            ? p1Query.data.player.wins
-                            : Number.NaN,
-                        losses:
-                          typeof p1Query.data?.player?.losses === "number"
-                            ? p1Query.data.player.losses
-                            : Number.NaN,
-                        draws:
-                          typeof p1Query.data?.player?.draws === "number"
-                            ? p1Query.data.player.draws
-                            : undefined,
-                        countryCode: p1Query.data?.player?.country_code,
-                        avatarThumbUrl: p1Query.data?.player?.avatar_thumb_url,
-                        avatarFullUrl: p1Query.data?.player?.avatar_full_url,
-                        hostTrustBadge: p1Query.data?.player?.host_trust_badge ?? null,
-                        hostTrustTier: p1Query.data?.player?.host_trust_tier ?? null,
-                        online: whiteOnline,
-                        playing: whitePlaying,
-                        playingGameId: game.id,
-                      }
-                    : null
-                }
-                railChrome={railChrome}
-                signedIn={signedIn}
-              />
-            ) : showBoardSkeleton ? (
-              <BoardSeatBarSkeleton clockActive={false} />
-            ) : null
-          }
-          board={boardNode}
-          coverOverlay={boardCoverOverlay}
-        />
+        {fullColumnShimmer ? (
+          <BoardColumnSkeleton showTopTrailing bottomClockActive={false} />
+        ) : (
+          <PlayBoardColumn
+            desktopHeader={
+              game ? (
+                <BoardSeatBar
+                  label={blackName}
+                  hint={blackHint}
+                  rating={p2Query.data?.player?.rating}
+                  ratingParenOpen={railChrome?.rating_paren_open}
+                  ratingParenClose={railChrome?.rating_paren_close}
+                  clock={p2Label}
+                  tone="muted"
+                  clockActive={Boolean(
+                    !gameFinished && !game?.paused && replayIndex == null && clockPlayer === 2,
+                  )}
+                  captures={opponentCaptures}
+                  pieceSide="dark"
+                  online={blackOnline}
+                  playing={blackPlaying}
+                  avatarThumbUrl={p2Query.data?.player?.avatar_thumb_url}
+                  countryCode={p2Query.data?.player?.country_code}
+                  trailing={boardViewToggle}
+                  hoverPlayer={
+                    game?.player2_id && (p2Query.data?.player?.username || blackName)
+                      ? {
+                          id: game.player2_id,
+                          username: p2Query.data?.player?.username || blackName,
+                          rating:
+                            typeof p2Query.data?.player?.rating === "number"
+                              ? p2Query.data.player.rating
+                              : Number.NaN,
+                          xp:
+                            typeof p2Query.data?.player?.xp === "number"
+                              ? p2Query.data.player.xp
+                              : Number.NaN,
+                          wins:
+                            typeof p2Query.data?.player?.wins === "number"
+                              ? p2Query.data.player.wins
+                              : Number.NaN,
+                          losses:
+                            typeof p2Query.data?.player?.losses === "number"
+                              ? p2Query.data.player.losses
+                              : Number.NaN,
+                          draws:
+                            typeof p2Query.data?.player?.draws === "number"
+                              ? p2Query.data.player.draws
+                              : undefined,
+                          countryCode: p2Query.data?.player?.country_code,
+                          avatarThumbUrl: p2Query.data?.player?.avatar_thumb_url,
+                          avatarFullUrl: p2Query.data?.player?.avatar_full_url,
+                          hostTrustBadge: p2Query.data?.player?.host_trust_badge ?? null,
+                          hostTrustTier: p2Query.data?.player?.host_trust_tier ?? null,
+                          online: blackOnline,
+                          playing: blackPlaying,
+                          playingGameId: game.id,
+                        }
+                      : null
+                  }
+                  railChrome={railChrome}
+                  signedIn={signedIn}
+                />
+              ) : boardViewToggle ? (
+                <div className="flex w-full justify-end">{boardViewToggle}</div>
+              ) : null
+            }
+            desktopFooter={
+              game ? (
+                <BoardSeatBar
+                  label={whiteName}
+                  hint={whiteHint}
+                  rating={p1Query.data?.player?.rating}
+                  ratingParenOpen={railChrome?.rating_paren_open}
+                  ratingParenClose={railChrome?.rating_paren_close}
+                  clock={p1Label}
+                  tone="muted"
+                  clockActive={Boolean(
+                    !gameFinished && !game?.paused && replayIndex == null && clockPlayer === 1,
+                  )}
+                  captures={yourCaptures}
+                  pieceSide="light"
+                  online={whiteOnline}
+                  playing={whitePlaying}
+                  avatarThumbUrl={p1Query.data?.player?.avatar_thumb_url}
+                  countryCode={p1Query.data?.player?.country_code}
+                  hoverPlayer={
+                    game?.player1_id && (p1Query.data?.player?.username || whiteName)
+                      ? {
+                          id: game.player1_id,
+                          username: p1Query.data?.player?.username || whiteName,
+                          rating:
+                            typeof p1Query.data?.player?.rating === "number"
+                              ? p1Query.data.player.rating
+                              : Number.NaN,
+                          xp:
+                            typeof p1Query.data?.player?.xp === "number"
+                              ? p1Query.data.player.xp
+                              : Number.NaN,
+                          wins:
+                            typeof p1Query.data?.player?.wins === "number"
+                              ? p1Query.data.player.wins
+                              : Number.NaN,
+                          losses:
+                            typeof p1Query.data?.player?.losses === "number"
+                              ? p1Query.data.player.losses
+                              : Number.NaN,
+                          draws:
+                            typeof p1Query.data?.player?.draws === "number"
+                              ? p1Query.data.player.draws
+                              : undefined,
+                          countryCode: p1Query.data?.player?.country_code,
+                          avatarThumbUrl: p1Query.data?.player?.avatar_thumb_url,
+                          avatarFullUrl: p1Query.data?.player?.avatar_full_url,
+                          hostTrustBadge: p1Query.data?.player?.host_trust_badge ?? null,
+                          hostTrustTier: p1Query.data?.player?.host_trust_tier ?? null,
+                          online: whiteOnline,
+                          playing: whitePlaying,
+                          playingGameId: game.id,
+                        }
+                      : null
+                  }
+                  railChrome={railChrome}
+                  signedIn={signedIn}
+                />
+              ) : null
+            }
+            board={boardNode}
+            coverOverlay={boardCoverOverlay}
+          />
+        )}
       </SmartBoardHost>
 
       <PlayRailAside>

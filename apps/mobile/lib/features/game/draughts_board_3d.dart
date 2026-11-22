@@ -30,6 +30,7 @@ class DraughtsBoard3D extends StatefulWidget {
     this.onPlyAnimated,
     this.illegalShakeKey = 0,
     this.replayMode = false,
+    this.onPaintReady,
   });
 
   final List<List<dynamic>> board;
@@ -57,6 +58,9 @@ class DraughtsBoard3D extends StatefulWidget {
 
   /// History scrub / replay: no land SFX (2D parity).
   final bool replayMode;
+
+  /// Hub sizing: true after first paint (idle full-column shimmer gate; web parity).
+  final ValueChanged<bool>? onPaintReady;
 
   @override
   State<DraughtsBoard3D> createState() => _DraughtsBoard3DState();
@@ -93,20 +97,16 @@ class _ActiveAnim {
 }
 
 class _DraughtsBoard3DState extends State<DraughtsBoard3D>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const _pickPhaseEnd = 0.24;
   static const _holdPhaseEnd = 0.34;
   static const _landPhaseStart = 0.72;
-  // Own-seat humanized timing (web MOVE_* / CAPTURE_*).
-  static const _moveDurationMinMs = 720;
-  static const _captureDurationMinMs = 920;
-  static const _durationPerSquareMs = 160;
-  static const _moveDurationMaxMs = 1650;
-  // Opponent / AI fast path (web OPPONENT_*).
-  static const _opponentMoveMinMs = 340;
-  static const _opponentCaptureMinMs = 440;
-  static const _opponentPerSquareMs = 90;
-  static const _opponentMaxMs = 820;
+  /** Snappy product timing (web 2D/3D parity) - same for own + opponent. */
+  static const _moveDurationMinMs = 340;
+  static const _captureDurationMinMs = 440;
+  static const _durationPerSquareMs = 90;
+  static const _moveDurationMaxMs = 820;
+  static const _stallGraceMs = 250;
 
   double _pitch = 0.55;
   double _yaw = 0.18;
@@ -122,6 +122,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   int _prevHistoryLen = 0;
   bool _holdSync = false;
   late final AnimationController _shakeCtrl;
+  Timer? _stallWatch;
+  bool _finishQueued = false;
 
   /// Board size whose first paint finished - mismatch keeps checker shimmer (web 3D parity).
   int? _paintedSize;
@@ -132,6 +134,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || widget.boardSize != forSize) return;
         setState(() => _paintedSize = forSize);
+        widget.onPaintReady?.call(true);
       });
     });
   }
@@ -199,6 +202,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(NeoPieceImages.ensureLoaded().then((_) {
       if (mounted) setState(() {});
     }));
@@ -238,16 +242,13 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
+          if (_finishQueued) return;
+          _finishQueued = true;
           try {
             _finishAndAdvance();
           } catch (_) {
             // Never leave the board frozen after a land commit error.
-            setState(() {
-              _active = null;
-              _progress = 0;
-              _holdSync = false;
-              _queue.clear();
-            });
+            _forceRecoverStall();
           }
         }
       });
@@ -260,8 +261,56 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     _schedulePaintReady();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      if (_anim.isAnimating) _anim.stop(canceled: false);
+    } else if (state == AppLifecycleState.resumed) {
+      if (_active != null && !_anim.isAnimating && _anim.value < 1) {
+        _anim.forward();
+      }
+    }
+  }
+
+  void _cancelStallWatch() {
+    _stallWatch?.cancel();
+    _stallWatch = null;
+  }
+
+  void _armStallWatch(int durationMs) {
+    _cancelStallWatch();
+    _stallWatch = Timer(
+      Duration(milliseconds: durationMs + _stallGraceMs),
+      () {
+        if (!mounted) return;
+        if (_anim.isAnimating) {
+          _armStallWatch(_stallGraceMs);
+          return;
+        }
+        if (_active != null || _holdSync || _finishQueued) {
+          _forceRecoverStall();
+        }
+      },
+    );
+  }
+
+  void _forceRecoverStall() {
+    _cancelStallWatch();
+    _finishQueued = false;
+    _anim.stop();
+    setState(() {
+      _active = null;
+      _progress = 0;
+      _holdSync = false;
+      _queue.clear();
+    });
+  }
+
   void _startNext() {
     if (_queue.isEmpty) {
+      _cancelStallWatch();
+      _finishQueued = false;
       setState(() {
         _active = null;
         _progress = 0;
@@ -273,22 +322,20 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     final dr = (next.toR - next.fromR).toDouble();
     final dc = (next.toC - next.fromC).toDouble();
     final dist = math.sqrt(dr * dr + dc * dc);
-    final yours = widget.yourPlayer;
-    final opponentFast = yours != null && next.player != yours;
-    final base = next.isCapture
-        ? (opponentFast ? _opponentCaptureMinMs : _captureDurationMinMs)
-        : (opponentFast ? _opponentMoveMinMs : _moveDurationMinMs);
-    final perSq = opponentFast ? _opponentPerSquareMs : _durationPerSquareMs;
-    final maxMs = opponentFast ? _opponentMaxMs : _moveDurationMaxMs;
-    final minMs = opponentFast
-        ? (next.isCapture ? _opponentCaptureMinMs : _opponentMoveMinMs)
-        : (next.isCapture ? _captureDurationMinMs : _moveDurationMinMs);
-    final ms = (base + dist * perSq).clamp(minMs, maxMs).round();
+    final base = next.isCapture ? _captureDurationMinMs : _moveDurationMinMs;
+    final ms = (base + dist * _durationPerSquareMs)
+        .clamp(
+          next.isCapture ? _captureDurationMinMs : _moveDurationMinMs,
+          _moveDurationMaxMs,
+        )
+        .round();
+    _finishQueued = false;
     setState(() {
       _active = next;
       _progress = 0;
     });
     _anim.duration = Duration(milliseconds: ms);
+    _armStallWatch(ms);
     _anim.forward(from: 0);
   }
 
@@ -318,9 +365,11 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     }
     _active = null;
     _progress = 0;
+    _finishQueued = false;
     if (_queue.isNotEmpty) {
       _startNext();
     } else {
+      _cancelStallWatch();
       setState(() => _holdSync = false);
     }
   }
@@ -415,6 +464,9 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
 
   @override
   void dispose() {
+    widget.onPaintReady?.call(false);
+    WidgetsBinding.instance.removeObserver(this);
+    _cancelStallWatch();
     _anim.dispose();
     _shakeCtrl.dispose();
     super.dispose();
@@ -593,6 +645,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         return Transform.translate(
           offset: Offset(shakeDx, 0),
           child: CustomPaint(
+            isComplex: true,
+            willChange: true,
             painter: _Board3DPainter(
               board: display,
               size: widget.boardSize,
@@ -624,7 +678,6 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
               captureBursts: _active?.captures ?? const [],
               burstProgress: burstT,
             ),
-            child: const SizedBox.expand(),
           ),
         );
       },
@@ -943,44 +996,42 @@ class _Board3DPainter extends CustomPainter {
     final headR = crowned ? unit * 0.33 : unit * 0.3;
     final headCy = collarCy - unit * 0.1 - headR * 0.55;
 
+    Paint aaFill(Color c) => Paint()
+      ..color = c
+      ..isAntiAlias = true
+      ..filterQuality = FilterQuality.high;
+    Paint aaStroke(Color c) => Paint()
+      ..color = c
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true
+      ..filterQuality = FilterQuality.high;
+
     void paintSplitOval(Rect rect) {
       final path = Path()..addOval(rect);
-      canvas.drawPath(path, Paint()..color = base);
+      canvas.drawPath(path, aaFill(base));
       canvas.save();
       canvas.clipPath(path);
       canvas.drawRect(
         Rect.fromLTRB(cx, rect.top - 1, rect.right + 1, rect.bottom + 1),
-        Paint()..color = shade,
+        aaFill(shade),
       );
       canvas.restore();
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = outline
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..strokeJoin = StrokeJoin.round,
-      );
+      canvas.drawPath(path, aaStroke(outline));
     }
 
     void paintSplitPath(Path path) {
-      canvas.drawPath(path, Paint()..color = base);
+      canvas.drawPath(path, aaFill(base));
       canvas.save();
       canvas.clipPath(path);
       final bounds = path.getBounds();
       canvas.drawRect(
         Rect.fromLTRB(cx, bounds.top - 1, bounds.right + 1, bounds.bottom + 1),
-        Paint()..color = shade,
+        aaFill(shade),
       );
       canvas.restore();
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = outline
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..strokeJoin = StrokeJoin.round,
-      );
+      canvas.drawPath(path, aaStroke(outline));
     }
 
     // Flared pedestal (foreshortened cylinder)
@@ -995,8 +1046,8 @@ class _Board3DPainter extends CustomPainter {
       height: unit * 0.26,
     ));
 
-    // Tapered stem - stacked discs
-    final stemSteps = crowned ? 5 : 4;
+    // Tapered stem - denser stacked discs (web 72-seg cylinder parity).
+    final stemSteps = crowned ? 12 : 10;
     for (var i = 0; i < stemSteps; i++) {
       final t = i / (stemSteps - 1);
       final y = stemBot - t * stemH;

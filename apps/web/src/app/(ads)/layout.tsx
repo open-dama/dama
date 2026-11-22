@@ -39,7 +39,7 @@ export default function AdsLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[var(--dama-bg)] text-[var(--dama-text)] md:flex">
       <AdsDesktopRail />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={playerStickyHeaderClass}>
+        <header className={playerStickyHeaderClass} data-dama-shell-header="">
           <div className={playerHeaderInnerClass}>
             {overviewTitle && overviewHref ? (
               <Link

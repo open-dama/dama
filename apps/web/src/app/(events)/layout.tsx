@@ -48,7 +48,7 @@ export default function EventsLayout({ children }: { children: React.ReactNode }
       {!hideHostingChrome ? <EventsDesktopRail /> : null}
       <div className="flex min-w-0 flex-1 flex-col">
         {!hideHostingChrome ? (
-          <header className={playerStickyHeaderClass}>
+          <header className={playerStickyHeaderClass} data-dama-shell-header="">
             <div className={playerHeaderInnerClass}>
               {overviewTitle && overviewHref ? (
                 <Link

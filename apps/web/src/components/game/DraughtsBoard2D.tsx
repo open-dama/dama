@@ -8,6 +8,7 @@
 
 import { BoardSquareCoords } from "@/components/game/BoardSquareCoords";
 import { PalacePieceMark } from "@/components/game/PalacePieceMark";
+import { BoardAreaSkeleton } from "@/components/ui/BoardColumnSkeleton";
 import { pieceLandKind, playPieceLandSound, unlockGameAudio } from "@/lib/audio-notify";
 import { cn } from "@/lib/utils";
 import type { BoardCell, LegalMove, MoveHistoryEntry } from "@/types/game";
@@ -43,14 +44,11 @@ export type DraughtsBoard2DProps = {
 const PICK_PHASE_END = 0.24;
 const HOLD_PHASE_END = 0.34;
 const LAND_PHASE_START = 0.72;
-const MOVE_DURATION_MIN = 0.72;
-const CAPTURE_DURATION_MIN = 0.92;
-const DURATION_PER_SQUARE = 0.16;
-const MOVE_DURATION_MAX = 1.65;
-const OPPONENT_MOVE_DURATION_MIN = 0.34;
-const OPPONENT_CAPTURE_DURATION_MIN = 0.44;
-const OPPONENT_DURATION_PER_SQUARE = 0.09;
-const OPPONENT_MOVE_DURATION_MAX = 0.82;
+/** Snappy product timing (3D parity) - same for own + opponent plies. */
+const MOVE_DURATION_MIN = 0.34;
+const CAPTURE_DURATION_MIN = 0.44;
+const DURATION_PER_SQUARE = 0.09;
+const MOVE_DURATION_MAX = 0.82;
 
 type ActiveAnimation = {
   from: [number, number];
@@ -69,6 +67,8 @@ type ActiveAnimation = {
   soundPlayed?: boolean;
   /** Prevent double finishAndAdvance in one rAF turn. */
   finishQueued?: boolean;
+  /** performance.now() when finish was queued - stall recovery gate. */
+  finishQueuedAt?: number;
 };
 
 function isDark(row: number, col: number) {
@@ -87,19 +87,10 @@ function moveDurationSeconds(
   from: [number, number],
   to: [number, number],
   isCapture: boolean,
-  opponentMove?: boolean,
 ): number {
   const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
-  const base = isCapture
-    ? opponentMove
-      ? OPPONENT_CAPTURE_DURATION_MIN
-      : CAPTURE_DURATION_MIN
-    : opponentMove
-      ? OPPONENT_MOVE_DURATION_MIN
-      : MOVE_DURATION_MIN;
-  const perSq = opponentMove ? OPPONENT_DURATION_PER_SQUARE : DURATION_PER_SQUARE;
-  const max = opponentMove ? OPPONENT_MOVE_DURATION_MAX : MOVE_DURATION_MAX;
-  return Math.min(max, base + dist * perSq);
+  const base = isCapture ? CAPTURE_DURATION_MIN : MOVE_DURATION_MIN;
+  return Math.min(MOVE_DURATION_MAX, base + dist * DURATION_PER_SQUARE);
 }
 
 function boardsEqual(left: BoardGrid | undefined, right: BoardGrid | undefined): boolean {
@@ -133,7 +124,6 @@ function animationFromHistoryEntry(
   const isCapture = captures.length > 0;
   const wasKing = Boolean(prevBoard?.[from[0]]?.[from[1]]?.k);
   const isPromotion = Boolean(dest?.k) && !wasKing;
-  const opponentMove = yourPlayer != null && player !== yourPlayer;
   return {
     from,
     to,
@@ -143,7 +133,7 @@ function animationFromHistoryEntry(
     isPromotion,
     progress: 0,
     isCapture,
-    duration: moveDurationSeconds(from, to, isCapture, opponentMove),
+    duration: moveDurationSeconds(from, to, isCapture),
     boardAfter: entry.board_after,
   };
 }
@@ -214,12 +204,13 @@ function travelT(progress: number): number {
   return easeInOutCubic((progress - HOLD_PHASE_END) / (LAND_PHASE_START - HOLD_PHASE_END));
 }
 
+/** Match 3D PieceMesh lift scale (1.035) - larger 2D scale caused pick/put wobble. */
 function flyScale(progress: number): number {
   if (progress < PICK_PHASE_END) {
-    return 1 + easeInOutQuad(progress / PICK_PHASE_END) * 0.08;
+    return 1 + easeInOutQuad(progress / PICK_PHASE_END) * 0.035;
   }
-  if (progress < LAND_PHASE_START) return 1.08;
-  return 1.08 - easeInOutQuad((progress - LAND_PHASE_START) / (1 - LAND_PHASE_START)) * 0.08;
+  if (progress < LAND_PHASE_START) return 1.035;
+  return 1.035 - easeInOutQuad((progress - LAND_PHASE_START) / (1 - LAND_PHASE_START)) * 0.035;
 }
 
 function PieceDisc({
@@ -281,6 +272,8 @@ export default function DraughtsBoard2D({
   const flyElRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef(size);
   const flipRef = useRef(flipBoard);
+  /** Cached plane side (px) - remeasure only on resize so pick→put never jitters. */
+  const planeSideRef = useRef(0);
   sizeRef.current = size;
   flipRef.current = flipBoard;
   const historyPresent = moveHistory.length > 0;
@@ -304,27 +297,73 @@ export default function DraughtsBoard2D({
     return () => window.clearTimeout(t);
   }, [illegalShakeKey]);
 
-  /** Drive fly piece via DOM (Chess.com / Lichess style) - never setState every frame. */
-  const applyFlyDom = useCallback((anim: ActiveAnimation, progress: number) => {
+  const measurePlaneSide = useCallback(() => {
     const el = flyElRef.current;
-    const sz = sizeRef.current;
-    if (!el || sz <= 0) return;
-    const t = travelT(progress);
-    const scale = flyScale(progress);
-    const flip = flipRef.current;
-    const fromR = flip ? sz - 1 - anim.from[0] : anim.from[0];
-    const fromC = flip ? sz - 1 - anim.from[1] : anim.from[1];
-    const toR = flip ? sz - 1 - anim.to[0] : anim.to[0];
-    const toC = flip ? sz - 1 - anim.to[1] : anim.to[1];
-    const vr = fromR + (toR - fromR) * t;
-    const vc = fromC + (toC - fromC) * t;
-    const cell = 100 / sz;
-    el.style.left = `${vc * cell + cell / 2}%`;
-    el.style.top = `${vr * cell + cell / 2}%`;
-    el.style.width = `${cell * 0.78}%`;
-    el.style.height = `${cell * 0.78}%`;
-    el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    const plane = el?.parentElement;
+    if (!plane) return;
+    const rect = plane.getBoundingClientRect();
+    const side = Math.min(rect.width, rect.height);
+    if (side >= 1) planeSideRef.current = side;
   }, []);
+
+  useLayoutEffect(() => {
+    measurePlaneSide();
+    const plane = flyElRef.current?.parentElement;
+    if (!plane || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => measurePlaneSide());
+    ro.observe(plane);
+    return () => ro.disconnect();
+  }, [measurePlaneSide]);
+
+  // Mid-game stall recovery: holdSync with no active fly must not freeze the board.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (
+        holdSyncRef.current &&
+        !animationRef.current &&
+        queueRef.current.length === 0 &&
+        !loopRunningRef.current
+      ) {
+        holdSyncRef.current = false;
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  /** Drive fly piece via DOM (3D-stable px math) - never setState every frame. */
+  const applyFlyDom = useCallback(
+    (anim: ActiveAnimation, progress: number) => {
+      const el = flyElRef.current;
+      const sz = sizeRef.current;
+      if (!el || sz <= 0) return;
+      let side = planeSideRef.current;
+      if (side < 1) {
+        measurePlaneSide();
+        side = planeSideRef.current;
+      }
+      if (side < 1) return;
+      const t = travelT(progress);
+      const scale = flyScale(progress);
+      const flip = flipRef.current;
+      const fromR = flip ? sz - 1 - anim.from[0] : anim.from[0];
+      const fromC = flip ? sz - 1 - anim.from[1] : anim.from[1];
+      const toR = flip ? sz - 1 - anim.to[0] : anim.to[0];
+      const toC = flip ? sz - 1 - anim.to[1] : anim.to[1];
+      const vr = fromR + (toR - fromR) * t;
+      const vc = fromC + (toC - fromC) * t;
+      const cell = side / sz;
+      // Resting piece sits in an h/w-[78%] cell wrapper - fly box must match that
+      // (extra 0.98 made pick→put jump smaller than the resting disc).
+      const piece = cell * 0.78;
+      el.style.left = `${vc * cell + cell / 2}px`;
+      el.style.top = `${vr * cell + cell / 2}px`;
+      el.style.width = `${piece}px`;
+      el.style.height = `${piece}px`;
+      // translate3d keeps the fly layer on the compositor (3D-stable; less 2D jitter).
+      el.style.transform = `translate3d(-50%, -50%, 0) scale(${scale})`;
+    },
+    [measurePlaneSide],
+  );
 
   const commitBoardAfter = useCallback((anim: ActiveAnimation) => {
     if (!anim.boardAfter?.length) return;
@@ -367,15 +406,30 @@ export default function DraughtsBoard2D({
       if (prev < LAND_PHASE_START && anim.progress >= LAND_PHASE_START) {
         commitBoardAfter(anim);
       }
-      if (anim.progress >= 1 && !anim.finishQueued) {
-        anim.finishQueued = true;
-        try {
-          finishAndAdvanceRef.current();
-        } catch {
-          // Never leave the board stuck with finishQueued + active fly (prod hitch path).
+      if (anim.progress >= 1) {
+        if (!anim.finishQueued) {
+          anim.finishQueued = true;
+          anim.finishQueuedAt = performance.now();
+          try {
+            finishAndAdvanceRef.current();
+          } catch {
+            // Never leave the board stuck with finishQueued + active fly (prod hitch path).
+            animationRef.current = null;
+            holdSyncRef.current = false;
+            setActiveFly(null);
+            loopRunningRef.current = false;
+            lastTsRef.current = null;
+            return;
+          }
+        } else if (
+          animationRef.current === anim &&
+          performance.now() - (anim.finishQueuedAt ?? 0) > 500
+        ) {
+          // finishQueued but still active after grace - force recover (mid-game stall).
           animationRef.current = null;
           holdSyncRef.current = false;
           setActiveFly(null);
+          queueRef.current = [];
           loopRunningRef.current = false;
           lastTsRef.current = null;
           return;
@@ -397,6 +451,7 @@ export default function DraughtsBoard2D({
     const next = queueRef.current.shift();
     if (!next) {
       animationRef.current = null;
+      holdSyncRef.current = false;
       setActiveFly(null);
       lastTsRef.current = null;
       return;
@@ -564,7 +619,9 @@ export default function DraughtsBoard2D({
     };
   }, [activeFly, lastMoveToken, moveHistory, replayMode]);
 
-  if (size <= 0) return null;
+  if (size <= 0) {
+    return <BoardAreaSkeleton />;
+  }
 
   const cells: { row: number; col: number }[] = [];
   for (let r = 0; r < size; r++) {
@@ -576,14 +633,19 @@ export default function DraughtsBoard2D({
   }
 
   const display = renderBoard.length ? renderBoard : board;
+  // 3D parity: only lock own piece while still in the air; unlock at land commit.
+  const ownAirLocked = Boolean(
+    activeFly && yourPlayer != null && activeFly.player === yourPlayer && !activeFly.boardApplied,
+  );
 
   return (
     <div
       className={cn(
-        "relative aspect-square w-full overflow-hidden",
+        "relative aspect-square w-full overflow-hidden touch-none overscroll-none",
         shake && "animate-pulse",
         className,
       )}
+      style={{ touchAction: "none" }}
       // biome-ignore lint/a11y/useSemanticElements: interactive board uses grid ARIA on div layout
       role="grid"
       aria-rowcount={size}
@@ -615,7 +677,7 @@ export default function DraughtsBoard2D({
           const squareHighlighted =
             isSelected || isLegalTarget || isMust || (!selected && legalOrigins.has(key));
           const hidePiece = hiddenKeys.has(key);
-          const canClick = Boolean(interactive && dark && !activeFly);
+          const canClick = Boolean(interactive && dark && !ownAirLocked);
           // Always opaque fill (3D meshStandardMaterial parity). The old quiet-square
           // `background:` shorthand cleared background-color to transparent, so
           // subpixel seams between lime highlights and neighbors composited against
@@ -685,14 +747,14 @@ export default function DraughtsBoard2D({
               ) : null}
               {cell && !hidePiece ? (
                 <span className="relative z-[2] flex h-[78%] w-[78%] items-center justify-center">
-                  {/* Square fill is the movable cue (same as 3D) - no under-piece ring. */}
+                  {/* Square fill is the movable cue (same as 3D) - no under-piece ring.
+                      No CSS scale/transition - 3D uses mesh scale only in the fly loop. */}
                   <PieceDisc
                     player={(cell.p === 2 ? 2 : 1) as 1 | 2}
                     isKing={Boolean(cell.k)}
                     className={cn(
-                      "h-full w-full transition-transform",
-                      (isSelected || isMust) &&
-                        "scale-110 shadow-[0_0_12px_2px_var(--dama-board-highlight)]",
+                      "h-full w-full",
+                      (isSelected || isMust) && "shadow-[0_0_12px_2px_var(--dama-board-highlight)]",
                     )}
                   />
                 </span>
@@ -702,20 +764,26 @@ export default function DraughtsBoard2D({
         })}
       </div>
 
-      {activeFly ? (
-        <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
-          <div
-            ref={flyElRef}
-            className="absolute flex items-center justify-center will-change-transform"
-          >
+      {/* Keep fly layer mounted - remounting mid-pick caused 2D piece glitches. */}
+      <div
+        className="pointer-events-none absolute inset-0 z-[2]"
+        aria-hidden
+        style={{ visibility: activeFly ? "visible" : "hidden" }}
+      >
+        <div
+          ref={flyElRef}
+          className="absolute flex items-center justify-center will-change-transform"
+        >
+          {activeFly ? (
             <PieceDisc
               player={activeFly.player}
               isKing={activeFly.isKing}
-              className="h-full w-full shadow-lg"
+              // Same drop-shadow as resting PieceDisc - shadow-lg caused pick/put pop.
+              className="h-full w-full"
             />
-          </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

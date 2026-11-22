@@ -16,7 +16,7 @@ import { isLegalChromeReady } from "@/types/legal-chrome";
 import { isMarketingChromeReady } from "@/types/platform";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { type ReactNode, Suspense } from "react";
+import { type ReactNode, Suspense, useEffect } from "react";
 
 function footerActive(pathname: string, href: string): boolean {
   const pathOnly = href.split("?")[0] || href;
@@ -61,6 +61,46 @@ function MarketingShell({
   const isHome = pathname === "/";
   const lockViewport = isHome && lockHomeViewport;
 
+  // Locked play: kill document rubber-band so board gestures cannot pull the header.
+  useEffect(() => {
+    if (!lockViewport) return;
+    const root = document.documentElement;
+    const prevRoot = root.style.overscrollBehaviorY;
+    const prevBody = document.body.style.overscrollBehaviorY;
+    const prevRootOverflow = root.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevRootTouch = root.style.touchAction;
+    root.style.overscrollBehaviorY = "none";
+    document.body.style.overscrollBehaviorY = "none";
+    root.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    // manipulation: allow rail pan-y; board/header blocked via preventDefault below.
+    root.style.touchAction = "manipulation";
+    const onTouchMove = (event: TouchEvent) => {
+      const t = event.target;
+      if (!(t instanceof Element)) return;
+      // Only intentional scrollports may scroll. Everything else (board, header, main)
+      // must not rubber-band the locked shell / fixed top nav.
+      if (
+        t.closest(
+          "[data-dama-rail-scroll], [data-dama-rail-aside], [role='dialog'], [data-radix-scroll-area-viewport], [data-radix-select-content]",
+        )
+      ) {
+        return;
+      }
+      if (event.cancelable) event.preventDefault();
+    };
+    window.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    return () => {
+      root.style.overscrollBehaviorY = prevRoot;
+      document.body.style.overscrollBehaviorY = prevBody;
+      root.style.overflow = prevRootOverflow;
+      document.body.style.overflow = prevBodyOverflow;
+      root.style.touchAction = prevRootTouch;
+      window.removeEventListener("touchmove", onTouchMove, true);
+    };
+  }, [lockViewport]);
+
   return (
     <div
       className={cn(
@@ -68,7 +108,9 @@ function MarketingShell({
         // Locked play: flex + h-svh (not dvh) so iOS Safari URL-bar show/hide cannot
         // resize the board host in a measure loop. Rail still scrolls inside.
         // Unlocked embeds (leaderboard/match): page scroll; md+ row with left rail.
-        lockViewport ? "flex h-svh max-h-svh overflow-hidden" : "min-h-screen md:flex",
+        lockViewport
+          ? "flex h-svh max-h-svh overflow-hidden overscroll-none"
+          : "min-h-screen md:flex",
       )}
     >
       <Suspense fallback={<aside className="hidden h-screen w-[15.5rem] shrink-0 md:block" />}>
@@ -81,7 +123,7 @@ function MarketingShell({
         )}
       >
         <Suspense fallback={null}>
-          <PlayerMobileChrome />
+          <PlayerMobileChrome lockToViewport={lockViewport} />
         </Suspense>
         <main
           className={cn(
@@ -93,7 +135,8 @@ function MarketingShell({
                   lockViewport
                     ? // No main pb on locked play - it left a blank band above the bottom nav.
                       // Rail scrollport clears the nav instead (see playRailAsideScrollClass).
-                      "flex min-h-0 flex-col overflow-hidden"
+                      // overscroll-none: board gestures must not pull the sticky header.
+                      "flex min-h-0 flex-col overflow-hidden overscroll-none"
                     : // Unlocked embeds: document scroll + bottom-nav clearance.
                       cn("overflow-visible", homePlayMainPadClass),
                 )

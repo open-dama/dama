@@ -47,7 +47,14 @@ function isIgnoredScrollTarget(target: EventTarget | null): boolean {
     target.closest("[data-skip-hide-on-scroll]") ||
     // Play rail body / aside scroll must not hide center Filters.
     target.closest("[data-dama-rail-scroll]") ||
-    target.closest("[data-dama-rail-main]")
+    target.closest("[data-dama-rail-main]") ||
+    // Board gestures (2D/3D/Orbit) must never drive header / filter headroom.
+    target.closest("[data-dama-board-plane]") ||
+    target.closest("[data-dama-board-chrome]") ||
+    target.closest("[data-smart-board]") ||
+    target.closest("[data-dama-smart-frame]") ||
+    target.closest("[data-smart-board-stack]") ||
+    target.closest("[data-dama-shell-header]")
   ) {
     return true;
   }

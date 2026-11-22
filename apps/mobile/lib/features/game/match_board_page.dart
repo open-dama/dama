@@ -2197,7 +2197,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
           ),
           body: const Padding(
             padding: EdgeInsets.all(16),
-            child: BoardGridSkeleton(),
+            // Full column height (seats+board) - never a minimized stamp.
+            child: SizedBox.expand(child: BoardGridSkeleton()),
           ),
         ),
       );

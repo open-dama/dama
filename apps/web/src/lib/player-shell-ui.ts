@@ -12,11 +12,11 @@ export const DAMA_MOBILE_HEADER_HEIGHT_VAR = "--dama-mobile-header-height";
  * `md:` drops the nav pad because BottomNavBar is `md:hidden`.
  */
 export const playerMainPadClass =
-  "pb-[calc(var(--dama-bottom-nav-height,5.5rem)+var(--dama-bottom-pad-extra,1.25rem)+env(safe-area-inset-bottom,0px))] md:pb-8";
+  "pb-[calc(var(--dama-bottom-nav-height,4.25rem)+var(--dama-bottom-pad-extra,1.25rem)+env(safe-area-inset-bottom,0px))] md:pb-8";
 
 /** Home play: same bottom-nav clearance; tighter on md+ where the nav is hidden. */
 export const homePlayMainPadClass =
-  "pb-[calc(var(--dama-bottom-nav-height,5.5rem)+var(--dama-bottom-pad-extra,1.25rem)+env(safe-area-inset-bottom,0px))] md:pb-3";
+  "pb-[calc(var(--dama-bottom-nav-height,4.25rem)+var(--dama-bottom-pad-extra,1.25rem)+env(safe-area-inset-bottom,0px))] md:pb-3";
 
 /**
  * Mobile/tablet board + rail column (Chess.com locked play hub).
@@ -119,7 +119,7 @@ export const playRailNestedListScrollClass = playRailInnerListScrollClass;
 export const playerMainWidthClass = "w-full max-w-none px-4 sm:px-6 lg:px-8";
 
 export const playerStickyHeaderClass =
-  "sticky top-0 z-50 border-b border-[var(--dama-border)]/60 bg-[var(--dama-card)]/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl supports-[backdrop-filter]:bg-[var(--dama-card)]/70";
+  "sticky top-0 z-50 shrink-0 border-b border-[var(--dama-border)]/60 bg-[var(--dama-card)]/95 pt-[env(safe-area-inset-top)] backdrop-blur-xl supports-[backdrop-filter]:bg-[var(--dama-card)]/90 overscroll-none [transform:translateZ(0)]";
 
 export const playerHeaderInnerClass =
   "flex h-14 w-full max-w-none items-center justify-between gap-3 px-4 sm:px-6 lg:px-8";
@@ -148,3 +148,11 @@ export const tournamentBrowseGridClass =
  */
 export const mobilePlayBoardMaxHeightClass =
   "max-lg:h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:max-h-[min(52svh,calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-10.5rem))] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden";
+
+/**
+ * Full seats+board shimmer column (playing + non-playing).
+ * Nearly the full locked shell under header + bottom FAB (not idle 52svh stamp).
+ * shrink-0 so the rail cannot crush seats+board into a plane-only postage stamp.
+ */
+export const mobilePlayBoardShimmerHeightClass =
+  "max-lg:!h-[calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-4.5rem)] max-lg:!max-h-[calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-4.5rem)] max-lg:!min-h-[calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-4.5rem)] max-lg:w-full max-lg:shrink-0 max-lg:justify-start max-lg:overflow-hidden";

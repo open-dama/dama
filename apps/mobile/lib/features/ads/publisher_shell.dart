@@ -5,7 +5,7 @@ import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/theme/theme_toggle_button.dart';
 import 'package:dama_mobile/core/types/types.dart';
-import 'package:dama_mobile/core/ui/scrollable_portal_bottom_nav.dart';
+import 'package:dama_mobile/core/ui/collapsible_bottom_nav_fab.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:dama_mobile/features/ads/publisher_analytics_page.dart';
 import 'package:dama_mobile/features/ads/publisher_campaigns_page.dart';
@@ -252,7 +252,7 @@ class _PublisherShellState extends State<PublisherShell> {
         ],
       ),
       body: _pageFor(current.routeKey),
-      bottomNavigationBar: ScrollablePortalBottomNav(
+      bottomNavigationBar: CollapsibleBottomNavFab(
         selectedIndex: _index.clamp(0, _tabs.length - 1),
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: [

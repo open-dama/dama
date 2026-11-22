@@ -1298,10 +1298,20 @@ class _HomePageState extends State<HomePage> {
 
                   // Bound to viewport so the play-rail list scrolls inside the hub,
                   // not the whole page (web aside overflow-hidden parity).
+                  // Play board surface: never scroll the shell (keeps AppBar fixed;
+                  // board pans must not rubber-band the header - web parity).
+                  final playSurfaceLocked = _playChromeLoading ||
+                      _playRailChromeLoading ||
+                      (_playChrome != null && _playRailChrome != null);
                   return RefreshIndicator(
                     onRefresh: _loadHome,
+                    notificationPredicate: playSurfaceLocked
+                        ? (_) => false
+                        : defaultScrollNotificationPredicate,
                     child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
+                      physics: playSurfaceLocked
+                          ? const NeverScrollableScrollPhysics()
+                          : const AlwaysScrollableScrollPhysics(),
                       child: SizedBox(
                         height: constraints.maxHeight,
                         child: Padding(
@@ -1671,7 +1681,7 @@ List<List<dynamic>> _previewStartingBoard({int size = 10, int setupRows = 4}) {
   return board;
 }
 
-class _HomePreviewBoard3D extends StatelessWidget {
+class _HomePreviewBoard3D extends StatefulWidget {
   const _HomePreviewBoard3D({
     required this.opponentLabel,
     required this.playerLabel,
@@ -1687,23 +1697,30 @@ class _HomePreviewBoard3D extends StatelessWidget {
   final String vsLabel;
 
   @override
+  State<_HomePreviewBoard3D> createState() => _HomePreviewBoard3DState();
+}
+
+class _HomePreviewBoard3DState extends State<_HomePreviewBoard3D> {
+  bool _painted = false;
+
+  @override
   Widget build(BuildContext context) {
     final board = _previewStartingBoard();
     final frame = PlayBoardFrame(
-      vsLabel: vsLabel,
-      topSeat: opponentLabel.trim().isNotEmpty
+      vsLabel: widget.vsLabel,
+      topSeat: widget.opponentLabel.trim().isNotEmpty
           ? _SideSeatChip(
-              label: opponentLabel,
-              clock: clockLabel,
+              label: widget.opponentLabel,
+              clock: widget.clockLabel,
               muted: true,
               pieceSideLight: false,
-              trailing: boardViewToggle,
+              trailing: widget.boardViewToggle,
             )
-          : boardViewToggle,
-      bottomSeat: playerLabel.trim().isNotEmpty
+          : widget.boardViewToggle,
+      bottomSeat: widget.playerLabel.trim().isNotEmpty
           ? _SideSeatChip(
-              label: playerLabel,
-              clock: clockLabel,
+              label: widget.playerLabel,
+              clock: widget.clockLabel,
               muted: false,
               pieceSideLight: true,
               clockActive: true,
@@ -1717,10 +1734,21 @@ class _HomePreviewBoard3D extends StatelessWidget {
         selectedCol: null,
         onSelectSquare: (_, __) {},
         interactive: false,
+        onPaintReady: (ready) {
+          if (!mounted || _painted == ready) return;
+          setState(() => _painted = ready);
+        },
       ),
     );
-    // Same smart maximize / FAB / pop flow as live boards (web parity).
-    return SmartBoardShell(active: true, popSignal: true, child: frame);
+    // Until first paint: fill column with visible seats+board (budget) so WebGL can
+    // paint - Offstage/offscreen GL often never fires onPaintReady (infinite shimmer).
+    // After paint: same smart maximize / FAB / pop flow as live boards (web parity).
+    final shell = SmartBoardShell(
+      active: _painted,
+      popSignal: _painted,
+      child: frame,
+    );
+    return _painted ? shell : SizedBox.expand(child: shell);
   }
 }
 

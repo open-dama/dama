@@ -12,6 +12,7 @@ import {
   playerHeaderInnerClass,
   playerStickyHeaderClass,
 } from "@/lib/player-shell-ui";
+import { cn } from "@/lib/utils";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
 import { useRef } from "react";
 
@@ -23,7 +24,12 @@ export function PlayerShellHeader() {
   const token = useAuthStore((s) => s.token);
 
   return (
-    <header ref={headerRef} className={playerStickyHeaderClass}>
+    <header
+      ref={headerRef}
+      className={cn(playerStickyHeaderClass, "shrink-0 overscroll-none")}
+      data-dama-shell-header=""
+      data-skip-hide-on-scroll=""
+    >
       <div className={playerHeaderInnerClass}>
         <div className="flex min-w-0 items-center gap-2 md:hidden">
           <PlayerMobileMenu />

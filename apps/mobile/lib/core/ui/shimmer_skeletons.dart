@@ -742,39 +742,56 @@ class BoardSeatBarSkeleton extends StatelessWidget {
 }
 
 /// Checkerboard plane only (web [BoardAreaSkeleton]).
-/// 10×10 flush plane - matches live board surface (no outer border/pad).
+/// Standard shimmer card shell - no board-palette tint.
 class BoardAreaSkeleton extends StatelessWidget {
-  const BoardAreaSkeleton({super.key, this.wrapRoot = true, this.size = 10});
+  /// Default 8×8 matches original web card-shell shimmer (not live 10×10 board).
+  const BoardAreaSkeleton({super.key, this.wrapRoot = true, this.size = 8});
 
   final bool wrapRoot;
   final int size;
 
   @override
   Widget build(BuildContext context) {
-    final boardDark = damaColorsOf(context).boardDark;
-    final grid = ColoredBox(
-      color: boardDark,
-      child: Column(
-        children: [
-          for (var r = 0; r < size; r++)
-            Expanded(
-              child: Row(
-                children: [
-                  for (var col = 0; col < size; col++)
-                    Expanded(
-                      child: Opacity(
-                        opacity: (r + col).isOdd ? 0.9 : 0.5,
-                        child: const SizedBox.expand(
-                          child: ShimmerBox(
-                            borderRadius: BorderRadius.zero,
+    final tokens = damaColorsOf(context);
+    final grid = DecoratedBox(
+      decoration: BoxDecoration(
+        color: tokens.card,
+        borderRadius: BorderRadius.circular(2),
+        border: Border.all(color: tokens.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Column(
+          children: [
+            for (var r = 0; r < size; r++)
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: r == size - 1 ? 0 : 2),
+                  child: Row(
+                    children: [
+                      for (var col = 0; col < size; col++)
+                        Expanded(
+                          child: Padding(
+                            padding:
+                                EdgeInsets.only(right: col == size - 1 ? 0 : 2),
+                            child: Opacity(
+                              opacity: (r + col).isOdd ? 0.9 : 0.55,
+                              child: const SizedBox.expand(
+                                child: ShimmerBox(
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(1),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
     return wrapRoot ? _shimmerRoot(grid) : grid;
