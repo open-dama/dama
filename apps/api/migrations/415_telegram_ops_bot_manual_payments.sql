@@ -6,7 +6,7 @@ INSERT INTO platform_settings (key, value, updated_at)
 VALUES (
   'telegram_ops_bot',
   '{
-    "enabled": false,
+    "enabled": true,
     "bot_service_url": "",
     "bot_api_key": "",
     "reviewer_user_id": "",
