@@ -742,54 +742,47 @@ class BoardSeatBarSkeleton extends StatelessWidget {
 }
 
 /// Checkerboard plane only (web [BoardAreaSkeleton]).
+/// 10×10 flush plane - matches live board surface (no outer border/pad).
 class BoardAreaSkeleton extends StatelessWidget {
-  const BoardAreaSkeleton({super.key, this.wrapRoot = true, this.size = 8});
+  const BoardAreaSkeleton({super.key, this.wrapRoot = true, this.size = 10});
 
   final bool wrapRoot;
   final int size;
 
   @override
   Widget build(BuildContext context) {
-    final grid = Column(
-      children: [
-        for (var r = 0; r < size; r++) ...[
-          if (r > 0) const SizedBox(height: 2),
-          Expanded(
-            child: Row(
-              children: [
-                for (var col = 0; col < size; col++) ...[
-                  if (col > 0) const SizedBox(width: 2),
-                  Expanded(
-                    child: Opacity(
-                      opacity: (r + col).isOdd ? 0.9 : 0.55,
-                      child: SizedBox.expand(
-                        child: ShimmerBox(
-                          borderRadius: BorderRadius.circular(1),
+    final boardDark = damaColorsOf(context).boardDark;
+    final grid = ColoredBox(
+      color: boardDark,
+      child: Column(
+        children: [
+          for (var r = 0; r < size; r++)
+            Expanded(
+              child: Row(
+                children: [
+                  for (var col = 0; col < size; col++)
+                    Expanded(
+                      child: Opacity(
+                        opacity: (r + col).isOdd ? 0.9 : 0.5,
+                        child: const SizedBox.expand(
+                          child: ShimmerBox(
+                            borderRadius: BorderRadius.zero,
+                          ),
                         ),
                       ),
                     ),
-                  ),
                 ],
-              ],
+              ),
             ),
-          ),
         ],
-      ],
-    );
-    final framed = DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(3),
-        border: Border.all(
-          color: damaColorsOf(context).borderSubtle,
-        ),
       ),
-      child: Padding(padding: const EdgeInsets.all(4), child: grid),
     );
-    return wrapRoot ? _shimmerRoot(framed) : framed;
+    return wrapRoot ? _shimmerRoot(grid) : grid;
   }
 }
 
 /// Flush Chess.com column: top seat + square board + bottom seat (web BoardColumnSkeleton).
+/// Unbounded height → width-square hug; bounded host → height-fit (PlayBoardFrame parity).
 class BoardColumnSkeleton extends StatelessWidget {
   const BoardColumnSkeleton({
     super.key,
@@ -814,11 +807,11 @@ class BoardColumnSkeleton extends StatelessWidget {
         if (!maxW.isFinite || maxW <= 0) return const SizedBox.shrink();
         final reserved = _seatRowH * 2 + _seatGap * 2;
         final double side;
-        if (maxH.isFinite && maxH > 0) {
+        if (!maxH.isFinite || maxH <= 0) {
+          side = maxW;
+        } else {
           final availH = maxH - reserved;
           side = (maxW <= availH ? maxW : availH).clamp(0.0, double.infinity);
-        } else {
-          side = maxW;
         }
         if (side <= 0) return const SizedBox.shrink();
         return Center(

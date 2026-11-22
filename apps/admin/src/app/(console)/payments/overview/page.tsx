@@ -4,11 +4,12 @@ import { SignInLink } from "@/components/auth/SignInLink";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PaymentsOverviewSkeleton } from "@/components/ui/shimmer-skeletons";
 import {
+  type FinancialOverviewPeriodDays,
   useAdminConsoleChromeQuery,
   useAdminFinancialOverviewQuery,
   useConsoleNavQuery,
-  type FinancialOverviewPeriodDays,
 } from "@/hooks/query";
+import type { FinancialCurrencyAmount } from "@/hooks/query/useAdminFinancialOverviewQuery";
 import { useIsConsoleRole } from "@/hooks/useIsConsoleRole";
 import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
 import { adminConsoleChromeUnavailable } from "@/lib/chrome-unavailable";
@@ -16,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
 import { isAdminConsoleChromeReady } from "@/types/admin-console-chrome";
 import type { ConsoleNavModule } from "@/types/console";
-import type { FinancialCurrencyAmount } from "@/hooks/query/useAdminFinancialOverviewQuery";
 import {
   ArrowLeftRight,
   Building2,
@@ -29,7 +29,7 @@ import {
   Receipt,
   Wallet,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 function consoleNavHref(modules: ConsoleNavModule[], path: string): string {
   const want = path.trim().replace(/\/$/, "");

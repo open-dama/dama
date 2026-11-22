@@ -2,9 +2,9 @@ import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
 import { apiToastMessage } from "@/lib/api-toast-message";
 import { apiRestUrl } from "@/lib/env";
 import { invalidateAdPublisher } from "@/lib/invalidate";
-import type { ViewportCreativeSlot } from "@/types/ads";
 import type { AdPlayback } from "@/types/ad-playback";
 import { isViewportCreativesChromeReady } from "@/types/ad-playback";
+import type { ViewportCreativeSlot } from "@/types/ads";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { EventEntryFilter } from "@/hooks/query/useEventsPublicListQuery";
 import type { TournamentEntryFilter } from "@/hooks/query/useTournamentsQuery";
+import { describe, expect, it } from "vitest";
 
 /** All-tab: Official filter values must be assignable to Community list filters. */
 function communityFiltersFromAllTab(

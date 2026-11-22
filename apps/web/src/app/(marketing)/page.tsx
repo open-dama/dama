@@ -9,6 +9,7 @@ import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQ
 import { softCommunityJoinStatusMessage } from "@/lib/community-player-chrome-soft";
 import { cupLifecyclePhase } from "@/lib/cupLifecycle";
 import { isHomeViewportLocked } from "@/lib/home-shell";
+import { invalidateTournamentCup, invalidateTournaments } from "@/lib/invalidate";
 import { prizePoolCardLabelsFromHome } from "@/lib/prize-pool-lines";
 import {
   freeJoinPlayHref,
@@ -21,7 +22,6 @@ import { isHomeSurfaceChromeReady } from "@/types/home-chrome";
 import { isPaymentModalChromeReady } from "@/types/payment-modal-chrome";
 import { isMarketingChromeReady } from "@/types/platform";
 import type { Tournament } from "@/types/tournament";
-import { invalidateTournamentCup, invalidateTournaments } from "@/lib/invalidate";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";

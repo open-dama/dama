@@ -393,7 +393,6 @@ class _MatchSeatAvatarsState extends State<MatchSeatAvatars> {
                       decoration: BoxDecoration(
                         color: (thumb == null || thumb.isEmpty) ? swatch : null,
                         borderRadius: BorderRadius.circular(3),
-                        border: Border.all(color: const Color(0x4D000000)),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: DamaUserAvatar(

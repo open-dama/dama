@@ -90,8 +90,9 @@ class _YouTubeEmbedState extends State<_YouTubeEmbed> {
   void initState() {
     super.initState();
     final id = Uri.encodeComponent(widget.videoId.trim());
+    // mute=1: keep board land SFX audible - unmuted WebView media steals audio focus.
     final src =
-        'https://www.youtube-nocookie.com/embed/$id?rel=0&modestbranding=1&playsinline=1';
+        'https://www.youtube-nocookie.com/embed/$id?rel=0&modestbranding=1&playsinline=1&mute=1';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
@@ -104,7 +105,7 @@ class _YouTubeEmbedState extends State<_YouTubeEmbed> {
     if (oldWidget.videoId != widget.videoId) {
       final id = Uri.encodeComponent(widget.videoId.trim());
       final src =
-          'https://www.youtube-nocookie.com/embed/$id?rel=0&modestbranding=1&playsinline=1';
+          'https://www.youtube-nocookie.com/embed/$id?rel=0&modestbranding=1&playsinline=1&mute=1';
       _controller.loadRequest(Uri.parse(src));
     }
   }

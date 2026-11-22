@@ -87,11 +87,10 @@ function SeatButton({
       {/* Inspect: avatar + name (not the whole seat chip). */}
       <button
         type="button"
-        className="relative h-11 w-11 shrink-0 rounded-full border-2 disabled:cursor-default"
+        className="relative h-11 w-11 shrink-0 rounded-full disabled:cursor-default"
         style={{
-          // White seat → black disc; black seat → white disc.
+          // White seat → black disc; black seat → white disc. No piece/board-colored border.
           background: seat === "white" ? "var(--dama-piece-dark)" : "var(--dama-piece-light)",
-          borderColor: seat === "white" ? "var(--dama-piece-dark)" : "var(--dama-piece-light)",
         }}
         disabled={!card}
         title={inspectTitle}

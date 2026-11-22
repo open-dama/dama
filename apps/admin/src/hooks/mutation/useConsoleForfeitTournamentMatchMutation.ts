@@ -1,5 +1,5 @@
-import { authHeaders, restClient } from "@/lib/api";
 import { tournamentChromeQueryKey } from "@/hooks/query/useTournamentChromeQuery";
+import { authHeaders, restClient } from "@/lib/api";
 import { apiToastMessage } from "@/lib/api-toast-message";
 import type { TournamentChrome } from "@/types/tournament-chrome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";

@@ -24,8 +24,8 @@ import {
   ShimmerBlock,
 } from "@/components/ui/shimmer-skeletons";
 import { useReviewReceiptMutation } from "@/hooks/mutation";
-import { useAdminReceiptQuery } from "@/hooks/query/useAdminReceiptQuery";
 import { useAdminConsoleChromeQuery, useAdminReceiptsQuery } from "@/hooks/query";
+import { useAdminReceiptQuery } from "@/hooks/query/useAdminReceiptQuery";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
 import { useIsConsoleRole } from "@/hooks/useIsConsoleRole";

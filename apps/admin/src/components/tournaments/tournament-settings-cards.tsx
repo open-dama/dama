@@ -12,15 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { dualPursePlacePercentInvalid } from "@/lib/competition-payout";
 import {
   useSaveCompetitionArenaSettingsMutation,
   useSaveCompetitionPayoutDefaultsMutation,
-  useSaveCompetitionPrizeSettleSettingsMutation,
   useSaveCompetitionPointsToastSettingsMutation,
+  useSaveCompetitionPrizeSettleSettingsMutation,
   useSaveCompetitionStandingsSettingsMutation,
 } from "@/hooks/mutation";
 import { useCompetitionPointsToastSettingsQuery } from "@/hooks/query";
+import { dualPursePlacePercentInvalid } from "@/lib/competition-payout";
 import type { ClientEnums } from "@/types/platform";
 import type { TournamentChrome } from "@/types/tournament-chrome";
 import { useEffect, useState } from "react";

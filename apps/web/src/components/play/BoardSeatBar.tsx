@@ -97,12 +97,12 @@ export function BoardSeatBar({
 
   const avatarFace = (
     <span
-      className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-visible rounded-sm text-xs font-semibold ring-1 ring-black/30 sm:h-9 sm:w-9 sm:text-sm"
+      className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-visible rounded-sm text-xs font-semibold sm:h-9 sm:w-9 sm:text-sm"
       style={
         thumb
           ? undefined
           : {
-              // Seat swatch = that seat's piece color (not inverted contrast).
+              // Seat swatch = that seat's piece color (not inverted contrast). No board/piece border.
               background:
                 pieceSide === "light" ? "var(--dama-piece-light)" : "var(--dama-piece-dark)",
               color: pieceSide === "light" ? "var(--dama-piece-dark)" : "var(--dama-piece-light)",

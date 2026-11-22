@@ -1,9 +1,9 @@
 import type { ClientNavLink, ClientNavPayload } from "@/types/platform";
+import { softCommunityJoinTitle, softTournamentsPageTitle } from "./community-player-chrome-soft";
 import {
   playerTournamentDiscoveryHref,
   tournamentsHrefFromEventsView,
 } from "./competition-cup-source";
-import { softCommunityJoinTitle, softTournamentsPageTitle } from "./community-player-chrome-soft";
 import { softHostingAnalyticsTitle, softHostingBrandName } from "./hosting-organizer-chrome-soft";
 
 /** Ops routes - signed-in only (hamburger Account / user menu / portal rail), never bottom tabs. */

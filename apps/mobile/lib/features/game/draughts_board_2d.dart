@@ -145,7 +145,17 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
-          _finishAndAdvance();
+          try {
+            _finishAndAdvance();
+          } catch (_) {
+            // Never leave the board frozen after a land commit error.
+            setState(() {
+              _active = null;
+              _progress = 0;
+              _holdSync = false;
+              _queue.clear();
+            });
+          }
         }
       });
     _shakeCtrl = AnimationController(
@@ -496,8 +506,9 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         builder: (context, child) {
           final shakeT = _shakeCtrl.value;
           final shakeAmp = (1.0 - shakeT) * 4.0;
-          final shakeDx =
-              shakeAmp > 0.05 ? math.sin(shakeT * math.pi * 10) * shakeAmp : 0.0;
+          final shakeDx = shakeAmp > 0.05
+              ? math.sin(shakeT * math.pi * 10) * shakeAmp
+              : 0.0;
           return Transform.translate(offset: Offset(shakeDx, 0), child: child);
         },
         // Continuous opaque plane under cells (web/3D parity) so anti-alias

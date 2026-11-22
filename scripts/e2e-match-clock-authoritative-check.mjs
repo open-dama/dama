@@ -4,7 +4,7 @@
  * Requires local API (default http://127.0.0.1:18080) and a player JWT
  * (DAMA_E2E_TOKEN or .tmp-admin-auth.json access_token / token).
  */
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");

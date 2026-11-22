@@ -1,7 +1,7 @@
 "use client";
 
-import { ReceiptDetailSkeletonBoot } from "@/components/wallet/ReceiptDetailSkeletonBoot";
 import { PaymentReceiptDetail } from "@/components/wallet/PaymentReceiptDetail";
+import { ReceiptDetailSkeletonBoot } from "@/components/wallet/ReceiptDetailSkeletonBoot";
 import { useEventsOrganizerChromeQuery } from "@/hooks/query/useEventsOrganizerChromeQuery";
 import { softHostingChromeUnavailable } from "@/lib/hosting-organizer-chrome-soft";
 import { moneyBasePathFromHref } from "@/lib/money-base-path";

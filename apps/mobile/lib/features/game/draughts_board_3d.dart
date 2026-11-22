@@ -238,7 +238,17 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
-          _finishAndAdvance();
+          try {
+            _finishAndAdvance();
+          } catch (_) {
+            // Never leave the board frozen after a land commit error.
+            setState(() {
+              _active = null;
+              _progress = 0;
+              _holdSync = false;
+              _queue.clear();
+            });
+          }
         }
       });
     // Illegal-destination reject shake (horizontal). Captures never trigger this.
@@ -556,7 +566,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       animation: Listenable.merge([_anim, _shakeCtrl]),
       builder: (context, _) {
         (double, double, double, double, double)? fly;
-        final progress = _anim.isAnimating || _active != null ? _anim.value : 0.0;
+        final progress =
+            _anim.isAnimating || _active != null ? _anim.value : 0.0;
         if (_active != null && progress < 1) {
           fly = _pieceTransform(
             progress,
@@ -569,9 +580,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         }
         final shakeT = _shakeCtrl.value;
         final shakeAmp = (1.0 - shakeT) * 6.0;
-        final shakeDx = shakeAmp > 0.05
-            ? math.sin(shakeT * math.pi * 10) * shakeAmp
-            : 0.0;
+        final shakeDx =
+            shakeAmp > 0.05 ? math.sin(shakeT * math.pi * 10) * shakeAmp : 0.0;
         final a = _active;
         final burstT = () {
           if (a == null || !a.isCapture || progress <= _holdPhaseEnd) {

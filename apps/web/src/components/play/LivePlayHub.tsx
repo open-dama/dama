@@ -12,12 +12,12 @@ import { PlayRailAside } from "@/components/play-rail/PlayRailAside";
 import { PlayRailScrollPort } from "@/components/play-rail/PlayRailScrollPort";
 import type { RailPlayer } from "@/components/play-rail/PlayerListRow";
 import { BoardSeatBar } from "@/components/play/BoardSeatBar";
-import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
-import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { MatchPauseOverlay } from "@/components/play/MatchPauseOverlay";
 import { OfficialPauseActivityStrip } from "@/components/play/OfficialPauseActivityStrip";
 import { OfficialPauseBanner } from "@/components/play/OfficialPauseBanner";
+import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
 import { PlayPauseStopActions } from "@/components/play/PlayPauseStopActions";
+import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { useServerMatchClocks } from "@/components/player/MatchClock";
 import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,12 @@ import { useMaxLg } from "@/hooks/useMaxLg";
 import { authHeaders, resolveWsUrl, restClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/api-client-error";
 import { applyOptimisticDraughtsMove } from "@/lib/applyOptimisticDraughtsMove";
-import { playGameNotify, unlockGameAudio } from "@/lib/audio-notify";
+import {
+  armAudioGestureResume,
+  playGameNotify,
+  resumeGameAudio,
+  unlockGameAudio,
+} from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { pieceSeatNames, usePiecePalette } from "@/lib/board-palette";
 import { useBoardViewMode } from "@/lib/board-view";
@@ -73,7 +78,6 @@ import {
   withResolvedOutcome,
 } from "@/lib/gameOutcome";
 import { invalidateAvatarSurfaces, invalidateFeatureFlags } from "@/lib/invalidate";
-import { isOtpSessionVerified, subscribeOtpSession } from "@/lib/otp-session";
 import {
   applyOfficialPauseFmt,
   buildOfficialPausedBannerLines,
@@ -81,6 +85,7 @@ import {
   isOfficialPause,
   officialPauseRoleLabel,
 } from "@/lib/official-pause-display";
+import { isOtpSessionVerified, subscribeOtpSession } from "@/lib/otp-session";
 import {
   getActivePlayBoardGameId,
   isLeavePauseSilentError,
@@ -201,7 +206,7 @@ function LiveSeatBar({
   const avatar = (
     <span
       className={cn(
-        "relative flex shrink-0 items-center justify-center rounded-full font-semibold ring-1 ring-black/20",
+        "relative flex shrink-0 items-center justify-center rounded-full font-semibold",
         layout === "side"
           ? "h-8 w-8 text-[11px] sm:h-9 sm:w-9 sm:text-xs"
           : "h-8 w-8 text-xs sm:h-9 sm:w-9 sm:text-sm",
@@ -608,6 +613,14 @@ export function LivePlayHub({
 
   useEffect(() => {
     if (phase === "menu") clearStoredPlaySession();
+  }, [phase]);
+
+  // Lobby YouTube unmounts when live starts - reclaim AudioContext so put-downs are audible
+  // (Lichess/Chess.com: no competing media beside the live board).
+  useEffect(() => {
+    if (phase !== "playing") return;
+    void resumeGameAudio();
+    armAudioGestureResume();
   }, [phase]);
 
   const leavePauseRef = useRef({

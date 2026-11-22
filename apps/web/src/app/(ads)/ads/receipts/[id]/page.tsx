@@ -1,7 +1,7 @@
 "use client";
 
-import { ReceiptDetailSkeletonBoot } from "@/components/wallet/ReceiptDetailSkeletonBoot";
 import { PaymentReceiptDetail } from "@/components/wallet/PaymentReceiptDetail";
+import { ReceiptDetailSkeletonBoot } from "@/components/wallet/ReceiptDetailSkeletonBoot";
 import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { moneyBasePathFromHref } from "@/lib/money-base-path";
 import { useParams } from "next/navigation";

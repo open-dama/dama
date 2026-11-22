@@ -930,7 +930,15 @@ function BoardScene({
       queueMicrotask(() => {
         // Skip if a newer ply already replaced this one (avoids double startNext).
         if (animationRef.current !== animation) return;
-        finishAndAdvance();
+        try {
+          finishAndAdvance();
+        } catch {
+          // Never leave finishQueued stuck with a frozen piece mid-board.
+          animationRef.current = null;
+          holdSyncRef.current = false;
+          setAnimMask(null);
+          setIsAnimating(false);
+        }
       });
     }
   });
@@ -1129,7 +1137,13 @@ export default function DraughtsScene3D(props: Props) {
         // Pulled-back default framing (more margin around the board than the prior 12.8/9.2 @ fov 37).
         camera={{ position: [0, 15.1, 10.85], fov: 38 }}
         dpr={performanceTier === "low" ? 1 : [1, 2]}
-        gl={{ alpha: true }}
+        // Chess.com/Lichess-style: prefer discrete GPU, skip MSAA on low tier to avoid mid-match hitch.
+        gl={{
+          alpha: true,
+          antialias: performanceTier === "high",
+          powerPreference: "high-performance",
+          stencil: false,
+        }}
         style={{ background: "transparent" }}
         onCreated={() => {
           const forSize = size;

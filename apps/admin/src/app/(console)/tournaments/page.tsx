@@ -1,20 +1,20 @@
 "use client";
 
 import { AdminFilterBar } from "@/components/admin/admin-filter-bar";
-import { TournamentReportsPanel } from "@/components/tournaments/TournamentReportsPanel";
-import { OfficialPauseDialog } from "@/components/tournaments/OfficialPauseDialog";
-import { OfficialPauseLiveBoards } from "@/components/tournaments/OfficialPauseLiveBoards";
-import { ArenaDurationField } from "@/components/tournaments/ArenaDurationField";
-import {
-  ArenaSettingsCard,
-  PayoutDefaultsCard,
-  PrizeSettleSettingsCard,
-  PointsToastSettingsCard,
-  StandingsPointsCard,
-} from "@/components/tournaments/tournament-settings-cards";
 import { SignInLink } from "@/components/auth/SignInLink";
 import { EntityMediaEditor } from "@/components/media/EntityMediaEditor";
 import { GalleryCarousel } from "@/components/media/GalleryCarousel";
+import { ArenaDurationField } from "@/components/tournaments/ArenaDurationField";
+import { OfficialPauseDialog } from "@/components/tournaments/OfficialPauseDialog";
+import { OfficialPauseLiveBoards } from "@/components/tournaments/OfficialPauseLiveBoards";
+import { TournamentReportsPanel } from "@/components/tournaments/TournamentReportsPanel";
+import {
+  ArenaSettingsCard,
+  PayoutDefaultsCard,
+  PointsToastSettingsCard,
+  PrizeSettleSettingsCard,
+  StandingsPointsCard,
+} from "@/components/tournaments/tournament-settings-cards";
 import { AmountInput } from "@/components/ui/amount-input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -52,28 +52,20 @@ import {
 } from "@/components/ui/shimmer-skeletons";
 import { SkipPagination } from "@/components/ui/skip-pagination";
 import { Textarea } from "@/components/ui/textarea";
-import { parseDefaultArenaDurationMinutes, tournamentFormatIsArena } from "@/lib/competition-arena";
-import { classicSeatCeiling, formatSeatCapDisplay } from "@/lib/seat-cap-display";
-import {
-  buildPlacePercentsPayload,
-  defaultPayoutModeForFormat,
-  payoutModeOptions,
-  placePercentsSumInvalid,
-} from "@/lib/competition-payout";
 import {
   useClearTournamentPrizeImageMutation,
-  useCreateTournamentMutation,
-  useDeleteTournamentMutation,
-  useRemoveTournamentGalleryMutation,
-  useSetTournamentStatusMutation,
   useConsoleForfeitTournamentMatchMutation,
   useConsoleRematchTournamentMatchMutation,
   useConsoleStartTournamentMatchMutation,
+  useCreateTournamentMutation,
+  useDeleteTournamentMutation,
+  useFinishTournamentArenaMutation,
   useOfficialPauseGameMutation,
   useOfficialPauseMetaMutation,
   useOfficialResumeGameMutation,
+  useRemoveTournamentGalleryMutation,
+  useSetTournamentStatusMutation,
   useSettleCompetitionPrizesMutation,
-  useFinishTournamentArenaMutation,
   useStartTournamentCupMutation,
   useUpdateTournamentMutation,
   useUploadTournamentGalleryMutation,
@@ -86,16 +78,42 @@ import {
   useAdminTournamentEntriesQuery,
   useAdminTournamentScoreboardQuery,
   useAdminTournamentsQuery,
-  useMyPermissionsQuery,
   useClientEnumsQuery,
   useConsoleFeatureFlagsQuery,
   useEventsCatalogQuery,
+  useMyPermissionsQuery,
   useOfficialPauseChromeQuery,
   useOfficialPauseEventsQuery,
   usePaymentCurrencyQuery,
   useTournamentChromeQuery,
 } from "@/hooks/query";
 import { adminGameStateQueryKey } from "@/hooks/query/useAdminGameStateQuery";
+import { useMediaUploadChromeQuery } from "@/hooks/query/useMediaUploadChromeQuery";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
+import { useIsConsoleRole } from "@/hooks/useIsConsoleRole";
+import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
+import { useUrlSkip } from "@/hooks/useUrlSkip";
+import { authHeaders, restClient } from "@/lib/api";
+import { parseDefaultArenaDurationMinutes, tournamentFormatIsArena } from "@/lib/competition-arena";
+import {
+  buildPlacePercentsPayload,
+  defaultPayoutModeForFormat,
+  payoutModeOptions,
+  placePercentsSumInvalid,
+} from "@/lib/competition-payout";
+import { parseListPageSize } from "@/lib/parse-list-page-size";
+import { QueryStale } from "@/lib/query-policy";
+import { resolvePublicMediaUrl } from "@/lib/resolve-public-media-url";
+import { parsePositiveDecimal } from "@/lib/sanitize-decimal-input";
+import { sanitizeIntegerInput } from "@/lib/sanitize-integer-input";
+import { classicSeatCeiling, formatSeatCapDisplay } from "@/lib/seat-cap-display";
+import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/auth";
+import type { AdminTournament } from "@/types";
+import type { EventsCatalogFormat } from "@/types/events-catalog";
+import type { GamePayload } from "@/types/game";
+import { type MediaUploadChrome, isMediaUploadChromeReady } from "@/types/media-upload-chrome";
 import {
   fillOfficialPauseFmt,
   formatPauseDurationSeconds,
@@ -104,31 +122,13 @@ import {
   livePauseStatusLabel,
   officialPauseRoleLabel,
 } from "@/types/official-pause-chrome";
-import { useMediaUploadChromeQuery } from "@/hooks/query/useMediaUploadChromeQuery";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
-import { useIsConsoleRole } from "@/hooks/useIsConsoleRole";
-import { authHeaders, restClient } from "@/lib/api";
-import { QueryStale } from "@/lib/query-policy";
-import { parsePositiveDecimal } from "@/lib/sanitize-decimal-input";
-import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
-import { toast } from "sonner";
-import { useUrlSkip } from "@/hooks/useUrlSkip";
-import { parseListPageSize } from "@/lib/parse-list-page-size";
-import { resolvePublicMediaUrl } from "@/lib/resolve-public-media-url";
-import { sanitizeIntegerInput } from "@/lib/sanitize-integer-input";
-import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/store/auth";
-import type { AdminTournament } from "@/types";
-import type { GamePayload } from "@/types/game";
 import type { ClientEnums } from "@/types/platform";
-import type { EventsCatalogFormat } from "@/types/events-catalog";
-import { type MediaUploadChrome, isMediaUploadChromeReady } from "@/types/media-upload-chrome";
 import type { TournamentBracketMatch } from "@/types/tournament-bracket";
 import { type TournamentChrome, isTournamentChromeReady } from "@/types/tournament-chrome";
 import { useQueries } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 type TournamentFormMode = { kind: "create" } | { kind: "edit"; tournament: AdminTournament };
 

@@ -10,9 +10,9 @@ import {
 import { resolvePublicMediaUrl } from "@/lib/resolve-public-media-url";
 import { viewportAspectRatioFromLabel } from "@/lib/resolve-viewport-creative";
 import { cn } from "@/lib/utils";
+import type { AdScheduleChrome } from "@/types/ad-playback";
 import type { AdCampaign } from "@/types/ads";
 import type { ViewportCreativeSlot } from "@/types/ads";
-import type { AdScheduleChrome } from "@/types/ad-playback";
 import { Loader2, Monitor, Smartphone, Tablet, Upload, X, Youtube } from "lucide-react";
 import { useCallback, useId, useRef } from "react";
 

@@ -4,9 +4,9 @@ import {
   PaymentReceiptDocument,
   type PaymentReceiptDocumentChrome,
 } from "@/components/payments/PaymentReceiptDocument";
+import { ReceiptDetailSkeleton } from "@/components/payments/ReceiptDetailSkeleton";
 import { Button } from "@/components/ui/button";
 import { FetchProgressBar } from "@/components/ui/fetch-progress";
-import { ReceiptDetailSkeleton } from "@/components/payments/ReceiptDetailSkeleton";
 import { useDownloadPaymentReceiptPdfMutation } from "@/hooks/mutation/useDownloadPaymentReceiptPdfMutation";
 import { useAdminConsoleChromeQuery } from "@/hooks/query/useAdminConsoleChromeQuery";
 import { useAdminReceiptQuery } from "@/hooks/query/useAdminReceiptQuery";

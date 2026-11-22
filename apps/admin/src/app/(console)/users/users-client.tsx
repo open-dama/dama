@@ -3,10 +3,9 @@
 import { AdminFilterBar } from "@/components/admin/admin-filter-bar";
 import { SignInLink } from "@/components/auth/SignInLink";
 import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
-import { AdminUserIdentityPanel } from "@/components/users/AdminUserIdentityPanel";
+import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +33,7 @@ import {
   UsersListBodySkeleton,
   UsersListSkeleton,
 } from "@/components/ui/shimmer-skeletons";
+import { AdminUserIdentityPanel } from "@/components/users/AdminUserIdentityPanel";
 import { useSetUserActiveMutation, useSetUserRoleMutation } from "@/hooks/mutation";
 import {
   useAdminConsoleChromeQuery,

@@ -29,8 +29,8 @@ import {
   useToggleEventsCatalogSizeMutation,
   useUpdateEventsCatalogSizeMutation,
 } from "@/hooks/mutation/useEventsCatalogSizeMutations";
-import { useAdminEventsCatalogSizesQuery } from "@/hooks/query/useAdminEventsCatalogSizesQuery";
 import { usePaymentCurrencyQuery } from "@/hooks/query";
+import { useAdminEventsCatalogSizesQuery } from "@/hooks/query/useAdminEventsCatalogSizesQuery";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
 import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";

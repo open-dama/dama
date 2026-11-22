@@ -42,6 +42,7 @@ let gameStartPlayer: HTMLAudioElement | null = null;
 let messagePlayer: HTMLAudioElement | null = null;
 
 let visibilityHooked = false;
+let ctxStateHooked = false;
 let audioUnlocked = false;
 /** Serialize resume/unlock so tab-visible + ad-close cannot race and leave ctx suspended. */
 let resumeInFlight: Promise<void> | null = null;
@@ -64,6 +65,64 @@ function makeAudioContext(): AudioContext | null {
   }
 }
 
+function hookCtxState(audio: AudioContext): void {
+  if (ctxStateHooked) return;
+  ctxStateHooked = true;
+  audio.addEventListener("statechange", () => {
+    // YouTube / in-match video can suspend or interrupt mid-game (Chrome + iOS).
+    if (audio.state === "suspended" || (audio.state as string) === "interrupted") {
+      audioUnlocked = false;
+      armAudioGestureResume();
+    }
+  });
+}
+
+function dropAudioContext(): void {
+  const prev = ctx;
+  ctx = null;
+  masterGain = null;
+  landBuffers.clear();
+  buffersWarm = null;
+  ctxStateHooked = false;
+  audioUnlocked = false;
+  if (prev && prev.state !== "closed") {
+    try {
+      void prev.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Lichess `resumeWithTest`: recreate interrupted/closed contexts, race resume()
+ * with a timeout (resume can hang forever after iframe media), then require running.
+ */
+async function resumeWithTest(): Promise<AudioContext | null> {
+  let audio = getCtx();
+  if (!audio) return null;
+  const state = audio.state as string;
+  if (state !== "running" && state !== "suspended") {
+    // iOS reports `interrupted`; closed contexts cannot resume.
+    dropAudioContext();
+    audio = getCtx();
+    if (!audio) return null;
+  }
+  if (audio.state === "suspended") {
+    try {
+      await Promise.race([
+        audio.resume(),
+        new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 400);
+        }),
+      ]);
+    } catch {
+      /* autoplay / policy */
+    }
+  }
+  return audio.state === "running" ? audio : null;
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!ctx) ctx = makeAudioContext();
@@ -72,6 +131,7 @@ function getCtx(): AudioContext | null {
     masterGain = ctx.createGain();
     masterGain.connect(ctx.destination);
   }
+  hookCtxState(ctx);
   // Tab/background + post-video ads suspend AudioContext → land SFX go silent until resumed.
   if (!visibilityHooked) {
     visibilityHooked = true;
@@ -86,23 +146,16 @@ function getCtx(): AudioContext | null {
     });
     window.addEventListener("focus", () => {
       const audio = ctx;
-      if (audio?.state === "suspended") void resumeGameAudio();
+      if (audio?.state === "suspended" || (audio?.state as string) === "interrupted") {
+        void resumeGameAudio();
+      }
     });
   }
   return ctx;
 }
 
 async function ensureCtx(): Promise<AudioContext | null> {
-  const audio = getCtx();
-  if (!audio) return null;
-  if (audio.state === "suspended") {
-    try {
-      await audio.resume();
-    } catch {
-      /* autoplay / policy */
-    }
-  }
-  return audio;
+  return resumeWithTest();
 }
 
 /**
@@ -231,7 +284,11 @@ export async function resumeGameAudio(): Promise<void> {
   if (resumeInFlight) return resumeInFlight;
   resumeInFlight = (async () => {
     try {
-      await ensureCtx();
+      const audio = await resumeWithTest();
+      if (!audio) {
+        armAudioGestureResume();
+        return;
+      }
       await warmLandBuffers(true);
       audioUnlocked = false;
       await unlockGameAudio();

@@ -1,7 +1,7 @@
-import { authHeaders, restClient } from "@/lib/api";
-import { officialPauseChromeQueryKey } from "@/hooks/query/useOfficialPauseChromeQuery";
 import { adminGameStateQueryKey } from "@/hooks/query/useAdminGameStateQuery";
+import { officialPauseChromeQueryKey } from "@/hooks/query/useOfficialPauseChromeQuery";
 import { officialPauseEventsQueryKey } from "@/hooks/query/useOfficialPauseEventsQuery";
+import { authHeaders, restClient } from "@/lib/api";
 import { officialPauseChromeApiToast } from "@/lib/api-toast-message";
 import type { GamePayload } from "@/types/game";
 import type { OfficialPauseChrome } from "@/types/official-pause-chrome";

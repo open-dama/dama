@@ -9,6 +9,8 @@ import { PlayRailAside } from "@/components/play-rail/PlayRailAside";
 import { PlayRailScrollPort } from "@/components/play-rail/PlayRailScrollPort";
 import { BoardSeatBar } from "@/components/play/BoardSeatBar";
 import { MatchPauseOverlay } from "@/components/play/MatchPauseOverlay";
+import { OfficialPauseActivityStrip } from "@/components/play/OfficialPauseActivityStrip";
+import { OfficialPauseBanner } from "@/components/play/OfficialPauseBanner";
 import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
 import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { useServerMatchClocks } from "@/components/player/MatchClock";
@@ -33,15 +35,6 @@ import { usePlayRailChromeQuery } from "@/hooks/query/usePlayRailChromeQuery";
 import { useProgressionQuery } from "@/hooks/query/useProgressionQuery";
 import { usePublicPlayerQuery } from "@/hooks/query/usePublicPlayerQuery";
 import { useSpectateChromeQuery } from "@/hooks/query/useSpectateChromeQuery";
-import {
-  applyOfficialPauseFmt,
-  buildOfficialPausedBannerLines,
-  buildPauseOverlayCopy,
-  isPlayerPause,
-  officialPauseRoleLabel,
-} from "@/lib/official-pause-display";
-import { OfficialPauseActivityStrip } from "@/components/play/OfficialPauseActivityStrip";
-import { OfficialPauseBanner } from "@/components/play/OfficialPauseBanner";
 import { useMaxLg } from "@/hooks/useMaxLg";
 import { playGameNotify } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
@@ -61,6 +54,13 @@ import { mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
 import { activeClockPlayer } from "@/lib/gameOutcome";
 import { buildInitialBoard } from "@/lib/initial-board";
 import { invalidateAvatarSurfaces } from "@/lib/invalidate";
+import {
+  applyOfficialPauseFmt,
+  buildOfficialPausedBannerLines,
+  buildPauseOverlayCopy,
+  isPlayerPause,
+  officialPauseRoleLabel,
+} from "@/lib/official-pause-display";
 import {
   mobilePlayBoardColumnClass,
   mobilePlayBoardMaxHeightClass,
@@ -145,7 +145,7 @@ function SeatRow({
   const avatar = (
     <span
       className={cn(
-        "relative flex shrink-0 items-center justify-center rounded-full font-semibold ring-1 ring-black/20",
+        "relative flex shrink-0 items-center justify-center rounded-full font-semibold",
         layout === "side"
           ? "h-8 w-8 text-[11px] sm:h-9 sm:w-9 sm:text-xs"
           : "h-8 w-8 text-xs sm:h-9 sm:w-9 sm:text-sm",

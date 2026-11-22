@@ -1,10 +1,10 @@
 "use client";
 
 import MatchmakingPage from "@/app/(player)/matchmaking/page";
+import { GeoAdSlot } from "@/components/ads/GeoAdSlot";
 import { useOptionalSignInModal } from "@/components/auth/SignInModal";
 import { HomePreviewBoard } from "@/components/home/HomePreviewBoard";
 import { PlatformStatsPage } from "@/components/home/PlatformStatsPage";
-import { GeoAdSlot } from "@/components/ads/GeoAdSlot";
 import { BoardColorsPopover } from "@/components/play-rail/BoardColorsPopover";
 import type { ChallengeOpponent } from "@/components/play-rail/CreateChallengeForm";
 import { GamesPanel } from "@/components/play-rail/GamesPanel";
@@ -19,8 +19,8 @@ import { PlayBoardColumn } from "@/components/play/PlayBoardColumn";
 import { SmartBoardHost } from "@/components/play/SmartBoardHost";
 import { CompetitionTournamentsHub } from "@/components/tournaments/CompetitionTournamentsHub";
 import { TournamentCupLobby } from "@/components/tournaments/TournamentCupLobby";
-import { Button } from "@/components/ui/button";
 import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   BoardAreaSkeleton,
@@ -61,6 +61,7 @@ import { tournamentsHrefFromEventsView } from "@/lib/competition-cup-source";
 import { buildInitialBoard } from "@/lib/initial-board";
 import { isOtpSessionVerified, subscribeOtpSession } from "@/lib/otp-session";
 import { parseListPageSize } from "@/lib/parse-list-page-size";
+import { PLAY_SESSION_EVENT, readStoredPlaySession } from "@/lib/play-session-storage";
 import {
   mobilePlayBoardColumnClass,
   mobilePlayBoardMaxHeightClass,
@@ -71,7 +72,6 @@ import {
   playRailStickyMainClass,
   tournamentMiniCardGridClass,
 } from "@/lib/player-shell-ui";
-import { PLAY_SESSION_EVENT, readStoredPlaySession } from "@/lib/play-session-storage";
 import { ensurePracticeToken } from "@/lib/practice-token";
 import {
   shouldOpenTournamentCupLobby,
@@ -1058,8 +1058,10 @@ export function HomePlayHub({
 
     const playRailInner = (
       <>
-        {/* No padded wrapper / no loading skeleton - both created a ghost band under the board. */}
-        <GeoAdSlot hideUntilReady />
+        {/* No padded wrapper / no loading skeleton - both created a ghost band under the board.
+            Unmount lobby YouTube while a match is live - iframe audio steals AudioContext
+            and swallows board put-down SFX (Chess.com: no competing media beside the board). */}
+        {!liveActive ? <GeoAdSlot hideUntilReady /> : null}
         {/* Frozen main tabs (all breakpoints); body scrolls in PlayRailScrollPort. */}
         <div
           className={cn(playRailStickyMainClass, "grid grid-cols-3")}

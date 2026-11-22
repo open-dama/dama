@@ -2,9 +2,8 @@
 
 import { SignInLink } from "@/components/auth/SignInLink";
 import { ManageEventDialog } from "@/components/events/ManageEventDialog";
-import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
-import { hostReputationLine } from "@/lib/host-reputation-line";
 import { ArenaDurationField } from "@/components/tournaments/ArenaDurationField";
+import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
 import { AmountInput } from "@/components/ui/amount-input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,8 +19,8 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   type OpsColumn,
-  type OpsRowSelectionState,
   OpsDataTable,
+  type OpsRowSelectionState,
   selectedRowIds,
 } from "@/components/ui/ops-data-table";
 import { OpsDataTableRowActions } from "@/components/ui/ops-data-table-row-actions";
@@ -51,14 +50,39 @@ import {
 } from "@/hooks/query/useEventsListQuery";
 import { useEventsOrganizerChromeQuery } from "@/hooks/query/useEventsOrganizerChromeQuery";
 import { useMeQuery } from "@/hooks/query/useMeQuery";
+import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQuery";
+import { usePaymentRouteQuery } from "@/hooks/query/usePaymentRouteQuery";
+import { useWalletQuery } from "@/hooks/query/useWalletQuery";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
+import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
+import { useUrlSkip } from "@/hooks/useUrlSkip";
+import { restClient } from "@/lib/api";
+import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
 import { softCommunityJoinStatusMessage } from "@/lib/community-player-chrome-soft";
+import { parseDefaultArenaDurationMinutes, tournamentFormatIsArena } from "@/lib/competition-arena";
+import {
+  buildPlacePercentsPayload,
+  defaultPayoutModeForFormat,
+  payoutModeOptions,
+  placePercentsSumInvalid,
+} from "@/lib/competition-payout";
+import { apiRestUrl } from "@/lib/env";
+import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
+import { eventsDialogShellStyle } from "@/lib/events-dialog-shell-style";
+import { filenameFromContentDisposition } from "@/lib/filename-from-content-disposition";
+import {
+  resolveHostPreferPublicSeed,
+  resolveHostVisibilityAfterCatalog,
+} from "@/lib/host-create-visibility";
+import { hostReputationLine } from "@/lib/host-reputation-line";
 import {
   softHostingCancelAction,
   softHostingChromeUnavailable,
   softHostingCloseAction,
   softHostingCreateAction,
-  softHostingCreateTitle,
   softHostingCreateBlurb,
+  softHostingCreateTitle,
   softHostingEmptyList,
   softHostingFeatureDisabled,
   softHostingListBlurb,
@@ -71,30 +95,6 @@ import {
   softHostingVisibilityPrivateBlurb,
   softHostingVisibilityPublicBlurb,
 } from "@/lib/hosting-organizer-chrome-soft";
-import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQuery";
-import { usePaymentRouteQuery } from "@/hooks/query/usePaymentRouteQuery";
-import { useWalletQuery } from "@/hooks/query/useWalletQuery";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
-import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
-import { parseDefaultArenaDurationMinutes, tournamentFormatIsArena } from "@/lib/competition-arena";
-import {
-  buildPlacePercentsPayload,
-  defaultPayoutModeForFormat,
-  payoutModeOptions,
-  placePercentsSumInvalid,
-} from "@/lib/competition-payout";
-import { useUrlSkip } from "@/hooks/useUrlSkip";
-import { restClient } from "@/lib/api";
-import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
-import { apiRestUrl } from "@/lib/env";
-import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
-import { eventsDialogShellStyle } from "@/lib/events-dialog-shell-style";
-import {
-  resolveHostPreferPublicSeed,
-  resolveHostVisibilityAfterCatalog,
-} from "@/lib/host-create-visibility";
-import { filenameFromContentDisposition } from "@/lib/filename-from-content-disposition";
 import {
   hostedEventPrizePoolLines,
   prizePoolCardLabelsFromOrganizer,

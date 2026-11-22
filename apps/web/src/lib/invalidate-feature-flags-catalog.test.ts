@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import type { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 import { invalidateFeatureFlags } from "./invalidate";
 
 describe("invalidateFeatureFlags", () => {

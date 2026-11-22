@@ -11,7 +11,9 @@ import { useEventsDashboardQuery } from "@/hooks/query/useEventsDashboardQuery";
 import { useEventsOrganizerChromeQuery } from "@/hooks/query/useEventsOrganizerChromeQuery";
 import { useWalletChromeQuery } from "@/hooks/query/useWalletChromeQuery";
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
-import { useAuthHydrated, useAuthStore } from "@/store/auth";
+import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
+import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
+import { hostReputationLine } from "@/lib/host-reputation-line";
 import {
   softHostingChromeUnavailable,
   softHostingDashboardBlurb,
@@ -20,9 +22,7 @@ import {
   softHostingPortalCreateLabel,
   softHostingPortalPublicListLabel,
 } from "@/lib/hosting-organizer-chrome-soft";
-import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
-import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
-import { hostReputationLine } from "@/lib/host-reputation-line";
+import { useAuthHydrated, useAuthStore } from "@/store/auth";
 import { isEventsOrganizerChromeReady } from "@/types/events-organizer-chrome";
 import { isWalletChromeReady } from "@/types/wallet-chrome";
 import Link from "next/link";

@@ -1,9 +1,31 @@
 "use client";
 
+import { ArenaClock } from "@/components/competition/ArenaClock";
+import { ArenaStandingsTable } from "@/components/competition/ArenaStandingsTable";
+import { EventStandingsTable } from "@/components/events/EventStandingsTable";
 import { ReportEventDialog } from "@/components/events/ReportEventDialog";
 import { Button } from "@/components/ui/button";
 import { ShimmerBlock } from "@/components/ui/shimmer-skeletons";
-import { ArenaClock } from "@/components/competition/ArenaClock";
+import {
+  useTournamentArenaLeaveQueueMutation,
+  useTournamentArenaQueueMutation,
+} from "@/hooks/mutation/useTournamentArenaQueueMutation";
+import { useTournamentCheckInMutation } from "@/hooks/mutation/useTournamentCheckInMutation";
+import { useTournamentMatchReadyMutation } from "@/hooks/mutation/useTournamentMatchReadyMutation";
+import { useTournamentStartGameMutation } from "@/hooks/mutation/useTournamentStartGameMutation";
+import { useClientEnumsQuery } from "@/hooks/query/useClientEnumsQuery";
+import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
+import { useTournamentArenaStandingsQuery } from "@/hooks/query/useTournamentArenaStandingsQuery";
+import { useTournamentBracketQuery } from "@/hooks/query/useTournamentBracketQuery";
+import { useTournamentDetailQuery } from "@/hooks/query/useTournamentDetailQuery";
+import { useTournamentEntriesQuery } from "@/hooks/query/useTournamentEntriesQuery";
+import { useTournamentStandingsQuery } from "@/hooks/query/useTournamentStandingsQuery";
+import {
+  isRadixSelectPortalTarget,
+  releaseBodyPointerEvents,
+} from "@/hooks/use-deferred-dialog-selection";
+import { isApiClientError } from "@/lib/api-client-error";
+import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
 import {
   softCommunityArenaLobbyBlurb,
   softCommunityArenaLobbyTitle,
@@ -20,44 +42,22 @@ import {
   softCommunityRosterTitle,
   softCommunitySpectateAction,
 } from "@/lib/community-player-chrome-soft";
-import { softHostingReportAction } from "@/lib/hosting-organizer-chrome-soft";
-import { ArenaStandingsTable } from "@/components/competition/ArenaStandingsTable";
-import {
-  useTournamentArenaLeaveQueueMutation,
-  useTournamentArenaQueueMutation,
-} from "@/hooks/mutation/useTournamentArenaQueueMutation";
-import { useTournamentCheckInMutation } from "@/hooks/mutation/useTournamentCheckInMutation";
-import { useTournamentMatchReadyMutation } from "@/hooks/mutation/useTournamentMatchReadyMutation";
-import { useTournamentStartGameMutation } from "@/hooks/mutation/useTournamentStartGameMutation";
-import { useClientEnumsQuery } from "@/hooks/query/useClientEnumsQuery";
-import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
-import { useTournamentArenaStandingsQuery } from "@/hooks/query/useTournamentArenaStandingsQuery";
-import { EventStandingsTable } from "@/components/events/EventStandingsTable";
-import { useTournamentBracketQuery } from "@/hooks/query/useTournamentBracketQuery";
-import { useTournamentDetailQuery } from "@/hooks/query/useTournamentDetailQuery";
-import { useTournamentEntriesQuery } from "@/hooks/query/useTournamentEntriesQuery";
-import { useTournamentStandingsQuery } from "@/hooks/query/useTournamentStandingsQuery";
-import {
-  isRadixSelectPortalTarget,
-  releaseBodyPointerEvents,
-} from "@/hooks/use-deferred-dialog-selection";
-import { isApiClientError } from "@/lib/api-client-error";
-import { cupLobbyPlayerErrMsg } from "@/lib/cup-lobby-player-err";
 import { arenaClockActive } from "@/lib/competition-arena";
-import { cn } from "@/lib/utils";
+import { cupLobbyPlayerErrMsg } from "@/lib/cup-lobby-player-err";
+import { cupLifecycleStatusLabel } from "@/lib/cupLifecycle";
+import { computeEstPrizeShare, formatEstPrizeShareAmount } from "@/lib/est-prize-share";
+import { softHostingReportAction } from "@/lib/hosting-organizer-chrome-soft";
+import {
+  prizePoolCardLabelsFromTournaments,
+  tournamentPrizePoolLines,
+} from "@/lib/prize-pool-lines";
 import {
   checkInWindowState,
   tournamentCupStarted,
   tournamentFormatIsArena,
   tournamentFormatUsesStandingsTable,
 } from "@/lib/tournament-cup-lobby";
-import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
-import { computeEstPrizeShare, formatEstPrizeShareAmount } from "@/lib/est-prize-share";
-import { cupLifecycleStatusLabel } from "@/lib/cupLifecycle";
-import {
-  prizePoolCardLabelsFromTournaments,
-  tournamentPrizePoolLines,
-} from "@/lib/prize-pool-lines";
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 import type { TournamentBracketMatch } from "@/types/tournament";
 import type { TournamentsPlayerChrome } from "@/types/tournaments-player-chrome";

@@ -2,7 +2,7 @@
 
 import { DamaWordmark } from "@/components/brand/dama-wordmark";
 import { Button } from "@/components/ui/button";
-import { isAppShellChromeReady, type AppShellChrome } from "@/lib/app-shell-chrome";
+import { type AppShellChrome, isAppShellChromeReady } from "@/lib/app-shell-chrome";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 

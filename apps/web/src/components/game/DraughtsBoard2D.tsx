@@ -369,7 +369,17 @@ export default function DraughtsBoard2D({
       }
       if (anim.progress >= 1 && !anim.finishQueued) {
         anim.finishQueued = true;
-        finishAndAdvanceRef.current();
+        try {
+          finishAndAdvanceRef.current();
+        } catch {
+          // Never leave the board stuck with finishQueued + active fly (prod hitch path).
+          animationRef.current = null;
+          holdSyncRef.current = false;
+          setActiveFly(null);
+          loopRunningRef.current = false;
+          lastTsRef.current = null;
+          return;
+        }
       }
       if (animationRef.current) {
         rafRef.current = window.requestAnimationFrame(tick);
@@ -694,7 +704,10 @@ export default function DraughtsBoard2D({
 
       {activeFly ? (
         <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
-          <div ref={flyElRef} className="absolute flex items-center justify-center will-change-transform">
+          <div
+            ref={flyElRef}
+            className="absolute flex items-center justify-center will-change-transform"
+          >
             <PieceDisc
               player={activeFly.player}
               isKing={activeFly.isKing}

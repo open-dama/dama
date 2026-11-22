@@ -1,3 +1,4 @@
+import type { ClientNavPayload } from "@/types/platform";
 import { describe, expect, it } from "vitest";
 import {
   filterHostingNavLinks,
@@ -12,7 +13,6 @@ import {
   pickOpsPlayerNavLinks,
   resolvePlayerNavHref,
 } from "./player-nav";
-import type { ClientNavPayload } from "@/types/platform";
 
 function q(href: string): URLSearchParams {
   return new URL(href, "http://x").searchParams;

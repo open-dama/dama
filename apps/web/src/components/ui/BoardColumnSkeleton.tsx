@@ -11,10 +11,12 @@ function ShimmerBlock({ className }: { className?: string }) {
   return <div className={cn("dama-shimmer", className)} aria-hidden />;
 }
 
-const BOARD_SKELETON_SIZE = 8;
+/** Live dama board is 10×10 - keep shimmer plane in sync. */
+const BOARD_SKELETON_SIZE = 10;
 
 /**
  * Checkerboard plane for a sized board slot (PlayBoardColumn square).
+ * Flush to the plane (no outer border/pad) - matches live 2D/3D board surface.
  * Never use a solid block here - that was the “old” shimmer flash.
  */
 const BOARD_SKELETON_CELLS: { row: number; col: number }[] = (() => {
@@ -29,20 +31,17 @@ const BOARD_SKELETON_CELLS: { row: number; col: number }[] = (() => {
 
 export function BoardAreaSkeleton() {
   return (
-    <div
-      className="h-full w-full min-h-0 overflow-hidden rounded-sm border border-[var(--dama-border)] bg-[var(--dama-card)] p-1"
-      aria-hidden
-    >
+    <div className="h-full w-full min-h-0 overflow-hidden bg-[var(--dama-board-dark)]" aria-hidden>
       <div
-        className="grid h-full w-full gap-0.5"
+        className="grid h-full w-full"
         style={{ gridTemplateColumns: `repeat(${BOARD_SKELETON_SIZE}, 1fr)` }}
       >
         {BOARD_SKELETON_CELLS.map((cell) => (
           <ShimmerBlock
             key={`${cell.row}-${cell.col}`}
             className={cn(
-              "h-full w-full min-h-0 rounded-[1px]",
-              (cell.row + cell.col) % 2 === 1 ? "opacity-90" : "opacity-55",
+              "h-full w-full min-h-0",
+              (cell.row + cell.col) % 2 === 1 ? "opacity-90" : "opacity-50",
             )}
           />
         ))}
@@ -89,8 +88,8 @@ export function BoardPlaneLoading() {
 }
 
 /**
- * Chess.com board column shimmer: flush top seat + square board + bottom seat
- * (same measure stack as live PlayBoardColumn).
+ * Chess.com board column shimmer: flush top seat + square board + bottom seat.
+ * Uses PlayBoardColumn so budget/hug follows SmartBoardHost (live hug, idle 52svh).
  */
 export function BoardColumnSkeleton({
   showTopTrailing = true,

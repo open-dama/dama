@@ -1,6 +1,6 @@
+import type { MyPaymentReceipt } from "@/hooks/query/useMyReceiptsQuery";
 import { restClient } from "@/lib/api";
 import { QueryStale } from "@/lib/query-policy";
-import type { MyPaymentReceipt } from "@/hooks/query/useMyReceiptsQuery";
 import { useQuery } from "@tanstack/react-query";
 
 export type MyPaymentReceiptDetail = MyPaymentReceipt & {

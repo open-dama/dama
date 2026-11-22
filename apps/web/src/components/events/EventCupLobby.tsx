@@ -1,24 +1,6 @@
 "use client";
 
 import { ArenaClock } from "@/components/competition/ArenaClock";
-import {
-  softCommunityArenaLobbyBlurb,
-  softCommunityArenaLobbyTitle,
-  softCommunityBracketTitle,
-  softCommunityCarouselAria,
-  softCommunityEstPrizeShareBlurb,
-  softCommunityJoinStatusMessage,
-  softCommunityLoadFailed,
-  softCommunityLobbyBlurb,
-  softCommunityLobbyTitle,
-  softCommunityLobbyUnavailable,
-  softCommunityPrizePendingBlurb,
-  softCommunityReportSubmitAction,
-  softCommunityReportTitle,
-  softCommunityRosterTitle,
-  softCommunitySpectateAction,
-} from "@/lib/community-player-chrome-soft";
-import { softHostingReportAction } from "@/lib/hosting-organizer-chrome-soft";
 import { ArenaStandingsTable } from "@/components/competition/ArenaStandingsTable";
 import { eventGalleryImages } from "@/components/events/EventMiniCard";
 import { EventStandingsTable } from "@/components/events/EventStandingsTable";
@@ -45,19 +27,37 @@ import {
   releaseBodyPointerEvents,
 } from "@/hooks/use-deferred-dialog-selection";
 import { isApiClientError } from "@/lib/api-client-error";
-import { cupLobbyPlayerErrMsg } from "@/lib/cup-lobby-player-err";
+import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
+import {
+  softCommunityArenaLobbyBlurb,
+  softCommunityArenaLobbyTitle,
+  softCommunityBracketTitle,
+  softCommunityCarouselAria,
+  softCommunityEstPrizeShareBlurb,
+  softCommunityJoinStatusMessage,
+  softCommunityLoadFailed,
+  softCommunityLobbyBlurb,
+  softCommunityLobbyTitle,
+  softCommunityLobbyUnavailable,
+  softCommunityPrizePendingBlurb,
+  softCommunityReportSubmitAction,
+  softCommunityReportTitle,
+  softCommunityRosterTitle,
+  softCommunitySpectateAction,
+} from "@/lib/community-player-chrome-soft";
 import { arenaClockActive } from "@/lib/competition-arena";
-import { cn } from "@/lib/utils";
+import { cupLobbyPlayerErrMsg } from "@/lib/cup-lobby-player-err";
+import { cupLifecycleStatusLabel } from "@/lib/cupLifecycle";
+import { computeEstPrizeShare, formatEstPrizeShareAmount } from "@/lib/est-prize-share";
 import {
   eventCheckInWindowState,
   eventCupStarted,
   eventFormatUsesStandingsTable,
   tournamentFormatIsArena,
 } from "@/lib/event-cup-lobby";
-import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
-import { computeEstPrizeShare, formatEstPrizeShareAmount } from "@/lib/est-prize-share";
-import { cupLifecycleStatusLabel } from "@/lib/cupLifecycle";
+import { softHostingReportAction } from "@/lib/hosting-organizer-chrome-soft";
 import { hostedEventPrizePoolLines, prizePoolCardLabelsFromPlayer } from "@/lib/prize-pool-lines";
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 import type { HostedBracketMatch } from "@/types/events";
 import type { EventsPlayerChrome } from "@/types/events-player-chrome";

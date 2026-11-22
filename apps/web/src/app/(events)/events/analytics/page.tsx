@@ -11,8 +11,6 @@ import {
 import { useEventsAnalyticsQuery } from "@/hooks/query/useEventsAnalyticsQuery";
 import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
 import { useEventsOrganizerChromeQuery } from "@/hooks/query/useEventsOrganizerChromeQuery";
-import { useAuthHydrated, useAuthStore } from "@/store/auth";
-import type { EventsAnalyticsRow } from "@/types/events";
 import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
 import {
   softHostingAnalyticsBlurb,
@@ -22,6 +20,8 @@ import {
   softHostingFeatureDisabled,
   softHostingListTitle,
 } from "@/lib/hosting-organizer-chrome-soft";
+import { useAuthHydrated, useAuthStore } from "@/store/auth";
+import type { EventsAnalyticsRow } from "@/types/events";
 import { isEventsOrganizerChromeReady } from "@/types/events-organizer-chrome";
 import { useMemo } from "react";
 

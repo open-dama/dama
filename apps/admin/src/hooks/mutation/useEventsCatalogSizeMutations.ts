@@ -1,5 +1,5 @@
-import { eventsAdminChromeQueryKey } from "@/hooks/query/useEventsAdminChromeQuery";
 import { adminEventsCatalogSizesQueryKey } from "@/hooks/query/useAdminEventsCatalogSizesQuery";
+import { eventsAdminChromeQueryKey } from "@/hooks/query/useEventsAdminChromeQuery";
 import { restClient } from "@/lib/api";
 import { eventsAdminChromeApiToast } from "@/lib/api-toast-message";
 import type { EventsAdminChrome } from "@/types/events-admin-chrome";

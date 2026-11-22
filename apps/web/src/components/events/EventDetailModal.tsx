@@ -5,7 +5,6 @@ import { eventGalleryImages } from "@/components/events/EventMiniCard";
 import { PaymentEventJoinModal } from "@/components/events/PaymentEventJoinModal";
 import { GalleryCarousel } from "@/components/media/GalleryCarousel";
 import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
-import { hostReputationLine } from "@/lib/host-reputation-line";
 import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
 import { Button } from "@/components/ui/button";
 import { ShimmerBlock } from "@/components/ui/shimmer-skeletons";
@@ -32,6 +31,7 @@ import {
 import { resolveCupCardCta } from "@/lib/cupLifecycle";
 import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
+import { hostReputationLine } from "@/lib/host-reputation-line";
 import { playerProfileHref } from "@/lib/player-profile-href";
 import { hostedEventPrizePoolLines, prizePoolCardLabelsFromPlayer } from "@/lib/prize-pool-lines";
 import { seatCapFillRight } from "@/lib/seat-cap-display";

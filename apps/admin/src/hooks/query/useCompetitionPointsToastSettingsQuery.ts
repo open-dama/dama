@@ -1,5 +1,5 @@
-import { restClient } from "@/lib/api";
 import type { CompetitionPointsToastSettingsPayload } from "@/hooks/mutation/useSaveCompetitionPointsToastSettingsMutation";
+import { restClient } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
 export function competitionPointsToastSettingsQueryKey(token: string | null | undefined) {

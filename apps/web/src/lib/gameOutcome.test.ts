@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { withResolvedOutcome, winnerFromBoard } from "./gameOutcome";
 import type { BoardCell, GamePayload } from "@/types/game";
+import { describe, expect, it } from "vitest";
+import { winnerFromBoard, withResolvedOutcome } from "./gameOutcome";
 
 function cell(p: 1 | 2, k = false): BoardCell {
   return { p, k };

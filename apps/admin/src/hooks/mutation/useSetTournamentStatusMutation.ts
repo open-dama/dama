@@ -1,4 +1,4 @@
-import { mapRestTournament, type RestTournamentRow } from "@/hooks/query/useAdminTournamentsQuery";
+import { type RestTournamentRow, mapRestTournament } from "@/hooks/query/useAdminTournamentsQuery";
 import { tournamentChromeQueryKey } from "@/hooks/query/useTournamentChromeQuery";
 import { authHeaders, restClient } from "@/lib/api";
 import { tournamentChromeApiToast } from "@/lib/api-toast-message";

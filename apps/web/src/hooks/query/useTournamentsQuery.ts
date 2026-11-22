@@ -1,7 +1,7 @@
 import type { SkipPaginationMeta } from "@/components/ui/skip-pagination";
 import { authHeaders, restClient } from "@/lib/api";
-import { QueryStale } from "@/lib/query-policy";
 import type { CupLifecycleListFilter } from "@/lib/cupLifecycle";
+import { QueryStale } from "@/lib/query-policy";
 import type { Tournament } from "@/types/tournament";
 import { useQuery } from "@tanstack/react-query";
 

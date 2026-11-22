@@ -2,8 +2,8 @@ import { eventsOrganizerChromeQueryKey } from "@/hooks/query/useEventsOrganizerC
 import { apiToastMessage } from "@/lib/api-toast-message";
 import { apiRestUrl } from "@/lib/env";
 import {
-  softHostingToastSaved,
   softHostingToastSaveFailed,
+  softHostingToastSaved,
   softHostingUploadLogoFailed,
   softHostingUploadSponsorFailed,
 } from "@/lib/hosting-organizer-chrome-soft";

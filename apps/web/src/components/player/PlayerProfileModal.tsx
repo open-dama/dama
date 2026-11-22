@@ -2,6 +2,7 @@
 
 import { ComposeMessageModal, type MessageTarget } from "@/components/chat/ComposeMessageModal";
 import { OnlineStatusDot } from "@/components/play-rail/OnlineStatusDot";
+import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
 import { DamaUserAvatar } from "@/components/ui/DamaUserAvatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +36,6 @@ import {
   type ProfileInspectChrome,
   isProfileInspectChromeReady,
 } from "@/types/profile-inspect-chrome";
-import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
 import { Eye, Mail, Swords, UserMinus, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";

@@ -1,9 +1,9 @@
+import type { SkipPaginationMeta } from "@/components/ui/skip-pagination";
 import { authHeaders, restClient } from "@/lib/api";
 import { QueryStale } from "@/lib/query-policy";
 import { requireApiSkipMeta } from "@/lib/skip-pagination";
 import { useAuthHydrated } from "@/store/auth";
 import type { HostedBracketMatch } from "@/types/events";
-import type { SkipPaginationMeta } from "@/components/ui/skip-pagination";
 import { useQuery } from "@tanstack/react-query";
 
 export type EventLiveBoardsResponse = {

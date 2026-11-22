@@ -2,16 +2,16 @@
 
 import { Button } from "@/components/ui/button";
 import { FetchProgressBar } from "@/components/ui/fetch-progress";
-import { ReceiptDetailSkeleton } from "@/components/wallet/ReceiptDetailSkeleton";
 import {
   PaymentReceiptDocument,
   type PaymentReceiptDocumentChrome,
 } from "@/components/wallet/PaymentReceiptDocument";
+import { ReceiptDetailSkeleton } from "@/components/wallet/ReceiptDetailSkeleton";
 import { useDownloadPaymentReceiptPdfMutation } from "@/hooks/mutation/useDownloadPaymentReceiptPdfMutation";
-import { receiptDisplayStatusCode } from "@/lib/payment-status-display";
 import { useMyReceiptQuery } from "@/hooks/query/useMyReceiptQuery";
 import { useWalletChromeQuery } from "@/hooks/query/useWalletChromeQuery";
 import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
+import { receiptDisplayStatusCode } from "@/lib/payment-status-display";
 import { printReceiptArticle } from "@/lib/receipt-print";
 import { receiptSkeletonChromeFromWallet } from "@/lib/receipt-skeleton-chrome";
 import { useAuthStore } from "@/store/auth";

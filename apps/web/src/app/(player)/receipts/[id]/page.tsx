@@ -1,7 +1,7 @@
 "use client";
 
-import { ReceiptDetailSkeletonBoot } from "@/components/wallet/ReceiptDetailSkeletonBoot";
 import { PaymentReceiptDetail } from "@/components/wallet/PaymentReceiptDetail";
+import { ReceiptDetailSkeletonBoot } from "@/components/wallet/ReceiptDetailSkeletonBoot";
 import { useParams } from "next/navigation";
 import { Suspense } from "react";
 

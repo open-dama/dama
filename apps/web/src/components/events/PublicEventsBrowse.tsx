@@ -12,8 +12,6 @@ import {
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
 import { useUrlSkip } from "@/hooks/useUrlSkip";
-import { parseListPageSize } from "@/lib/parse-list-page-size";
-import { parseSearchDebounceMs } from "@/lib/play-rail-display";
 import {
   softCommunityCarouselAria,
   softCommunityLoadFailed,
@@ -35,6 +33,8 @@ import {
 } from "@/lib/community-player-chrome-soft";
 import { cupLifecycleStatusLabel, resolveCupCardCta } from "@/lib/cupLifecycle";
 import { softHostingPublicListEmpty } from "@/lib/hosting-organizer-chrome-soft";
+import { parseListPageSize } from "@/lib/parse-list-page-size";
+import { parseSearchDebounceMs } from "@/lib/play-rail-display";
 import { tournamentMiniCardGridClass } from "@/lib/player-shell-ui";
 import type { PrizePoolCardLabels } from "@/lib/prize-pool-lines";
 import type { HostedEvent } from "@/types/events";

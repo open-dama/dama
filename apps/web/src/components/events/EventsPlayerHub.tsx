@@ -15,8 +15,18 @@ import {
   type JoinHostedEventError,
   useJoinHostedEventMutation,
 } from "@/hooks/mutation/useJoinHostedEventMutation";
+import { useEventEntriesQuery } from "@/hooks/query/useEventEntriesQuery";
+import { useEventQuery } from "@/hooks/query/useEventQuery";
 import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
 import { useEventsPlayerChromeQuery } from "@/hooks/query/useEventsPlayerChromeQuery";
+import {
+  type EventEntryFilter,
+  useEventsPublicListQuery,
+} from "@/hooks/query/useEventsPublicListQuery";
+import { useJoinedEventsQuery } from "@/hooks/query/useJoinedEventsQuery";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
+import { useUrlSkip } from "@/hooks/useUrlSkip";
 import {
   softCommunityCarouselAria,
   softCommunityChromeUnavailable,
@@ -43,17 +53,6 @@ import {
   softTournamentsJoinAction,
   softTournamentsPlayersLabel,
 } from "@/lib/community-player-chrome-soft";
-import { catalogHostedFeatureOff } from "@/lib/events-catalog-gate";
-import {
-  type EventEntryFilter,
-  useEventsPublicListQuery,
-} from "@/hooks/query/useEventsPublicListQuery";
-import { useEventEntriesQuery } from "@/hooks/query/useEventEntriesQuery";
-import { useEventQuery } from "@/hooks/query/useEventQuery";
-import { useJoinedEventsQuery } from "@/hooks/query/useJoinedEventsQuery";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
-import { useUrlSkip } from "@/hooks/useUrlSkip";
 import {
   type CupLifecyclePhase,
   cupLifecycleStatusLabel,
@@ -61,6 +60,7 @@ import {
 } from "@/lib/cupLifecycle";
 import { shouldOpenEventCupLobby } from "@/lib/event-cup-lobby";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
+import { catalogHostedFeatureOff } from "@/lib/events-catalog-gate";
 import { parseListPageSize } from "@/lib/parse-list-page-size";
 import { parseSearchDebounceMs } from "@/lib/play-rail-display";
 import { tournamentMiniCardGridClass } from "@/lib/player-shell-ui";

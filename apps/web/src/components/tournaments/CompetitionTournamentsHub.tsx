@@ -7,27 +7,22 @@ import { TournamentMiniCard } from "@/components/tournaments/TournamentMiniCard"
 import { Button } from "@/components/ui/button";
 import { TournamentCardGridSkeleton } from "@/components/ui/shimmer-skeletons";
 import { SkipPagination } from "@/components/ui/skip-pagination";
-import { type TournamentEntryFilter, useTournamentsQuery } from "@/hooks/query/useTournamentsQuery";
-import { useTournamentsPlayerChromeQuery } from "@/hooks/query/useTournamentsPlayerChromeQuery";
 import { useHomeChromeQuery } from "@/hooks/query/useHomeChromeQuery";
+import { useTournamentsPlayerChromeQuery } from "@/hooks/query/useTournamentsPlayerChromeQuery";
+import { type TournamentEntryFilter, useTournamentsQuery } from "@/hooks/query/useTournamentsQuery";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
 import { useUrlSkip } from "@/hooks/useUrlSkip";
-import {
-  type CompetitionCupSource,
-  parseCompetitionCupSource,
-  tournamentsHrefFromEventsView,
-} from "@/lib/competition-cup-source";
 import {
   softCommunityCarouselAria,
   softCommunityChromeUnavailable,
   softCommunityEmpty,
   softCommunitySearchLabel,
   softCommunitySearchPlaceholder,
-  softTournamentsEmpty,
-  softTournamentsEmptyOfficial,
   softTournamentsBadgeCommunity,
   softTournamentsBadgeOfficial,
+  softTournamentsEmpty,
+  softTournamentsEmptyOfficial,
   softTournamentsEnrollAction,
   softTournamentsFilterEntryAll,
   softTournamentsFilterEntryFree,
@@ -46,6 +41,11 @@ import {
   softTournamentsPlayersLabel,
 } from "@/lib/community-player-chrome-soft";
 import {
+  type CompetitionCupSource,
+  parseCompetitionCupSource,
+  tournamentsHrefFromEventsView,
+} from "@/lib/competition-cup-source";
+import {
   type CupLifecyclePhase,
   cupLifecycleStatusLabel,
   resolveCupCardCta,
@@ -56,11 +56,11 @@ import { tournamentMiniCardGridClass } from "@/lib/player-shell-ui";
 import { prizePoolCardLabelsFromHome } from "@/lib/prize-pool-lines";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
 import { isHomeSurfaceChromeReady } from "@/types/home-chrome";
-import {
-  isTournamentsPlayerChromeReady,
-  type TournamentsPlayerChrome,
-} from "@/types/tournaments-player-chrome";
 import type { Tournament } from "@/types/tournament";
+import {
+  type TournamentsPlayerChrome,
+  isTournamentsPlayerChromeReady,
+} from "@/types/tournaments-player-chrome";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 

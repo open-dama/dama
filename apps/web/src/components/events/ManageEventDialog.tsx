@@ -1,6 +1,8 @@
 "use client";
 
 import { EventStandingsTable } from "@/components/events/EventStandingsTable";
+import { OfficialPauseConfirmDialog } from "@/components/events/OfficialPauseConfirmDialog";
+import { EntityMediaEditor } from "@/components/media/EntityMediaEditor";
 import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,8 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { EntityMediaEditor } from "@/components/media/EntityMediaEditor";
 import { MediaDropzone } from "@/components/ui/media-dropzone";
+import { OpsDataTableRowActions } from "@/components/ui/ops-data-table-row-actions";
 import {
   Select,
   SelectContent,
@@ -25,31 +27,29 @@ import {
 } from "@/components/ui/select";
 import { ShimmerBlock } from "@/components/ui/shimmer-skeletons";
 import { SkipPagination } from "@/components/ui/skip-pagination";
-import { OpsDataTableRowActions } from "@/components/ui/ops-data-table-row-actions";
-import { OfficialPauseConfirmDialog } from "@/components/events/OfficialPauseConfirmDialog";
-import { useCloseHostedEventMutation } from "@/hooks/mutation/useCloseHostedEventMutation";
-import { useHostedEventEntryActionsMutation } from "@/hooks/mutation/useHostedEventEntryActionsMutation";
 import { useBulkOfficialPauseMutation } from "@/hooks/mutation/useBulkOfficialPauseMutation";
 import { useBulkOfficialResumeMutation } from "@/hooks/mutation/useBulkOfficialResumeMutation";
+import { useClearHostedEventPrizeImageMutation } from "@/hooks/mutation/useClearHostedEventPrizeImageMutation";
+import { useCloseHostedEventMutation } from "@/hooks/mutation/useCloseHostedEventMutation";
+import { useFinishEventArenaMutation } from "@/hooks/mutation/useFinishEventArenaMutation";
+import { useForfeitHostedEventMatchMutation } from "@/hooks/mutation/useForfeitHostedEventMatchMutation";
+import { useHostedEventEntryActionsMutation } from "@/hooks/mutation/useHostedEventEntryActionsMutation";
 import { useOfficialPauseGameMutation } from "@/hooks/mutation/useOfficialPauseGameMutation";
 import { useOfficialPauseMetaMutation } from "@/hooks/mutation/useOfficialPauseMetaMutation";
 import { useOfficialResumeGameMutation } from "@/hooks/mutation/useOfficialResumeGameMutation";
 import { usePatchHostedEventMutation } from "@/hooks/mutation/usePatchHostedEventMutation";
-import { useReopenHostedEventMutation } from "@/hooks/mutation/useReopenHostedEventMutation";
-import { useForfeitHostedEventMatchMutation } from "@/hooks/mutation/useForfeitHostedEventMatchMutation";
 import { useRematchHostedEventMatchMutation } from "@/hooks/mutation/useRematchHostedEventMatchMutation";
-import { useStartHostedEventGameMutation } from "@/hooks/mutation/useStartHostedEventGameMutation";
-import { useFinishEventArenaMutation } from "@/hooks/mutation/useFinishEventArenaMutation";
-import { useStartHostedEventMutation } from "@/hooks/mutation/useStartHostedEventMutation";
-import { useClearHostedEventPrizeImageMutation } from "@/hooks/mutation/useClearHostedEventPrizeImageMutation";
 import { useRemoveHostedEventGalleryMutation } from "@/hooks/mutation/useRemoveHostedEventGalleryMutation";
+import { useReopenHostedEventMutation } from "@/hooks/mutation/useReopenHostedEventMutation";
+import { useStartHostedEventGameMutation } from "@/hooks/mutation/useStartHostedEventGameMutation";
+import { useStartHostedEventMutation } from "@/hooks/mutation/useStartHostedEventMutation";
 import { useUploadHostedEventGalleryMutation } from "@/hooks/mutation/useUploadHostedEventGalleryMutation";
 import { useUploadHostedEventLogoMutation } from "@/hooks/mutation/useUploadHostedEventLogoMutation";
 import { useUploadHostedEventPrizeImageMutation } from "@/hooks/mutation/useUploadHostedEventPrizeImageMutation";
 import { useClientEnumsQuery } from "@/hooks/query/useClientEnumsQuery";
 import { useEventBracketQuery } from "@/hooks/query/useEventBracketQuery";
-import { useEventEntriesQuery } from "@/hooks/query/useEventEntriesQuery";
 import { useEventEntriesPagedQuery } from "@/hooks/query/useEventEntriesPagedQuery";
+import { useEventEntriesQuery } from "@/hooks/query/useEventEntriesQuery";
 import { useEventLiveBoardsQuery } from "@/hooks/query/useEventLiveBoardsQuery";
 import { useEventShareQuery } from "@/hooks/query/useEventShareQuery";
 import { useEventStandingsQuery } from "@/hooks/query/useEventStandingsQuery";
@@ -59,23 +59,25 @@ import { useOfficialPauseChromeQuery } from "@/hooks/query/useOfficialPauseChrom
 import { useOfficialPauseEventsQuery } from "@/hooks/query/useOfficialPauseEventsQuery";
 import { DIALOG_CLEAR_MS } from "@/hooks/use-deferred-dialog-selection";
 import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
-import { parseListPageSize } from "@/lib/parse-list-page-size";
 import { authHeaders, restClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/api-client-error";
-import { apiRestUrl } from "@/lib/env";
-import {
-  applyOfficialPauseFmt,
-  formatPauseDurationSeconds,
-  formatPauseSinceTime,
-  isOfficialPause,
-  isPlayerPause,
-  livePauseStatusLabel,
-  officialPauseErrorLabel,
-  officialPauseRoleLabel,
-} from "@/lib/official-pause-display";
 import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
+import {
+  softCommunityBracketTitle,
+  softCommunityJoinStatusMessage,
+  softCommunityResultCardDownloadAction,
+  softCommunityResultCardShareImageAction,
+  softCommunityShareResultAction,
+  softCommunityWinnersTitle,
+} from "@/lib/community-player-chrome-soft";
+import { tournamentFormatIsArena } from "@/lib/competition-arena";
+import {
+  buildPlacePercentsPayload,
+  payoutModeOptions,
+  placePercentsSumInvalid,
+} from "@/lib/competition-payout";
+import { apiRestUrl } from "@/lib/env";
 import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
-import { hostReputationLine } from "@/lib/host-reputation-line";
 import { bracketChromeFrom } from "@/lib/events-bracket-chrome";
 import { buildBracketSections } from "@/lib/events-bracket-sections";
 import {
@@ -88,36 +90,34 @@ import {
   shareOrDownloadResultCard,
 } from "@/lib/events-result-card";
 import { filenameFromContentDisposition } from "@/lib/filename-from-content-disposition";
-import {
-  hostedEventPrizePoolLines,
-  prizePoolCardLabelsFromOrganizer,
-} from "@/lib/prize-pool-lines";
-import { tournamentFormatIsArena } from "@/lib/competition-arena";
-import {
-  buildPlacePercentsPayload,
-  placePercentsSumInvalid,
-  payoutModeOptions,
-} from "@/lib/competition-payout";
-import {
-  softCommunityBracketTitle,
-  softCommunityJoinStatusMessage,
-  softCommunityResultCardDownloadAction,
-  softCommunityResultCardShareImageAction,
-  softCommunityShareResultAction,
-  softCommunityWinnersTitle,
-} from "@/lib/community-player-chrome-soft";
+import { hostReputationLine } from "@/lib/host-reputation-line";
 import {
   softHostingCloseAction,
+  softHostingPatchTitleLocked,
   softHostingPublicDisabled,
   softHostingReopenAction,
   softHostingStartAction,
-  softHostingPatchTitleLocked,
   softHostingTitleLabel,
   softHostingVisibilityPrivateBlurb,
   softHostingVisibilityPublicBlurb,
 } from "@/lib/hosting-organizer-chrome-soft";
-import { seatCapFillRight } from "@/lib/seat-cap-display";
+import {
+  applyOfficialPauseFmt,
+  formatPauseDurationSeconds,
+  formatPauseSinceTime,
+  isOfficialPause,
+  isPlayerPause,
+  livePauseStatusLabel,
+  officialPauseErrorLabel,
+  officialPauseRoleLabel,
+} from "@/lib/official-pause-display";
+import { parseListPageSize } from "@/lib/parse-list-page-size";
 import { playerProfileHref } from "@/lib/player-profile-href";
+import {
+  hostedEventPrizePoolLines,
+  prizePoolCardLabelsFromOrganizer,
+} from "@/lib/prize-pool-lines";
+import { seatCapFillRight } from "@/lib/seat-cap-display";
 import { cn } from "@/lib/utils";
 import type { HostedEvent } from "@/types/events";
 import type { EventsOrganizerChrome } from "@/types/events-organizer-chrome";

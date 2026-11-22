@@ -2,7 +2,6 @@
 
 import { SignInLink } from "@/components/auth/SignInLink";
 import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
-import { AdminUserIdentityPanel } from "@/components/users/AdminUserIdentityPanel";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -13,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { UserDetailSkeleton, UserIdentityBodySkeleton } from "@/components/ui/shimmer-skeletons";
+import { AdminUserIdentityPanel } from "@/components/users/AdminUserIdentityPanel";
 import { useSetUserActiveMutation, useSetUserRoleMutation } from "@/hooks/mutation";
 import {
   useAdminConsoleChromeQuery,

@@ -2,8 +2,8 @@ import { eventsOrganizerChromeQueryKey } from "@/hooks/query/useEventsOrganizerC
 import { restClient } from "@/lib/api";
 import { apiToastMessage } from "@/lib/api-toast-message";
 import {
-  softHostingToastSaved,
   softHostingToastSaveFailed,
+  softHostingToastSaved,
 } from "@/lib/hosting-organizer-chrome-soft";
 import { invalidateEvents } from "@/lib/invalidate";
 import type { HostedEvent, PatchHostedEventInput } from "@/types/events";

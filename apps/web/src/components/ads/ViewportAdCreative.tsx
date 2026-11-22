@@ -1,17 +1,17 @@
 "use client";
 
+import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
+import { resolvePublicMediaUrl } from "@/lib/resolve-public-media-url";
 import {
+  type ViewportCreativeSource,
   parseViewportBreakpoints,
   pickCampaignCreative,
   resolveViewportSlot,
   viewportAspectRatioFromLabel,
-  type ViewportCreativeSource,
 } from "@/lib/resolve-viewport-creative";
-import type { ViewportCreativeSlot } from "@/types/ads";
-import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
-import { resolvePublicMediaUrl } from "@/lib/resolve-public-media-url";
 import { cn } from "@/lib/utils";
 import type { AdScheduleChrome } from "@/types/ad-playback";
+import type { ViewportCreativeSlot } from "@/types/ads";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
@@ -65,7 +65,9 @@ function YouTubeNoCookieEmbed({
 }) {
   const endedRef = useRef(false);
   const videoIdTrim = videoId.trim();
-  const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoIdTrim)}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1`;
+  // mute=1: autoplaying lobby/in-match embeds must not steal page AudioContext
+  // from board land SFX (Chrome suspends WebAudio while unmuted iframe media plays).
+  const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoIdTrim)}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1&mute=1`;
 
   // YouTube iframes suspend page AudioContext (board put-down SFX go silent).
   // Re-arm on unmount the same way in-match overlay does after Continue.
