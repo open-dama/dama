@@ -980,26 +980,38 @@ class _WalletViewState extends State<_WalletView> {
                     ),
                   ),
                 ],
-                if (state.phoneRequired &&
-                    (state.cashRmgChrome?.phoneKycRequiredError ?? '')
-                        .trim()
-                        .isNotEmpty) ...[
-                  _walletCard(
-                    context,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          state.cashRmgChrome!.phoneKycRequiredError.trim(),
-                          style: TextStyle(color: tokens.danger),
+                if (state.phoneRequired) ...[
+                  Builder(
+                    builder: (_) {
+                      final cash = state.cashRmgChrome;
+                      final banner =
+                          (cash?.phoneKycBlurb ?? '').trim().isNotEmpty
+                              ? cash!.phoneKycBlurb.trim()
+                              : (cash?.phoneKycTitle ?? '').trim();
+                      if (banner.isEmpty) return const SizedBox.shrink();
+                      return _walletCard(
+                        context,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              banner,
+                              style: TextStyle(color: tokens.danger),
+                            ),
+                            if ((cash?.phoneKycTitle ?? '')
+                                .trim()
+                                .isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              OutlinedButton(
+                                onPressed: () =>
+                                    _openPhoneKycSheet(context, state),
+                                child: Text(cash!.phoneKycTitle.trim()),
+                              ),
+                            ],
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                        OutlinedButton(
-                          onPressed: () => _openPhoneKycSheet(context, state),
-                          child: Text(state.cashRmgChrome!.phoneKycTitle),
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ],
                 if ((state.country).trim().isEmpty) ...[

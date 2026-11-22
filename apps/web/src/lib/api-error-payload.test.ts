@@ -41,4 +41,17 @@ describe("isRawApiJsonEnvelope", () => {
       ),
     ).toBe(true);
   });
+
+  it("detects phone_kyc JSON and chrome+JSON hybrids", () => {
+    expect(
+      isRawApiJsonEnvelope(
+        '{"error":"Verify your phone number to use cash wallet features","error_key":"phone_kyc"}',
+      ),
+    ).toBe(true);
+    expect(
+      isRawApiJsonEnvelope(
+        'Verify your phone number to use cash wallet features\n{"error":"Verify your phone number to use cash wallet features","error_key":"phone_kyc"}',
+      ),
+    ).toBe(true);
+  });
 });

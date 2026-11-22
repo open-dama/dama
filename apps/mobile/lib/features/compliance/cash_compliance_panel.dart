@@ -12,9 +12,16 @@ import 'package:http/http.dart' as http;
 
 /// Age gate + phone KYC panel (DB chrome from GET /public/cash-rmg-chrome).
 class CashCompliancePanel extends StatefulWidget {
-  const CashCompliancePanel({super.key, required this.accessToken});
+  const CashCompliancePanel({
+    super.key,
+    required this.accessToken,
+    this.onPhoneVerified,
+  });
 
   final String accessToken;
+
+  /// Called after phone KYC succeeds (enroll/join dialogs clear phone gate).
+  final VoidCallback? onPhoneVerified;
 
   @override
   State<CashCompliancePanel> createState() => _CashCompliancePanelState();
@@ -375,6 +382,7 @@ class _CashCompliancePanelState extends State<CashCompliancePanel> {
                                   _phoneAttempted = false;
                                 });
                                 await _refreshEligibility();
+                                widget.onPhoneVerified?.call();
                               } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
@@ -478,6 +486,7 @@ class _CashCompliancePanelState extends State<CashCompliancePanel> {
                               _codeAttempted = false;
                             });
                             await _refreshEligibility();
+                            widget.onPhoneVerified?.call();
                           } catch (_) {
                             if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(

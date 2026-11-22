@@ -43,6 +43,7 @@ import {
   softCommunitySpectateAction,
 } from "@/lib/community-player-chrome-soft";
 import { arenaClockActive } from "@/lib/competition-arena";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
 import { cupLobbyPlayerErrMsg } from "@/lib/cup-lobby-player-err";
 import { cupLifecycleStatusLabel } from "@/lib/cupLifecycle";
 import { computeEstPrizeShare, formatEstPrizeShareAmount } from "@/lib/est-prize-share";
@@ -369,7 +370,7 @@ export function TournamentCupLobby({
         },
         onError: (err) => {
           const msg = cupLobbyPlayerErrMsg(lobbyChrome, err);
-          if (msg) toast.error(msg);
+          if (msg) chromeOnlyToastError(msg, { id: "cup-ready-error" });
         },
       },
     );
@@ -387,7 +388,7 @@ export function TournamentCupLobby({
         },
         onError: (err) => {
           const msg = cupLobbyPlayerErrMsg(lobbyChrome, err);
-          if (msg) toast.error(msg);
+          if (msg) chromeOnlyToastError(msg);
         },
       },
     );
@@ -405,7 +406,7 @@ export function TournamentCupLobby({
         },
         onError: (err) => {
           const msg = cupLobbyPlayerErrMsg(lobbyChrome, err);
-          if (msg) toast.error(msg);
+          if (msg) chromeOnlyToastError(msg);
         },
       },
     );
@@ -427,7 +428,7 @@ export function TournamentCupLobby({
         },
         onError: (err) => {
           const msg = cupLobbyPlayerErrMsg(lobbyChrome, err);
-          if (msg) toast.error(msg);
+          if (msg) chromeOnlyToastError(msg);
         },
       },
     );

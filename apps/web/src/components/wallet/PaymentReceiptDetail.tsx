@@ -147,7 +147,7 @@ export function PaymentReceiptDetail({ receiptId, backHref }: PaymentReceiptDeta
           router.replace(pathname, { scroll: false });
         },
         onError: (e) => {
-          toast.error((e instanceof Error ? e.message : "").trim() || failed);
+          if (failed) toast.error(failed);
           router.replace(pathname, { scroll: false });
         },
       },
@@ -245,7 +245,7 @@ export function PaymentReceiptDetail({ receiptId, backHref }: PaymentReceiptDeta
                       if (done) toast.success(done);
                     },
                     onError: (e) => {
-                      toast.error((e instanceof Error ? e.message : "").trim() || failed);
+                      if (failed) toast.error(failed);
                     },
                   },
                 );

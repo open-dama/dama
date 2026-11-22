@@ -598,6 +598,28 @@ class _JoinEventPageState extends State<JoinEventPage> {
           }
           return;
         }
+        if (isPhoneKycEventJoinError(res) || isAgeRequiredEventJoinError(res)) {
+          // Open payment dialog form (never snack phone_kyc / age JSON).
+          setState(() {
+            _joining = false;
+            _statusIsError = false;
+            _statusBlurb = '';
+          });
+          final gateEvent = _event;
+          if (gateEvent != null) {
+            final ok = await showPaymentEventJoinDialog(
+              context,
+              event: gateEvent,
+              prizePoolLabels: PrizePoolCardLabels.fromPlayer(chrome),
+              joinChrome: chrome,
+            );
+            if (!mounted) return;
+            if (ok) {
+              await _openSeatedCupLobby(gateEvent.id);
+            }
+          }
+          return;
+        }
         setState(() {
           _joining = false;
           _statusIsError = true;

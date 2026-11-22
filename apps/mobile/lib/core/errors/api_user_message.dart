@@ -17,10 +17,19 @@ bool isRawApiJsonEnvelope(String msg) {
   return false;
 }
 
-/// Returns trimmed chrome/user copy, or null when empty / JSON envelope.
+/// Returns trimmed chrome/user copy, or null when empty / JSON envelope /
+/// age-or-phone gate API English (forms own that UX).
 String? chromeOnlyUserMessage(String? msg) {
   final t = (msg ?? '').trim();
   if (t.isEmpty || isRawApiJsonEnvelope(t)) return null;
+  final lower = t.toLowerCase();
+  // Same English as API phone_kyc / age_required bodies - never snack alone.
+  if (lower.contains('verify your phone') ||
+      (lower.contains('phone number') && lower.contains('cash wallet')) ||
+      lower.contains('age verification required') ||
+      lower.contains('"error_key"')) {
+    return null;
+  }
   return t;
 }
 
@@ -65,6 +74,11 @@ String apiErrorKeyFromBody(String responseBody) {
   if (lower.contains('age verification') || lower.contains('age_required')) {
     return 'age_required';
   }
+  if (lower.contains('phone_kyc') ||
+      lower.contains('verify your phone') ||
+      (lower.contains('phone number') && lower.contains('cash wallet'))) {
+    return 'phone_kyc';
+  }
   return '';
 }
 
@@ -101,7 +115,8 @@ String cashGateChromeFromBody({
       // DOB gate owns age UX - never snack age_required_error / enroll_failed.
       return '';
     case 'phone_kyc':
-      return cashChrome.phoneKycRequiredError.trim();
+      // Phone KYC form owns UX - never snack phone_kyc_required_error / API JSON.
+      return '';
     case 'jurisdiction':
       return cashChrome.jurisdictionBlockedError.trim();
     case 'cash_disabled':

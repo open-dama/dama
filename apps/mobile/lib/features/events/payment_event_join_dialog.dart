@@ -11,6 +11,7 @@ import 'package:dama_mobile/core/util/sanitize_decimal_input.dart';
 import 'package:dama_mobile/features/auth/auth_cubit.dart';
 import 'package:dama_mobile/features/auth/auth_providers.dart';
 import 'package:dama_mobile/features/auth/sign_in_dialog.dart';
+import 'package:dama_mobile/features/compliance/cash_compliance_panel.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
 import 'package:dama_mobile/features/events/event_join_error.dart';
 import 'package:dama_mobile/features/events/hosting_organizer_chrome_soft.dart';
@@ -98,6 +99,7 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
   bool _chromeLoading = true;
   bool _joining = false;
   bool _forceAgeGate = false;
+  bool _forcePhoneGate = false;
   bool _ageAttempted = false;
   AuthProvidersChrome? _authChrome;
   final _amountCtrl = TextEditingController();
@@ -331,6 +333,14 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
           });
           return;
         }
+        if (key == 'phone_kyc') {
+          // Open phone KYC in-dialog; never snack phone_kyc JSON / API English.
+          setState(() {
+            _forcePhoneGate = true;
+            _joining = false;
+          });
+          return;
+        }
         setState(() => _joining = false);
         showEventJoinSnack(
           context,
@@ -481,16 +491,25 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
           final cashLockMsg = _cashLockMessage(wallet.country);
           final topUpValid = parsePositiveDecimal(_amountCtrl.text) != null;
           final ageBlocked =
-              !ev.isFreeEntry && (wallet.ageRequired || _forceAgeGate);
+              // Honor wallet / force gates even when a free cup redirected here after phone/age.
+              wallet.ageRequired || _forceAgeGate;
+          final phoneBlocked =
+              !ageBlocked && (wallet.phoneRequired || _forcePhoneGate);
           final cashChrome = wallet.cashRmgChrome ?? _cashChrome;
           // Field validation only - never use ageRequiredError as dialog blurb.
           final ageMsg = (cashChrome?.ageRequiredError ?? '').trim();
           final ageGateBlurb = (cashChrome?.ageGateBlurb ?? '').trim();
+          final phoneGateBlurb = (cashChrome?.phoneKycBlurb ?? '').trim();
+          final token = (auth.token ?? '').trim();
 
           String blurb;
           if (ageBlocked) {
             blurb = ageGateBlurb.isNotEmpty
                 ? ageGateBlurb
+                : softCommunityJoinStatusMessage(chrome.blurb);
+          } else if (phoneBlocked) {
+            blurb = phoneGateBlurb.isNotEmpty
+                ? phoneGateBlurb
                 : softCommunityJoinStatusMessage(chrome.blurb);
           } else if (cashLocked) {
             blurb = cashLockMsg.isNotEmpty
@@ -584,110 +603,97 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
                       ),
                     ],
                   ],
-                  if (!ageBlocked) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    feeLine,
-                    style: TextStyle(
-                      color: tokens.gold,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (widget.prizePoolLabels != null) ...[
-                    Builder(
-                      builder: (context) {
-                        final lines = hostedEventPrizePoolLines(
-                          ev,
-                          widget.prizePoolLabels!,
-                        );
-                        if (lines.isEmpty) return const SizedBox.shrink();
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 8),
-                            Text(
-                              lines.join(widget.prizePoolLabels!.metaSeparator),
-                              style: TextStyle(
-                                color: tokens.onSurfaceMuted,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
+                  if (phoneBlocked) ...[
+                    const SizedBox(height: 16),
+                    if (token.isEmpty)
+                      Text(
+                        (_authChrome?.navSignInLabel ?? '').trim(),
+                        style: TextStyle(color: tokens.danger),
+                      )
+                    else
+                      CashCompliancePanel(
+                        accessToken: token,
+                        onPhoneVerified: () async {
+                          await context
+                              .read<WalletCubit>()
+                              .loadCashEligibility();
+                          if (!mounted) return;
+                          setState(() => _forcePhoneGate = false);
+                        },
+                      ),
                   ],
-                  const SizedBox(height: 8),
-                  if (resolving)
-                    Row(
-                      children: [
-                        Text(
-                          metaSep.isNotEmpty
-                              ? '${chrome.balanceLabel}$metaSep'
-                              : chrome.balanceLabel,
-                        ),
-                        SizedBox(
-                          width: 72,
-                          height: 14,
-                          child: LinearProgressIndicator(
-                            color: tokens.gold,
-                            backgroundColor: tokens.border,
-                          ),
-                        ),
-                      ],
-                    )
-                  else if (countryMissing)
-                    Text(
-                      '${chrome.balanceLabel}$metaSep${chrome.balancePending}',
-                    )
-                  else if (walletReady &&
-                      balanceCurrency.isNotEmpty &&
-                      moneySep.isNotEmpty)
-                    Text(
-                      '${chrome.balanceLabel}$metaSep$balance$moneySep$balanceCurrency',
-                    )
-                  else
-                    Text(
-                      '${chrome.balanceLabel}$metaSep${chrome.balancePending}',
-                    ),
-                  if (!cashLocked && countryMissing) ...[
+                  if (!ageBlocked && !phoneBlocked) ...[
                     const SizedBox(height: 16),
                     Text(
-                      chrome.countryRequiredHint,
-                      style: TextStyle(color: tokens.danger),
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton(
-                      onPressed: chrome.topUpHref.isEmpty
-                          ? null
-                          : () {
-                              Navigator.of(context).pop();
-                              _openTopUpHref(
-                                context,
-                                token: auth.token!,
-                                href: chrome.topUpHref,
-                              );
-                            },
-                      child: Text(chrome.topUpAction),
-                    ),
-                  ],
-                  if (!cashLocked &&
-                      !resolving &&
-                      !countryMissing &&
-                      !canAfford) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      chrome.insufficientTitle,
+                      feeLine,
                       style: TextStyle(
                         color: tokens.gold,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (isManual) ...[
-                      const SizedBox(height: 8),
+                    if (widget.prizePoolLabels != null) ...[
+                      Builder(
+                        builder: (context) {
+                          final lines = hostedEventPrizePoolLines(
+                            ev,
+                            widget.prizePoolLabels!,
+                          );
+                          if (lines.isEmpty) return const SizedBox.shrink();
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 8),
+                              Text(
+                                lines.join(
+                                    widget.prizePoolLabels!.metaSeparator),
+                                style: TextStyle(
+                                  color: tokens.onSurfaceMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    if (resolving)
+                      Row(
+                        children: [
+                          Text(
+                            metaSep.isNotEmpty
+                                ? '${chrome.balanceLabel}$metaSep'
+                                : chrome.balanceLabel,
+                          ),
+                          SizedBox(
+                            width: 72,
+                            height: 14,
+                            child: LinearProgressIndicator(
+                              color: tokens.gold,
+                              backgroundColor: tokens.border,
+                            ),
+                          ),
+                        ],
+                      )
+                    else if (countryMissing)
                       Text(
-                        chrome.methodsBlurb,
-                        style: TextStyle(color: tokens.onSurfaceMuted),
+                        '${chrome.balanceLabel}$metaSep${chrome.balancePending}',
+                      )
+                    else if (walletReady &&
+                        balanceCurrency.isNotEmpty &&
+                        moneySep.isNotEmpty)
+                      Text(
+                        '${chrome.balanceLabel}$metaSep$balance$moneySep$balanceCurrency',
+                      )
+                    else
+                      Text(
+                        '${chrome.balanceLabel}$metaSep${chrome.balancePending}',
+                      ),
+                    if (!cashLocked && countryMissing) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        chrome.countryRequiredHint,
+                        style: TextStyle(color: tokens.danger),
                       ),
                       const SizedBox(height: 8),
                       FilledButton(
@@ -703,104 +709,138 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
                               },
                         child: Text(chrome.topUpAction),
                       ),
-                    ] else ...[
-                      const SizedBox(height: 8),
+                    ],
+                    if (!cashLocked &&
+                        !resolving &&
+                        !countryMissing &&
+                        !canAfford) ...[
+                      const SizedBox(height: 16),
                       Text(
-                        chrome.methodsTitle,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        chrome.methodsBlurb,
-                        style: TextStyle(color: tokens.onSurfaceMuted),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _amountCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                        chrome.insufficientTitle,
+                        style: TextStyle(
+                          color: tokens.gold,
+                          fontWeight: FontWeight.w600,
                         ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-                        ],
-                        decoration: InputDecoration(
-                          labelText: chrome.amountLabel,
-                          hintText: chrome.amountPlaceholder,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (v) {
-                          final s = sanitizeDecimalInput(v);
-                          if (s != v) {
-                            _amountCtrl.value = TextEditingValue(
-                              text: s,
-                              selection:
-                                  TextSelection.collapsed(offset: s.length),
-                            );
-                          }
-                          context.read<WalletCubit>().setAmountText(s);
-                          setState(() {});
-                        },
                       ),
-                      const SizedBox(height: 8),
+                      if (isManual) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          chrome.methodsBlurb,
+                          style: TextStyle(color: tokens.onSurfaceMuted),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          onPressed: chrome.topUpHref.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.of(context).pop();
+                                  _openTopUpHref(
+                                    context,
+                                    token: auth.token!,
+                                    href: chrome.topUpHref,
+                                  );
+                                },
+                          child: Text(chrome.topUpAction),
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          chrome.methodsTitle,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          chrome.methodsBlurb,
+                          style: TextStyle(color: tokens.onSurfaceMuted),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _amountCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                          ],
+                          decoration: InputDecoration(
+                            labelText: chrome.amountLabel,
+                            hintText: chrome.amountPlaceholder,
+                            border: const OutlineInputBorder(),
+                          ),
+                          onChanged: (v) {
+                            final s = sanitizeDecimalInput(v);
+                            if (s != v) {
+                              _amountCtrl.value = TextEditingValue(
+                                text: s,
+                                selection:
+                                    TextSelection.collapsed(offset: s.length),
+                              );
+                            }
+                            context.read<WalletCubit>().setAmountText(s);
+                            setState(() {});
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton(
+                              onPressed: wallet.loading ||
+                                      wallet.country.trim().isEmpty ||
+                                      !topUpValid
+                                  ? null
+                                  : () =>
+                                      context.read<WalletCubit>().checkout(),
+                              child: Text(chrome.checkoutAction),
+                            ),
+                            OutlinedButton(
+                              onPressed: chrome.topUpHref.isEmpty
+                                  ? null
+                                  : () {
+                                      Navigator.of(context).pop();
+                                      _openTopUpHref(
+                                        context,
+                                        token: auth.token!,
+                                        href: chrome.topUpHref,
+                                      );
+                                    },
+                              child: Text(chrome.topUpAction),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                    if (_legalChrome != null) ...[
+                      const SizedBox(height: 16),
                       Wrap(
                         spacing: 8,
-                        runSpacing: 8,
+                        runSpacing: 4,
                         children: [
-                          FilledButton(
-                            onPressed: wallet.loading ||
-                                    wallet.country.trim().isEmpty ||
-                                    !topUpValid
-                                ? null
-                                : () => context.read<WalletCubit>().checkout(),
-                            child: Text(chrome.checkoutAction),
+                          TextButton(
+                            onPressed: () =>
+                                openLegalPage(context, LegalDocKind.privacy),
+                            child: Text(_legalChrome!.privacyNavLabel),
                           ),
-                          OutlinedButton(
-                            onPressed: chrome.topUpHref.isEmpty
-                                ? null
-                                : () {
-                                    Navigator.of(context).pop();
-                                    _openTopUpHref(
-                                      context,
-                                      token: auth.token!,
-                                      href: chrome.topUpHref,
-                                    );
-                                  },
-                            child: Text(chrome.topUpAction),
+                          TextButton(
+                            onPressed: () =>
+                                openLegalPage(context, LegalDocKind.terms),
+                            child: Text(_legalChrome!.termsNavLabel),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                openLegalPage(context, LegalDocKind.refunds),
+                            child: Text(_legalChrome!.refundsNavLabel),
                           ),
                         ],
                       ),
                     ],
                   ],
-                  if (_legalChrome != null) ...[
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        TextButton(
-                          onPressed: () =>
-                              openLegalPage(context, LegalDocKind.privacy),
-                          child: Text(_legalChrome!.privacyNavLabel),
-                        ),
-                        TextButton(
-                          onPressed: () =>
-                              openLegalPage(context, LegalDocKind.terms),
-                          child: Text(_legalChrome!.termsNavLabel),
-                        ),
-                        TextButton(
-                          onPressed: () =>
-                              openLegalPage(context, LegalDocKind.refunds),
-                          child: Text(_legalChrome!.refundsNavLabel),
-                        ),
-                      ],
-                    ),
-                  ],
-                  ],
                 ],
               ),
             ),
             actions: [
-              if (resolving && !cashLocked && !ageBlocked)
+              if (resolving && !cashLocked && !ageBlocked && !phoneBlocked)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Text(
@@ -810,6 +850,7 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
                   ),
                 ),
               if (!ageBlocked &&
+                  !phoneBlocked &&
                   !cashLocked &&
                   canAfford &&
                   !resolving &&

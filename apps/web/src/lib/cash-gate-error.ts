@@ -63,14 +63,14 @@ export function cashGateChromeMessage(
   if (!key) return fb;
   // Known cash gate without chrome yet: empty (never enroll_failed / API JSON stand-in).
   if (!cashChrome) return CASH_GATE_KEYS.has(key) ? "" : fb;
+  // Age / phone gates own in-app forms - never toast required_error (same English as API).
+  if (key === "age_required" || key === "phone_kyc") return "";
   const map: Record<string, string | undefined> = {
-    age_required: cashChrome.age_required_error,
     cash_disabled: cashChrome.cash_disabled_error,
     jurisdiction: cashChrome.jurisdiction_blocked_error,
     country_required: cashChrome.country_required_error,
     locate_required: cashChrome.locate_required_error,
     locate_stale: cashChrome.locate_stale_error,
-    phone_kyc: cashChrome.phone_kyc_required_error,
   };
   const fromChrome = (map[key] || "").trim();
   if (fromChrome) return fromChrome;
@@ -98,7 +98,23 @@ export function isAgeRequiredError(err: unknown): boolean {
 }
 
 export function isPhoneKycRequiredError(err: unknown): boolean {
-  return cashGateErrorKey(err) === "phone_kyc";
+  if (cashGateErrorKey(err) === "phone_kyc") return true;
+  if (err && typeof err === "object") {
+    const k = String((err as { errorKey?: unknown }).errorKey || "").trim();
+    if (k === "phone_kyc") return true;
+  }
+  const msg = isApiClientError(err)
+    ? (err.message || "").toLowerCase()
+    : err instanceof Error
+      ? (err.message || "").toLowerCase()
+      : typeof err === "string"
+        ? err.toLowerCase()
+        : "";
+  return (
+    msg.includes("phone_kyc") ||
+    msg.includes("verify your phone") ||
+    (msg.includes("phone number") && msg.includes("cash wallet"))
+  );
 }
 
 export function cashGateErrorFromBody(

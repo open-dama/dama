@@ -205,7 +205,12 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
   const phoneBlocked = eligibilityQuery.isFetched && eligibilityKey === "phone_kyc";
   const cashActionBlocked = cashLocked || ageBlocked || phoneBlocked;
   const ageRequiredMessage = (cashChrome?.age_required_error || "").trim();
-  const phoneRequiredMessage = (cashChrome?.phone_kyc_required_error || "").trim();
+  /** Banner copy - blurb/title only (never phone_kyc_required_error / API English). */
+  const phoneRequiredMessage = (
+    cashChrome?.phone_kyc_blurb ||
+    cashChrome?.phone_kyc_title ||
+    ""
+  ).trim();
   const ageGateOpenLabel = (chrome?.age_gate_open_action || "").trim();
   const phoneGateOpenLabel = (
     chrome?.phone_kyc_open_action ||

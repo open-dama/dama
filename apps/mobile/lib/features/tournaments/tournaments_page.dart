@@ -739,8 +739,23 @@ class _TournamentsViewState extends State<_TournamentsView> {
       final token = await _ensureToken();
       if (!context.mounted || token == null || token.trim().isEmpty) return;
       final cubit = context.read<TournamentsCubit>();
-      final goPlay = await cubit.joinFree(t.id, bearerToken: token.trim());
+      final joinResult = await cubit.joinFree(t.id, bearerToken: token.trim());
       if (!context.mounted) return;
+      if (joinResult == 'phone_kyc' || joinResult == 'age_required') {
+        // Open enroll dialog form (never snack phone_kyc / age JSON).
+        final enrolled = await showPaymentEnrollDialog(
+          context,
+          tournament: t,
+          prizePoolLabels: PrizePoolCardLabels.fromTournaments(widget.chrome),
+        );
+        if (!context.mounted) return;
+        await cubit.refresh();
+        if (!context.mounted) return;
+        if (enrolled) {
+          await _openCupLobby(context, t.id, accessToken: token.trim());
+        }
+        return;
+      }
       final st = cubit.state;
       if (st.alreadyEnrolled) {
         final msg = softCommunityJoinStatusMessage(
@@ -765,7 +780,7 @@ class _TournamentsViewState extends State<_TournamentsView> {
           );
         }
       }
-      if (goPlay) {
+      if (joinResult == 'lobby') {
         await _openCupLobby(context, t.id, accessToken: token.trim());
       }
       return;

@@ -20,6 +20,18 @@ export function cupLobbyPlayerErrMsg(
   if (!chrome) return "";
   const bag = chrome as Record<string, string | undefined>;
   const key = isApiClientError(err) ? (err.errorKey || "").trim() : "";
+  // Age / phone gates own forms elsewhere - never toast API English / JSON / load_failed.
+  if (key === "age_required" || key === "phone_kyc") return "";
+  const apiMsgRaw = isApiClientError(err) ? (err.message || "").trim() : "";
+  const apiLower = apiMsgRaw.toLowerCase();
+  if (
+    apiLower.includes("verify your phone") ||
+    (apiLower.includes("phone number") && apiLower.includes("cash wallet")) ||
+    apiLower.includes("age verification") ||
+    apiLower.includes('"error_key"')
+  ) {
+    return "";
+  }
   if (key) {
     const mapped = chromeOnly(bag[key]);
     if (mapped) {
@@ -30,7 +42,7 @@ export function cupLobbyPlayerErrMsg(
     }
   }
   // Unmapped / legacy transport message - Event-sport fail-open (join-error parity).
-  const apiMsg = isApiClientError(err) ? chromeOnly(err.message) : "";
+  const apiMsg = chromeOnly(apiMsgRaw);
   if (apiMsg) {
     const scrubbed = softCommunityJoinStatusMessage(apiMsg);
     if (scrubbed) return scrubbed;

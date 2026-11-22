@@ -653,7 +653,7 @@ class _EventsPageState extends State<EventsPage> {
           walletShortfall = guarantee || hostFeeShort;
           final hostTrustMsg = key == 'err_host_guarantee_requires_document_kyc'
               ? chrome.errHostGuaranteeRequiresDocumentKyc.trim()
-              : key == 'err_host_paid_requires_phone_kyc'
+              : key == 'err_host_paid_requires_phone_kyc' || key == 'phone_kyc'
                   ? chrome.errHostPaidRequiresPhoneKyc.trim()
                   : key == 'err_host_concurrent_open_paid_cap'
                       ? chrome.errHostConcurrentOpenPaidCap.trim()
@@ -666,10 +666,16 @@ class _EventsPageState extends State<EventsPage> {
                                   : '';
           if (hostTrustMsg.isNotEmpty) {
             msg = hostTrustMsg;
-          } else {
-            final err = (decoded['error'] as String?)?.trim() ?? '';
-            if (err.isNotEmpty) msg = err;
+            // Phone KYC → wallet CTA (same as fee shortfall), never API English/JSON.
+            if (key == 'phone_kyc' ||
+                key == 'err_host_paid_requires_phone_kyc') {
+              walletShortfall = true;
+            }
+          } else if (key == 'age_required' || key == 'phone_kyc') {
+            // Form/wallet owns UX - keep soft reopen-failed only if chrome empty.
+            msg = softHostingToastReopenFailed(chrome.toastReopenFailed);
           }
+          // Never fall through to decoded['error'] (API English / JSON hybrid).
         }
       } catch (_) {}
       if (msg.isNotEmpty) {
@@ -1808,14 +1814,16 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
         final hostTrustMsg =
             hostKey == 'err_host_guarantee_requires_document_kyc'
                 ? chrome.errHostGuaranteeRequiresDocumentKyc.trim()
-                : hostKey == 'err_host_paid_requires_phone_kyc'
+                : hostKey == 'err_host_paid_requires_phone_kyc' ||
+                        hostKey == 'phone_kyc'
                     ? chrome.errHostPaidRequiresPhoneKyc.trim()
                     : hostKey == 'err_host_concurrent_open_paid_cap'
                         ? chrome.errHostConcurrentOpenPaidCap.trim()
                         : hostKey == 'err_host_reputation_blocked'
                             ? chrome.errHostReputationBlocked.trim()
                             : '';
-        // Map cash gates (phone_kyc, …) to wallet cash chrome - never raw API JSON/English.
+        // Map cash gates to wallet cash chrome - never raw API JSON/English.
+        // phone_kyc / age: prefer host-trust chrome or cash blurb/title (form owns UX).
         final cashMsg = wallet.cashGateMessageForBody(
           res.body,
           softHostingToastCreateFailed(chrome.toastCreateFailed),
@@ -3332,8 +3340,10 @@ class _ManageEventPageState extends State<_ManageEventPage>
             'format_unavailable' => chrome.formatUnavailable.trim(),
             'err_host_guarantee_requires_document_kyc' =>
               chrome.errHostGuaranteeRequiresDocumentKyc.trim(),
-            'err_host_paid_requires_phone_kyc' =>
+            'err_host_paid_requires_phone_kyc' ||
+            'phone_kyc' =>
               chrome.errHostPaidRequiresPhoneKyc.trim(),
+            'age_required' => '',
             'err_host_concurrent_open_paid_cap' =>
               chrome.errHostConcurrentOpenPaidCap.trim(),
             'err_host_reputation_blocked' =>

@@ -4,7 +4,11 @@ import { walletChromeQueryKey } from "@/hooks/query/useWalletChromeQuery";
 import { authHeaders, restClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/api-client-error";
 import { chromeOnlyToastError } from "@/lib/api-toast-message";
-import { cashGateChromeMessage } from "@/lib/cash-gate-error";
+import {
+  cashGateChromeMessage,
+  isAgeRequiredError,
+  isPhoneKycRequiredError,
+} from "@/lib/cash-gate-error";
 import { invalidateWallet } from "@/lib/invalidate";
 import { walletChromeErrorMessage } from "@/lib/wallet-chrome-error";
 import type { CashRmgPayload } from "@/types/cash-rmg";
@@ -33,6 +37,8 @@ export function useCreatePayoutRequestMutation(token: string | null | undefined)
       if (msg) toast.success(msg);
     },
     onError: (err) => {
+      // Age / phone gates open in-wallet forms - never toast API English or JSON.
+      if (isAgeRequiredError(err) || isPhoneKycRequiredError(err)) return;
       const chrome = qc.getQueryData<WalletChrome>(walletChromeQueryKey());
       const cashPayload = qc.getQueryData<CashRmgPayload>(cashRmgChromeQueryKey());
       const failed = (chrome?.payout_request_failed || "").trim();
@@ -43,7 +49,7 @@ export function useCreatePayoutRequestMutation(token: string | null | undefined)
         });
         return;
       }
-      // age / phone / locate / jurisdiction → cash chrome; else wallet chrome by key.
+      // locate / jurisdiction → cash chrome; else wallet chrome by key.
       const cashMsg = cashGateChromeMessage(err, cashPayload?.chrome, "");
       if (cashMsg) {
         chromeOnlyToastError(cashMsg, { id: "wallet-payout-error" });

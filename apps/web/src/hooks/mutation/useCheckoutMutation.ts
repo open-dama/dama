@@ -47,17 +47,14 @@ export function useCheckoutMutation(token: string | null | undefined) {
       window.location.assign(checkoutUrl);
     },
     onError: (err) => {
+      // Age / phone gates open in-wallet forms - never toast API English or JSON.
+      if (isAgeRequiredError(err) || isPhoneKycRequiredError(err)) return;
       const chrome = qc.getQueryData<WalletChrome>(walletChromeQueryKey());
       const cashPayload = qc.getQueryData<CashRmgPayload>(cashRmgChromeQueryKey());
-      // Cash/RMG gates (jurisdiction, age, phone, locate, …) → cash chrome only.
+      // Cash/RMG gates (jurisdiction, locate, …) → cash chrome only.
       const cashMsg = cashGateChromeMessage(err, cashPayload?.chrome, "");
       if (cashMsg) {
-        chromeOnlyToastError(cashMsg, {
-          id:
-            isAgeRequiredError(err) || isPhoneKycRequiredError(err)
-              ? "wallet-cash-gate-error"
-              : "wallet-checkout-cash-gate",
-        });
+        chromeOnlyToastError(cashMsg, { id: "wallet-checkout-cash-gate" });
         return;
       }
       // Provider / wallet chrome only - never API JSON / Error.message / dual toasts.

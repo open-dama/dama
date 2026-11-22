@@ -59,7 +59,7 @@ import {
   resolveCupCardCta,
 } from "@/lib/cupLifecycle";
 import { chromeOnlyToastError } from "@/lib/api-toast-message";
-import { isAgeRequiredError } from "@/lib/cash-gate-error";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { shouldOpenEventCupLobby } from "@/lib/event-cup-lobby";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
 import { catalogHostedFeatureOff } from "@/lib/events-catalog-gate";
@@ -346,8 +346,13 @@ export function EventsPlayerHub({
             router.replace(eventJoinPlayHref(fromCardId));
             return;
           }
-          // Age gate lives on PaymentEventJoinModal - never toast load_failed + JSON.
-          if (isAgeRequiredError(err)) return;
+          // Age / phone: open payment modal form (never toast load_failed + JSON).
+          if (isAgeRequiredError(err) || isPhoneKycRequiredError(err)) {
+            const id = (fromCardId || "").trim();
+            const fromList = id ? events.find((row) => (row.id || "").trim() === id) || null : null;
+            if (fromList) setPayJoinEvent(fromList);
+            return;
+          }
           const payment = (err as JoinHostedEventError).paymentRequired;
           if (payment) {
             const href = (ready.top_up_href || "").trim();

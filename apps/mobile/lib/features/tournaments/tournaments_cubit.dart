@@ -164,9 +164,11 @@ class TournamentsCubit extends Cubit<TournamentsState> {
     await _fetch(showSkeleton: false);
   }
 
-  /// Free cup join (no payment modal). Returns true when caller should open cup lobby.
+  /// Free cup join (no payment modal).
+  /// Returns `lobby` when caller should open cup lobby, `phone_kyc` / `age_required`
+  /// when caller should open the payment enroll dialog form, or `stay` on other errors.
   /// [bearerToken] overrides cubit token after guest sign-in (web enroll parity).
-  Future<bool> joinFree(String id, {String? bearerToken}) async {
+  Future<String> joinFree(String id, {String? bearerToken}) async {
     final token = (bearerToken ?? accessToken).trim();
     emit(state.copyWith(
       busy: true,
@@ -189,11 +191,15 @@ class TournamentsCubit extends Cubit<TournamentsState> {
           clearError: true,
           alreadyEnrolled: true,
         ));
-        return true;
+        return 'lobby';
       }
       if (res.statusCode >= 300) {
         // Free path should not hit cash gates; still never toast enroll_failed+API JSON.
         final key = apiErrorKeyFromBody(res.body);
+        if (key == 'phone_kyc' || key == 'age_required') {
+          emit(state.copyWith(busy: false, clearError: true));
+          return key;
+        }
         final mapped = chromeOnlyUserMessage(
           isCashGateErrorKey(key)
               ? cashGateChromeFromBody(
@@ -204,7 +210,7 @@ class TournamentsCubit extends Cubit<TournamentsState> {
               : softCommunityJoinStatusMessage(chrome.enrollFailed),
         );
         emit(state.copyWith(busy: false, error: mapped));
-        return false;
+        return 'stay';
       }
       QueryCache.invalidate(CacheKeys.tournaments);
       QueryCache.invalidatePrefix('session:wallet');
@@ -216,7 +222,7 @@ class TournamentsCubit extends Cubit<TournamentsState> {
         alreadyEnrolled: false,
       ));
       await _fetch(showSkeleton: false);
-      return true;
+      return 'lobby';
     } catch (_) {
       emit(state.copyWith(
         busy: false,
@@ -224,7 +230,7 @@ class TournamentsCubit extends Cubit<TournamentsState> {
           softCommunityJoinStatusMessage(chrome.enrollFailed),
         ),
       ));
-      return false;
+      return 'stay';
     }
   }
 

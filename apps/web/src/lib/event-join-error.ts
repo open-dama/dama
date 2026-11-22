@@ -75,13 +75,20 @@ export function eventJoinErrorChrome(
   const lower = apiMsg.toLowerCase();
   const key = cashGateErrorKey(err) || errKey(err);
 
-  // Age → silent (PaymentEventJoinModal / AgeGateForm owns UX; never load_failed / JSON).
+  // Age / phone → silent (PaymentEventJoinModal owns AgeGateForm / PhoneKycForm; never JSON).
   if (key === "age_required" || lower.includes("age verification")) {
+    return "";
+  }
+  if (
+    key === "phone_kyc" ||
+    lower.includes("phone_kyc") ||
+    lower.includes("verify your phone") ||
+    (lower.includes("phone number") && lower.includes("cash wallet"))
+  ) {
     return "";
   }
   // Other cash gates → cash chrome only (never load_failed / API JSON stand-in).
   if (
-    key === "phone_kyc" ||
     key === "jurisdiction" ||
     key === "cash_disabled" ||
     key === "unavailable" ||

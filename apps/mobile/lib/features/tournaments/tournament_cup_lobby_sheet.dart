@@ -13,6 +13,7 @@ import 'package:dama_mobile/core/types/events.dart';
 import 'package:dama_mobile/core/types/events_player_chrome.dart';
 import 'package:dama_mobile/core/types/tournament.dart';
 import 'package:dama_mobile/core/types/tournaments_player_chrome.dart';
+import 'package:dama_mobile/core/errors/api_user_message.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
 import 'package:dama_mobile/features/events/hosting_organizer_chrome_soft.dart';
 import 'package:dama_mobile/features/events/event_standings.dart';
@@ -538,6 +539,13 @@ class _TournamentCupLobbySheetState extends State<_TournamentCupLobbySheet> {
           }
         } catch (_) {}
         final chrome = widget.chrome;
+        // Never snack phone_kyc / age API English or JSON hybrids.
+        if (key == 'phone_kyc' ||
+            key == 'age_required' ||
+            apiErr.toLowerCase().contains('verify your phone') ||
+            apiErr.toLowerCase().contains('age verification')) {
+          return;
+        }
         final msg = key == 'toast_arena_queue_failed'
             ? (chrome.toastArenaQueueFailed.isNotEmpty
                 ? softCommunityJoinStatusMessage(chrome.toastArenaQueueFailed)
@@ -547,9 +555,10 @@ class _TournamentCupLobbySheetState extends State<_TournamentCupLobbySheet> {
             : (apiErr.isNotEmpty
                 ? softCommunityJoinStatusMessage(apiErr)
                 : softCommunityLoadFailed(chrome.loadFailed));
-        if (msg.trim().isNotEmpty) {
+        final shown = chromeOnlyUserMessage(msg);
+        if (shown != null && shown.isNotEmpty) {
           ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(msg.trim())));
+              .showSnackBar(SnackBar(content: Text(shown)));
         }
         return;
       }
@@ -593,6 +602,12 @@ class _TournamentCupLobbySheetState extends State<_TournamentCupLobbySheet> {
           }
         } catch (_) {}
         final chrome = widget.chrome;
+        if (key == 'phone_kyc' ||
+            key == 'age_required' ||
+            apiErr.toLowerCase().contains('verify your phone') ||
+            apiErr.toLowerCase().contains('age verification')) {
+          return;
+        }
         final msg = key == 'toast_arena_queue_failed'
             ? (chrome.toastArenaQueueFailed.isNotEmpty
                 ? softCommunityJoinStatusMessage(chrome.toastArenaQueueFailed)
@@ -602,9 +617,10 @@ class _TournamentCupLobbySheetState extends State<_TournamentCupLobbySheet> {
             : (apiErr.isNotEmpty
                 ? softCommunityJoinStatusMessage(apiErr)
                 : softCommunityLoadFailed(chrome.loadFailed));
-        if (msg.trim().isNotEmpty) {
+        final shown = chromeOnlyUserMessage(msg);
+        if (shown != null && shown.isNotEmpty) {
           ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(msg.trim())));
+              .showSnackBar(SnackBar(content: Text(shown)));
         }
         return;
       }

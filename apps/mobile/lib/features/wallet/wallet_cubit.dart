@@ -522,9 +522,15 @@ class WalletCubit extends Cubit<WalletState> {
       if (c == null || key.isEmpty) return fb;
       switch (key) {
         case 'age_required':
-          return c.ageRequiredError.trim().isNotEmpty
-              ? c.ageRequiredError.trim()
-              : fb;
+          // DOB gate owns UX - never map to snack / create-dialog API English.
+          return '';
+        case 'phone_kyc':
+          // Phone KYC form owns UX for enroll/join/wallet; create-event uses host-trust chrome.
+          return c.phoneKycBlurb.trim().isNotEmpty
+              ? c.phoneKycBlurb.trim()
+              : (c.phoneKycTitle.trim().isNotEmpty
+                  ? c.phoneKycTitle.trim()
+                  : '');
         case 'cash_disabled':
           return c.cashDisabledError.trim().isNotEmpty
               ? c.cashDisabledError.trim()
@@ -544,10 +550,6 @@ class WalletCubit extends Cubit<WalletState> {
         case 'locate_stale':
           return c.locateStaleError.trim().isNotEmpty
               ? c.locateStaleError.trim()
-              : fb;
-        case 'phone_kyc':
-          return c.phoneKycRequiredError.trim().isNotEmpty
-              ? c.phoneKycRequiredError.trim()
               : fb;
         default:
           return fb;
@@ -969,13 +971,11 @@ class WalletCubit extends Cubit<WalletState> {
       return;
     }
     if (state.ageRequired) {
-      final msg = state.cashRmgChrome?.ageRequiredError.trim() ?? '';
-      if (msg.isNotEmpty) emit(state.copyWith(error: msg));
+      // DOB gate owns UX - never snack age_required_error / API JSON.
       return;
     }
     if (state.phoneRequired) {
-      final msg = state.cashRmgChrome?.phoneKycRequiredError.trim() ?? '';
-      if (msg.isNotEmpty) emit(state.copyWith(error: msg));
+      // Phone KYC sheet owns UX - never snack phone_kyc_required_error / API JSON.
       return;
     }
     final chrome = state.chrome;
@@ -1016,6 +1016,13 @@ class WalletCubit extends Cubit<WalletState> {
         }),
       );
       if (res.statusCode >= 300) {
+        final key = apiErrorKeyFromBody(res.body);
+        // Age / phone gates open in-wallet sheets - never snack API English / JSON.
+        if (key == 'age_required' || key == 'phone_kyc') {
+          emit(state.copyWith(loading: false, clearError: true));
+          await loadCashEligibility();
+          return;
+        }
         emit(state.copyWith(
           loading: false,
           error: _cashGateChromeError(res.body, chrome.payoutRequestFailed),
@@ -1218,13 +1225,11 @@ class WalletCubit extends Cubit<WalletState> {
       return null;
     }
     if (state.ageRequired) {
-      final msg = state.cashRmgChrome?.ageRequiredError.trim() ?? '';
-      if (msg.isNotEmpty) emit(state.copyWith(error: msg));
+      // DOB gate owns UX - never snack age_required_error / API JSON.
       return null;
     }
     if (state.phoneRequired) {
-      final msg = state.cashRmgChrome?.phoneKycRequiredError.trim() ?? '';
-      if (msg.isNotEmpty) emit(state.copyWith(error: msg));
+      // Phone KYC sheet owns UX - never snack phone_kyc_required_error / API JSON.
       return null;
     }
     final country = state.country.trim().toUpperCase();
@@ -1253,6 +1258,13 @@ class WalletCubit extends Cubit<WalletState> {
         }),
       );
       if (res.statusCode >= 300) {
+        final key = apiErrorKeyFromBody(res.body);
+        // Age / phone gates open in-wallet sheets - never snack API English / JSON.
+        if (key == 'age_required' || key == 'phone_kyc') {
+          emit(state.copyWith(loading: false, clearError: true));
+          await loadCashEligibility();
+          return null;
+        }
         // Chrome-only - prefer checkout_failed; never surface raw JSON bodies.
         emit(state.copyWith(
           loading: false,

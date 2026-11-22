@@ -2,6 +2,7 @@
 
 import { SignInLink } from "@/components/auth/SignInLink";
 import { AgeGateForm } from "@/components/compliance/AgeGateForm";
+import { PhoneKycForm } from "@/components/compliance/PhoneKycForm";
 import { AmountInput } from "@/components/ui/amount-input";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -21,7 +22,7 @@ import { usePaymentRouteQuery } from "@/hooks/query/usePaymentRouteQuery";
 import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery";
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
 import { chromeOnlyToastError } from "@/lib/api-toast-message";
-import { isAgeRequiredError } from "@/lib/cash-gate-error";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { cashJurisdictionLockMessage, isCashJurisdictionLocked } from "@/lib/cash-jurisdiction";
 import {
   softCommunityJoinStatusMessage,
@@ -130,6 +131,7 @@ export function PaymentEventJoinModal({
   const checkout = useCheckoutMutation(token);
   const [topUpAmount, setTopUpAmount] = useState("");
   const [forceAgeGate, setForceAgeGate] = useState(false);
+  const [forcePhoneGate, setForcePhoneGate] = useState(false);
   const suggestedTopUpRef = useRef(false);
 
   useEffect(() => {
@@ -137,16 +139,22 @@ export function PaymentEventJoinModal({
       setTopUpAmount("");
       suggestedTopUpRef.current = false;
       setForceAgeGate(false);
+      setForcePhoneGate(false);
     }
   }, [open]);
 
   const eligibilityKey = (eligibilityQuery.data?.error_key || "").trim();
+  // Honor eligibility / force gates even when a free cup redirected here after phone/age.
   const ageBlocked =
     Boolean(event) &&
-    !event?.is_free_entry &&
-    ((eligibilityQuery.isFetched && eligibilityKey === "age_required") || forceAgeGate);
-  /** Form copy only - never surface age_required_error (looks like raw API English). */
+    (forceAgeGate || (eligibilityQuery.isFetched && eligibilityKey === "age_required"));
+  const phoneBlocked =
+    Boolean(event) &&
+    !ageBlocked &&
+    (forcePhoneGate || (eligibilityQuery.isFetched && eligibilityKey === "phone_kyc"));
+  /** Form copy only - never surface age/phone *_required_error (looks like raw API English). */
   const ageGateBlurb = (cashChrome?.age_gate_blurb || "").trim();
+  const phoneGateBlurb = (cashChrome?.phone_kyc_blurb || "").trim();
 
   useEffect(() => {
     if (!open || !event || event.is_free_entry) return;
@@ -248,8 +256,8 @@ export function PaymentEventJoinModal({
       if (cashLockMessage) toast.error(cashLockMessage);
       return;
     }
-    if (ageBlocked) {
-      // DOB gate already visible - no toast (never enroll_failed / API JSON).
+    if (ageBlocked || phoneBlocked) {
+      // Gate already visible - no toast (never enroll_failed / API JSON).
       return;
     }
     const code = (event.join_code || "").trim();
@@ -281,6 +289,11 @@ export function PaymentEventJoinModal({
           if (isAgeRequiredError(err)) {
             // Open DOB gate in-modal; never toast enroll_failed / load_failed / API JSON.
             setForceAgeGate(true);
+            return;
+          }
+          if (isPhoneKycRequiredError(err)) {
+            // Open phone KYC in-modal; never toast phone_kyc JSON / API English.
+            setForcePhoneGate(true);
             return;
           }
           const payment = (err as JoinHostedEventError).paymentRequired;
@@ -324,18 +337,20 @@ export function PaymentEventJoinModal({
           <Dialog.Description className="mt-2 text-sm text-[var(--dama-muted)]">
             {ageBlocked
               ? ageGateBlurb || softCommunityJoinStatusMessage(chrome.blurb)
-              : cashLocked
-                ? cashLockMessage || softCommunityJoinStatusMessage(chrome.blurb)
-                : resolving
-                  ? chrome.balance_pending
-                  : countryMissing
-                    ? chrome.country_required_hint
-                    : canAfford
-                      ? softCommunityJoinStatusMessage(chrome.blurb)
-                      : softCommunityJoinStatusMessage(chrome.insufficient_blurb)}
+              : phoneBlocked
+                ? phoneGateBlurb || softCommunityJoinStatusMessage(chrome.blurb)
+                : cashLocked
+                  ? cashLockMessage || softCommunityJoinStatusMessage(chrome.blurb)
+                  : resolving
+                    ? chrome.balance_pending
+                    : countryMissing
+                      ? chrome.country_required_hint
+                      : canAfford
+                        ? softCommunityJoinStatusMessage(chrome.blurb)
+                        : softCommunityJoinStatusMessage(chrome.insufficient_blurb)}
           </Dialog.Description>
 
-          {cashLocked && !ageBlocked ? (
+          {cashLocked && !ageBlocked && !phoneBlocked ? (
             <p className="mt-4 text-sm text-[var(--dama-danger)]">
               {cashLockMessage || cashChrome?.cash_rmg_unavailable || ""}
             </p>
@@ -395,6 +410,20 @@ export function PaymentEventJoinModal({
               <AgeGateForm
                 onVerified={() => {
                   setForceAgeGate(false);
+                  void eligibilityQuery.refetch();
+                }}
+              />
+              <Dialog.Close asChild>
+                <Button type="button" variant="outline">
+                  {softHostingCancelAction(chrome.cancel_action)}
+                </Button>
+              </Dialog.Close>
+            </div>
+          ) : phoneBlocked ? (
+            <div className="mt-6 space-y-3">
+              <PhoneKycForm
+                onVerified={() => {
+                  setForcePhoneGate(false);
                   void eligibilityQuery.refetch();
                 }}
               />

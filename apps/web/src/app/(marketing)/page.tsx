@@ -12,7 +12,7 @@ import { cupLifecyclePhase } from "@/lib/cupLifecycle";
 import { isHomeViewportLocked } from "@/lib/home-shell";
 import { invalidateTournamentCup, invalidateTournaments } from "@/lib/invalidate";
 import { prizePoolCardLabelsFromHome } from "@/lib/prize-pool-lines";
-import { isAgeRequiredError } from "@/lib/cash-gate-error";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import {
   freeJoinPlayHref,
   isAlreadyEnrolledError,
@@ -90,8 +90,11 @@ function LandingBody() {
           router.replace(freeJoinPlayHref(t.id));
           return;
         }
-        // Free path should not hit age; if it does, stay silent (never enroll_failed+JSON).
-        if (isAgeRequiredError(err)) return;
+        // Free path should not hit age/phone; if it does, open enroll modal form.
+        if (isAgeRequiredError(err) || isPhoneKycRequiredError(err)) {
+          setEnrollTournament(t);
+          return;
+        }
         const msg = tournamentEnrollErrorChrome(err, payChrome);
         if (msg) chromeOnlyToastError(msg, { id: "home-free-enroll-error" });
       }

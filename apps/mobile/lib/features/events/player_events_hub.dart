@@ -923,6 +923,34 @@ class _PlayerEventsBrowseState extends State<_PlayerEventsBrowse> {
           _goEventCupLobby(fromCardId ?? '');
           return;
         }
+        if (isPhoneKycEventJoinError(res) || isAgeRequiredEventJoinError(res)) {
+          // Open payment dialog form (never snack phone_kyc / age JSON).
+          final id = (fromCardId ?? '').trim();
+          HostedEvent? gateEvent;
+          if (id.isNotEmpty) {
+            for (final row in _events) {
+              if (row.id.trim() == id) {
+                gateEvent = row;
+                break;
+              }
+            }
+          }
+          if (gateEvent != null) {
+            final ok = await showPaymentEventJoinDialog(
+              context,
+              event: gateEvent,
+              prizePoolLabels: PrizePoolCardLabels.fromPlayer(chrome),
+              joinChrome: chrome,
+            );
+            if (!mounted) return;
+            if (ok) {
+              _markJoined(gateEvent.id);
+              unawaited(_refreshJoinedIds(token));
+              _goEventCupLobby(gateEvent.id);
+            }
+          }
+          return;
+        }
         showEventJoinSnack(
           context,
           message: eventJoinErrorChrome(chrome, res),
@@ -1827,6 +1855,31 @@ class _PlayerEventsDetailState extends State<_PlayerEventsDetail> {
             widget.onJoined?.call(seatedId);
           } else {
             widget.onBack();
+          }
+          return;
+        }
+        if (isPhoneKycEventJoinError(res) || isAgeRequiredEventJoinError(res)) {
+          // Open payment dialog form (never snack phone_kyc / age JSON).
+          final ok = await showPaymentEventJoinDialog(
+            context,
+            event: ev,
+            prizePoolLabels: PrizePoolCardLabels.fromPlayer(chrome),
+            joinChrome: chrome,
+          );
+          if (!mounted) return;
+          if (ok) {
+            setState(() {
+              _alreadyIn = true;
+              _myPending = false;
+            });
+            final seatedId = widget.eventId.trim().isNotEmpty
+                ? widget.eventId.trim()
+                : ev.id.trim();
+            if (seatedId.isNotEmpty) {
+              widget.onJoined?.call(seatedId);
+            } else {
+              widget.onBack();
+            }
           }
           return;
         }

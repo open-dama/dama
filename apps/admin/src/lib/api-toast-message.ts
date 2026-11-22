@@ -118,13 +118,25 @@ export function isRawApiJsonEnvelope(msg: string): boolean {
   return false;
 }
 
+/** Age / phone gate API English (forms own UX) - never toast alone. */
+export function isCashGateApiEnglish(msg: string): boolean {
+  const lower = (msg || "").trim().toLowerCase();
+  if (!lower) return false;
+  return (
+    lower.includes("verify your phone") ||
+    (lower.includes("phone number") && lower.includes("cash wallet")) ||
+    lower.includes("age verification required")
+  );
+}
+
 /**
  * Industry-standard toast: DB chrome string only.
- * Refuses JSON envelopes and empty copy. Stable id dedupes double-fires.
+ * Refuses JSON envelopes, age/phone API English, and empty copy.
+ * Stable id dedupes double-fires.
  */
 export function chromeOnlyToastError(msg: string | null | undefined, opts?: { id?: string }): void {
   const t = (msg || "").trim();
-  if (!t || isRawApiJsonEnvelope(t)) return;
+  if (!t || isRawApiJsonEnvelope(t) || isCashGateApiEnglish(t)) return;
   if (opts?.id) {
     toast.error(t, { id: opts.id });
     return;

@@ -2,7 +2,7 @@ import { cashRmgChromeQueryKey } from "@/hooks/query/useCashRmgChromeQuery";
 import { eventsCatalogQueryKey } from "@/hooks/query/useEventsCatalogQuery";
 import { eventsOrganizerChromeQueryKey } from "@/hooks/query/useEventsOrganizerChromeQuery";
 import { ApiClientError } from "@/lib/api-client-error";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { apiToastMessage, chromeOnlyToastError } from "@/lib/api-toast-message";
 import { cashGateChromeMessage, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { apiRestUrl } from "@/lib/env";
 import {
@@ -127,14 +127,20 @@ export function useCreateHostedEventMutation(token: string | null | undefined) {
               : hostKey === "err_host_reputation_blocked"
                 ? (chrome?.err_host_reputation_blocked || "").trim()
                 : "";
-      // phone_kyc / age / jurisdiction / … → cash chrome only (never raw API bodies).
-      const msg = hostTrustMsg || cashGateChromeMessage(err, cashPayload?.chrome, fallback);
+      // phone_kyc / age own forms elsewhere; host-trust / jurisdiction → chrome only (never API JSON).
+      const phoneGate =
+        isPhoneKycRequiredError(err) || hostKey === "err_host_paid_requires_phone_kyc";
+      const phoneMsg = phoneGate
+        ? (
+            hostTrustMsg ||
+            (cashPayload?.chrome?.phone_kyc_blurb || "").trim() ||
+            (cashPayload?.chrome?.phone_kyc_title || "").trim()
+          ).trim()
+        : "";
+      const msg =
+        phoneMsg || hostTrustMsg || cashGateChromeMessage(err, cashPayload?.chrome, fallback);
       if (!msg) return;
-      if (
-        isPhoneKycRequiredError(err) ||
-        hostKey === "err_host_paid_requires_phone_kyc" ||
-        hostKey === "err_host_guarantee_requires_document_kyc"
-      ) {
+      if (phoneGate || hostKey === "err_host_guarantee_requires_document_kyc") {
         const walletHref = (chrome?.portal_wallet_href || "").trim();
         const actionLabel =
           hostKey === "err_host_guarantee_requires_document_kyc"
@@ -145,6 +151,7 @@ export function useCreateHostedEventMutation(token: string | null | undefined) {
               (chrome?.top_up_action || "").trim();
         if (walletHref && actionLabel) {
           toast.error(msg, {
+            id: "host-create-phone-kyc",
             action: {
               label: actionLabel,
               onClick: () => {
@@ -155,7 +162,7 @@ export function useCreateHostedEventMutation(token: string | null | undefined) {
           return;
         }
       }
-      toast.error(msg);
+      chromeOnlyToastError(msg, { id: "host-create-error" });
     },
   });
 }

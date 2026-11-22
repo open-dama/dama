@@ -246,7 +246,7 @@ export function PaymentReceiptDocument({
                       if (done) toast.success(done);
                     },
                     onError: (e) => {
-                      toast.error((e instanceof Error ? e.message : "").trim() || failed);
+                      if (failed) toast.error(failed);
                     },
                   },
                 );

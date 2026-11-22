@@ -35,13 +35,19 @@ String eventJoinErrorChrome(
   final lower = apiMsg.toLowerCase();
   final bodyLower = res.body.toLowerCase();
 
-  // Age → silent (payment dialog / DOB gate owns UX; never load_failed / JSON).
+  // Age / phone → silent (payment dialog owns DOB / phone KYC UX; never JSON).
   if (key == 'age_required' || bodyLower.contains('age verification')) {
     return '';
   }
-  // Other cash gates → cash chrome only (never load_failed / API JSON).
   if (key == 'phone_kyc' ||
-      key == 'jurisdiction' ||
+      bodyLower.contains('phone_kyc') ||
+      bodyLower.contains('verify your phone') ||
+      (bodyLower.contains('phone number') &&
+          bodyLower.contains('cash wallet'))) {
+    return '';
+  }
+  // Other cash gates → cash chrome only (never load_failed / API JSON).
+  if (key == 'jurisdiction' ||
       key == 'cash_disabled' ||
       key == 'unavailable' ||
       key == 'country_required' ||
@@ -90,6 +96,25 @@ String eventJoinErrorChrome(
         : softCommunityLoadFailed(chrome.loadFailed);
   }
   return softCommunityLoadFailed(chrome.loadFailed);
+}
+
+/// True when join failed because phone KYC is required (open payment dialog form).
+bool isPhoneKycEventJoinError(http.Response res) {
+  final key = apiErrorKeyFromBody(res.body);
+  if (key == 'phone_kyc') return true;
+  final bodyLower = res.body.toLowerCase();
+  return bodyLower.contains('phone_kyc') ||
+      bodyLower.contains('verify your phone') ||
+      (bodyLower.contains('phone number') && bodyLower.contains('cash wallet'));
+}
+
+/// True when join failed because age verification is required.
+bool isAgeRequiredEventJoinError(http.Response res) {
+  final key = apiErrorKeyFromBody(res.body);
+  if (key == 'age_required') return true;
+  final bodyLower = res.body.toLowerCase();
+  return bodyLower.contains('age verification') ||
+      bodyLower.contains('age_required');
 }
 
 bool isAlreadyJoinedEventError(http.Response res) {

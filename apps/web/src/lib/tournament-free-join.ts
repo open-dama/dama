@@ -55,8 +55,16 @@ export function tournamentEnrollErrorChrome(
   // Paid cash gates (age / phone / locate / jurisdiction) → cash chrome only.
   // Never fall through to enroll_failed for known cash keys (that looked like
   // "Enrollment failed" + raw API JSON when chrome was still loading).
-  // Age opens DOB gate in-modal - stay silent here (no age_required_error toast).
+  // Age / phone open in-modal gates - stay silent (never age/phone API English or JSON).
   if (key === "age_required" || msg.includes("age verification") || msg.includes("age_required")) {
+    return "";
+  }
+  if (
+    key === "phone_kyc" ||
+    msg.includes("phone_kyc") ||
+    msg.includes("verify your phone") ||
+    (msg.includes("phone number") && msg.includes("cash wallet"))
+  ) {
     return "";
   }
   if (ENROLL_CASH_GATE_KEYS.has(key)) {

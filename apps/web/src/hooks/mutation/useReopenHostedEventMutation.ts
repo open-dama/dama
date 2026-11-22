@@ -1,13 +1,16 @@
+import { cashRmgChromeQueryKey } from "@/hooks/query/useCashRmgChromeQuery";
 import { eventsOrganizerChromeQueryKey } from "@/hooks/query/useEventsOrganizerChromeQuery";
 import { restClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/api-client-error";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { apiToastMessage, chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import {
   softHostingToastReopenFailed,
   softHostingToastReopened,
 } from "@/lib/hosting-organizer-chrome-soft";
 import { invalidateEvents } from "@/lib/invalidate";
 import { withWalletFocusParam } from "@/lib/wallet-focus-href";
+import type { CashRmgPayload } from "@/types/cash-rmg";
 import type { HostedEvent } from "@/types/events";
 import type { EventsOrganizerChrome } from "@/types/events-organizer-chrome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -78,10 +81,45 @@ export function useReopenHostedEventMutation(token: string | null | undefined) {
               : hostKey === "err_host_reputation_blocked"
                 ? (chrome?.err_host_reputation_blocked || "").trim()
                 : "";
+      const cashPayload = qc.getQueryData<CashRmgPayload>(cashRmgChromeQueryKey());
+      // phone_kyc: chrome blurb/title + wallet CTA (never API English+JSON).
+      const phoneGate =
+        isPhoneKycRequiredError(err) || hostKey === "err_host_paid_requires_phone_kyc";
+      const phoneMsg = phoneGate
+        ? (
+            hostTrustMsg ||
+            (cashPayload?.chrome?.phone_kyc_blurb || "").trim() ||
+            (cashPayload?.chrome?.phone_kyc_title || "").trim()
+          ).trim()
+        : "";
       const msg =
+        phoneMsg ||
         hostTrustMsg ||
         apiToastMessage(err, softHostingToastReopenFailed(chrome?.toast_reopen_failed));
-      if (msg) toast.error(msg);
+      if (!msg) return;
+      if (phoneGate || hostKey === "err_host_guarantee_requires_document_kyc") {
+        const walletHref = (chrome?.portal_wallet_href || "").trim();
+        const actionLabel =
+          hostKey === "err_host_guarantee_requires_document_kyc"
+            ? (cashPayload?.chrome?.doc_kyc_title || "").trim() ||
+              (chrome?.portal_wallet_label || "").trim()
+            : (cashPayload?.chrome?.phone_kyc_title || "").trim() ||
+              (chrome?.portal_wallet_label || "").trim() ||
+              (chrome?.top_up_action || "").trim();
+        if (walletHref && actionLabel) {
+          toast.error(msg, {
+            id: "host-reopen-phone-kyc",
+            action: {
+              label: actionLabel,
+              onClick: () => {
+                window.location.assign(walletHref);
+              },
+            },
+          });
+          return;
+        }
+      }
+      chromeOnlyToastError(msg, { id: "host-reopen-error" });
     },
   });
 }
