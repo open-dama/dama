@@ -200,7 +200,7 @@ async function warmLandBuffers(force = false): Promise<void> {
 
 /**
  * Sync buffer play. Returns false when ctx is not running so callers can
- * await resume — never report success for a silent suspended start.
+ * await resume - never report success for a silent suspended start.
  */
 function playLandFromBuffer(kind: PieceLandKind, volume: number): boolean {
   const audio = getCtx();
