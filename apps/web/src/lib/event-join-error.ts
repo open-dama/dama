@@ -1,14 +1,22 @@
 import { ApiClientError, isApiClientError } from "@/lib/api-client-error";
+import { cashGateChromeMessage, cashGateErrorKey } from "@/lib/cash-gate-error";
 import {
   softCommunityJoinStatusMessage,
   softCommunityLoadFailed,
 } from "@/lib/community-player-chrome-soft";
+import type { CashRmgChrome } from "@/types/cash-rmg";
 
 function chromeOnly(raw: string | undefined): string {
   const s = (raw || "").trim();
   if (!s) return "";
   // Never surface transport / API JSON blobs as toast copy.
-  if (s.startsWith("{") || s.startsWith("[")) return "";
+  if (
+    s.includes('"error_key"') ||
+    s.includes("'error_key'") ||
+    ((s.startsWith("{") || s.startsWith("[")) && (s.includes('"error"') || s.includes("'error'")))
+  ) {
+    return "";
+  }
   return s;
 }
 
@@ -57,11 +65,34 @@ export function isAlreadyJoinedEventError(err: unknown): boolean {
  * Map join failure to events_player_chrome (tournaments enroll parity).
  * Prefer error_key → DB chrome; never toast raw JSON.
  */
-export function eventJoinErrorChrome(err: unknown, chrome: JoinChrome): string {
+export function eventJoinErrorChrome(
+  err: unknown,
+  chrome: JoinChrome,
+  cashChrome?: CashRmgChrome,
+): string {
   const status = errStatus(err);
   const apiMsg = chromeOnly(errMessage(err));
   const lower = apiMsg.toLowerCase();
-  const key = errKey(err);
+  const key = cashGateErrorKey(err) || errKey(err);
+
+  // Age → silent (PaymentEventJoinModal / AgeGateForm owns UX; never load_failed / JSON).
+  if (key === "age_required" || lower.includes("age verification")) {
+    return "";
+  }
+  // Other cash gates → cash chrome only (never load_failed / API JSON stand-in).
+  if (
+    key === "phone_kyc" ||
+    key === "jurisdiction" ||
+    key === "cash_disabled" ||
+    key === "unavailable" ||
+    key === "country_required" ||
+    key === "locate_required" ||
+    key === "locate_stale"
+  ) {
+    return cashGateChromeMessage(err, cashChrome, "");
+  }
+  const cashMsg = cashGateChromeMessage(err, cashChrome, "");
+  if (cashMsg) return cashMsg;
 
   if (
     key === "already_joined" ||

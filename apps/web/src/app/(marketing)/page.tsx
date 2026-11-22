@@ -6,11 +6,13 @@ import { useTournamentEnrollMutation } from "@/hooks/mutation/useTournamentEnrol
 import { useClientNavFullQuery } from "@/hooks/query/useClientNavFullQuery";
 import { useHomeChromeQuery } from "@/hooks/query/useHomeChromeQuery";
 import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQuery";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
 import { softCommunityJoinStatusMessage } from "@/lib/community-player-chrome-soft";
 import { cupLifecyclePhase } from "@/lib/cupLifecycle";
 import { isHomeViewportLocked } from "@/lib/home-shell";
 import { invalidateTournamentCup, invalidateTournaments } from "@/lib/invalidate";
 import { prizePoolCardLabelsFromHome } from "@/lib/prize-pool-lines";
+import { isAgeRequiredError } from "@/lib/cash-gate-error";
 import {
   freeJoinPlayHref,
   isAlreadyEnrolledError,
@@ -83,12 +85,15 @@ function LandingBody() {
         if (ok && !ok.startsWith("{")) toast.success(ok);
         router.replace(freeJoinPlayHref(t.id));
       } catch (err) {
-        const msg = tournamentEnrollErrorChrome(err, payChrome);
-        if (msg) toast.error(msg);
         if (isAlreadyEnrolledError(err)) {
           onTournamentEnrolled(t.id);
           router.replace(freeJoinPlayHref(t.id));
+          return;
         }
+        // Free path should not hit age; if it does, stay silent (never enroll_failed+JSON).
+        if (isAgeRequiredError(err)) return;
+        const msg = tournamentEnrollErrorChrome(err, payChrome);
+        if (msg) chromeOnlyToastError(msg, { id: "home-free-enroll-error" });
       }
       return;
     }

@@ -86,6 +86,8 @@ class WalletPage extends StatelessWidget {
     cubit.loadWalletChrome();
     cubit.loadCashGate();
     cubit.autoLocate();
+    // Enroll/join dialogs reuse this load path - eligibility must settle for age gate.
+    cubit.loadCashEligibility();
   }
 }
 

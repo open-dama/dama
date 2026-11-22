@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dama_mobile/core/errors/api_user_message.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/types.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
@@ -8,7 +9,11 @@ import 'package:http/http.dart' as http;
 
 /// Map POST /events/join failures to events_player_chrome (web / tournament enroll parity).
 /// Never surface raw JSON or load_failed for seat conflicts.
-String eventJoinErrorChrome(EventsPlayerChrome chrome, http.Response res) {
+String eventJoinErrorChrome(
+  EventsPlayerChrome chrome,
+  http.Response res, {
+  CashRmgChrome? cashChrome,
+}) {
   String apiMsg = '';
   String key = '';
   try {
@@ -20,9 +25,40 @@ String eventJoinErrorChrome(EventsPlayerChrome chrome, http.Response res) {
       if (ek is String) key = ek.trim();
     }
   } catch (_) {}
+  if (key.isEmpty) key = apiErrorKeyFromBody(res.body);
   // Never toast / blurb transport JSON blobs.
-  if (apiMsg.startsWith('{') || apiMsg.startsWith('[')) apiMsg = '';
+  if (isRawApiJsonEnvelope(apiMsg) ||
+      apiMsg.startsWith('{') ||
+      apiMsg.startsWith('[')) {
+    apiMsg = '';
+  }
   final lower = apiMsg.toLowerCase();
+  final bodyLower = res.body.toLowerCase();
+
+  // Age → silent (payment dialog / DOB gate owns UX; never load_failed / JSON).
+  if (key == 'age_required' || bodyLower.contains('age verification')) {
+    return '';
+  }
+  // Other cash gates → cash chrome only (never load_failed / API JSON).
+  if (key == 'phone_kyc' ||
+      key == 'jurisdiction' ||
+      key == 'cash_disabled' ||
+      key == 'unavailable' ||
+      key == 'country_required' ||
+      key == 'locate_required' ||
+      key == 'locate_stale') {
+    return cashGateChromeFromBody(
+      responseBody: res.body,
+      cashChrome: cashChrome,
+      fallback: '',
+    );
+  }
+  final cashMsg = cashGateChromeFromBody(
+    responseBody: res.body,
+    cashChrome: cashChrome,
+    fallback: '',
+  );
+  if (cashMsg.isNotEmpty) return cashMsg;
 
   if (key == 'already_joined' ||
       lower.contains('already joined') ||
@@ -81,8 +117,8 @@ void showEventJoinSnack(
   bool success = false,
   SnackBarAction? action,
 }) {
-  final msg = message.trim();
-  if (msg.isEmpty) return;
+  final msg = chromeOnlyUserMessage(message);
+  if (msg == null) return;
   final tokens = damaColorsOf(context);
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(

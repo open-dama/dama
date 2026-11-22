@@ -22,5 +22,8 @@ export class ApiClientError extends Error {
 }
 
 export function isApiClientError(err: unknown): err is ApiClientError {
-  return err instanceof ApiClientError;
+  // Duck-type: `instanceof` fails when the class is loaded twice (SSR / HMR).
+  if (err instanceof ApiClientError) return true;
+  if (!err || typeof err !== "object") return false;
+  return (err as { name?: string }).name === "ApiClientError";
 }

@@ -30,4 +30,15 @@ describe("isRawApiJsonEnvelope", () => {
     ).toBe(true);
     expect(isRawApiJsonEnvelope("Checkout failed")).toBe(false);
   });
+
+  it("detects age_required JSON and chrome+JSON hybrids", () => {
+    expect(
+      isRawApiJsonEnvelope('{"error":"age verification required","error_key":"age_required"}'),
+    ).toBe(true);
+    expect(
+      isRawApiJsonEnvelope(
+        'Enrollment failed\n{"error":"age verification required","error_key":"age_required"}',
+      ),
+    ).toBe(true);
+  });
 });

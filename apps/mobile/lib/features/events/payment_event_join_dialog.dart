@@ -5,6 +5,8 @@ import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/prize_pool_lines.dart';
 import 'package:dama_mobile/core/types/types.dart';
+import 'package:dama_mobile/core/ui/chrome_date_field.dart';
+import 'package:dama_mobile/core/util/date_mask.dart';
 import 'package:dama_mobile/core/util/sanitize_decimal_input.dart';
 import 'package:dama_mobile/features/auth/auth_cubit.dart';
 import 'package:dama_mobile/features/auth/auth_providers.dart';
@@ -95,8 +97,11 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
   String _unavailable = '';
   bool _chromeLoading = true;
   bool _joining = false;
+  bool _forceAgeGate = false;
+  bool _ageAttempted = false;
   AuthProvidersChrome? _authChrome;
   final _amountCtrl = TextEditingController();
+  final _dobCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -218,6 +223,7 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
   @override
   void dispose() {
     _amountCtrl.dispose();
+    _dobCtrl.dispose();
     super.dispose();
   }
 
@@ -316,11 +322,24 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
           Navigator.of(context).pop(true);
           return;
         }
+        final key = apiErrorKeyFromBody(res.body);
+        if (key == 'age_required') {
+          // Open DOB gate in-dialog; never snack load_failed / enroll_failed / raw JSON.
+          setState(() {
+            _forceAgeGate = true;
+            _joining = false;
+          });
+          return;
+        }
+        setState(() => _joining = false);
         showEventJoinSnack(
           context,
-          message: eventJoinErrorChrome(joinChrome, res),
+          message: eventJoinErrorChrome(
+            joinChrome,
+            res,
+            cashChrome: _cashChrome,
+          ),
         );
-        setState(() => _joining = false);
         return;
       }
       final map = jsonDecode(res.body) as Map<String, dynamic>;
@@ -447,6 +466,7 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
           final country = wallet.country.trim();
           final resolving = !ev.isFreeEntry &&
               (!_cashGateSettled ||
+                  !wallet.cashEligibilityLoaded ||
                   wallet.locating ||
                   (country.isNotEmpty &&
                       (wallet.loading ||
@@ -460,9 +480,19 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
           final cashLocked = _cashLocked(wallet.country);
           final cashLockMsg = _cashLockMessage(wallet.country);
           final topUpValid = parsePositiveDecimal(_amountCtrl.text) != null;
+          final ageBlocked =
+              !ev.isFreeEntry && (wallet.ageRequired || _forceAgeGate);
+          final cashChrome = wallet.cashRmgChrome ?? _cashChrome;
+          // Field validation only - never use ageRequiredError as dialog blurb.
+          final ageMsg = (cashChrome?.ageRequiredError ?? '').trim();
+          final ageGateBlurb = (cashChrome?.ageGateBlurb ?? '').trim();
 
           String blurb;
-          if (cashLocked) {
+          if (ageBlocked) {
+            blurb = ageGateBlurb.isNotEmpty
+                ? ageGateBlurb
+                : softCommunityJoinStatusMessage(chrome.blurb);
+          } else if (cashLocked) {
             blurb = cashLockMsg.isNotEmpty
                 ? cashLockMsg
                 : softCommunityJoinStatusMessage(chrome.blurb);
@@ -491,6 +521,70 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
                           : tokens.onSurfaceMuted,
                     ),
                   ),
+                  if (ageBlocked) ...[
+                    const SizedBox(height: 16),
+                    if (cashChrome == null)
+                      SizedBox(
+                        height: 14,
+                        child: LinearProgressIndicator(
+                          color: tokens.gold,
+                          backgroundColor: tokens.border,
+                        ),
+                      )
+                    else ...[
+                      Text(
+                        cashChrome.ageGateBlurb,
+                        style: TextStyle(color: tokens.onSurfaceMuted),
+                      ),
+                      const SizedBox(height: 12),
+                      ChromeDateField(
+                        label: cashChrome.ageGateDobLabel,
+                        valueText: _dobCtrl.text,
+                        hintText: cashChrome.ageGateDobPlaceholder.isNotEmpty
+                            ? cashChrome.ageGateDobPlaceholder
+                            : cashChrome.ageGateDobLabel,
+                        enabled: !wallet.loading,
+                        errorText: _ageAttempted && _dobCtrl.text.trim().isEmpty
+                            ? (ageMsg.isNotEmpty
+                                ? ageMsg
+                                : cashChrome.ageGateFailed)
+                            : null,
+                        firstDate: DateTime(DateTime.now().year - 120),
+                        lastDate: DateTime.now(),
+                        initialDate: parseFlexibleDate(_dobCtrl.text) ??
+                            DateTime(
+                              DateTime.now().year - 21,
+                              DateTime.now().month,
+                              DateTime.now().day,
+                            ),
+                        onPicked: (picked) {
+                          setState(() {
+                            _dobCtrl.text = formatUsDate(picked);
+                            _ageAttempted = false;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: wallet.loading
+                            ? null
+                            : () async {
+                                setState(() => _ageAttempted = true);
+                                if (_dobCtrl.text.trim().isEmpty) return;
+                                await context
+                                    .read<WalletCubit>()
+                                    .submitAgeGate(_dobCtrl.text);
+                                if (!mounted) return;
+                                final live = context.read<WalletCubit>().state;
+                                if (!live.ageRequired) {
+                                  setState(() => _forceAgeGate = false);
+                                }
+                              },
+                        child: Text(cashChrome.ageGateSubmitAction),
+                      ),
+                    ],
+                  ],
+                  if (!ageBlocked) ...[
                   const SizedBox(height: 16),
                   Text(
                     feeLine,
@@ -701,11 +795,12 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
                       ],
                     ),
                   ],
+                  ],
                 ],
               ),
             ),
             actions: [
-              if (resolving && !cashLocked)
+              if (resolving && !cashLocked && !ageBlocked)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Text(
@@ -714,7 +809,11 @@ class _PaymentEventJoinDialogState extends State<PaymentEventJoinDialog> {
                         TextStyle(color: tokens.onSurfaceMuted, fontSize: 12),
                   ),
                 ),
-              if (!cashLocked && canAfford && !resolving && !countryMissing)
+              if (!ageBlocked &&
+                  !cashLocked &&
+                  canAfford &&
+                  !resolving &&
+                  !countryMissing)
                 FilledButton(
                   onPressed: _joining ||
                           (!ev.isFreeEntry && wallet.country.trim().isEmpty)

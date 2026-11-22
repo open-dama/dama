@@ -34,6 +34,7 @@ import { usePaymentRouteQuery } from "@/hooks/query/usePaymentRouteQuery";
 import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery";
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
 import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
 import { cashJurisdictionLockMessage, isCashJurisdictionLocked } from "@/lib/cash-jurisdiction";
 import { chromeSeparator } from "@/lib/chrome-separator";
 import {
@@ -67,6 +68,7 @@ import {
   softTournamentsPlayersLabel,
 } from "@/lib/community-player-chrome-soft";
 import { shouldOpenEventCupLobby } from "@/lib/event-cup-lobby";
+import { isAgeRequiredError } from "@/lib/cash-gate-error";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
 import { bracketChromeFrom } from "@/lib/events-bracket-chrome";
 import { buildBracketSections } from "@/lib/events-bracket-sections";
@@ -325,13 +327,15 @@ export function EventsJoinPanel({ initialCode = "", initialEventId = "" }: Props
             router.replace(eventJoinPlayHref(event?.id));
             return;
           }
+          // Age gate lives on PaymentEventJoinModal - never toast load_failed + JSON.
+          if (isAgeRequiredError(err)) return;
           const payment = (err as JoinHostedEventError).paymentRequired;
           if (payment) {
             setNeedsTopUp(true);
             return;
           }
-          const msg = eventJoinErrorChrome(err, chrome);
-          if (msg) toast.error(msg);
+          const msg = eventJoinErrorChrome(err, chrome, cashChrome);
+          if (msg) chromeOnlyToastError(msg, { id: "join-panel-error" });
         },
       },
     );

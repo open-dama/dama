@@ -42,11 +42,8 @@ export function AgeGateForm({ onVerified }: AgeGateFormProps) {
   }
 
   if (!ready) {
-    const unavailable = (
-      chromeQuery.data?.chrome?.cash_rmg_unavailable ||
-      (chromeQuery.error instanceof Error ? chromeQuery.error.message : "") ||
-      ""
-    ).trim();
+    // Chrome-only: never surface transport / Error.message / API JSON.
+    const unavailable = (chromeQuery.data?.chrome?.cash_rmg_unavailable || "").trim();
     return unavailable ? (
       <p className="text-sm text-[var(--dama-danger)]" role="alert">
         {unavailable}

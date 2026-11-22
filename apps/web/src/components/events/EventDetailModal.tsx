@@ -30,6 +30,8 @@ import {
 } from "@/lib/community-player-chrome-soft";
 import { resolveCupCardCta } from "@/lib/cupLifecycle";
 import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isAgeRequiredError } from "@/lib/cash-gate-error";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
 import { hostReputationLine } from "@/lib/host-reputation-line";
 import { playerProfileHref } from "@/lib/player-profile-href";
@@ -240,6 +242,8 @@ export function EventDetailModal({ open, eventId, chrome, onOpenChange, onJoined
             router.replace(eventJoinPlayHref(id));
             return;
           }
+          // Age gate lives on PaymentEventJoinModal - never toast enroll/load failed + JSON.
+          if (isAgeRequiredError(err)) return;
           const payment = (err as JoinHostedEventError).paymentRequired;
           if (payment) {
             const href = (chrome.top_up_href || "").trim();
@@ -256,7 +260,7 @@ export function EventDetailModal({ open, eventId, chrome, onOpenChange, onJoined
             return;
           }
           const msg = eventJoinErrorChrome(err, chrome);
-          if (msg) toast.error(msg);
+          if (msg) chromeOnlyToastError(msg, { id: "event-detail-join-error" });
         },
       },
     );

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dama_mobile/core/board_square.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/cup_lifecycle.dart';
+import 'package:dama_mobile/core/errors/api_user_message.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/prefs/board_palette_prefs.dart';
 import 'package:dama_mobile/core/prefs/board_view_prefs.dart';
@@ -978,8 +979,18 @@ class _HomePageState extends State<HomePage> {
           return;
         }
         if (res.statusCode >= 300) {
-          final msg = softCommunityJoinStatusMessage(pay?.enrollFailed ?? '');
-          if (msg.isNotEmpty) {
+          final key = apiErrorKeyFromBody(res.body);
+          // Free enroll should not hit cash gates; never toast enroll_failed+API JSON.
+          final msg = chromeOnlyUserMessage(
+            isCashGateErrorKey(key)
+                ? cashGateChromeFromBody(
+                    responseBody: res.body,
+                    cashChrome: null,
+                    fallback: '',
+                  )
+                : softCommunityJoinStatusMessage(pay?.enrollFailed ?? ''),
+          );
+          if (msg != null) {
             ScaffoldMessenger.of(context)
                 .showSnackBar(SnackBar(content: Text(msg)));
           }
@@ -993,8 +1004,10 @@ class _HomePageState extends State<HomePage> {
         await _openTournamentCupLobby(t.id);
       } catch (_) {
         if (!mounted) return;
-        final msg = softCommunityJoinStatusMessage(pay?.enrollFailed ?? '');
-        if (msg.isNotEmpty) {
+        final msg = chromeOnlyUserMessage(
+          softCommunityJoinStatusMessage(pay?.enrollFailed ?? ''),
+        );
+        if (msg != null) {
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(msg)));
         }

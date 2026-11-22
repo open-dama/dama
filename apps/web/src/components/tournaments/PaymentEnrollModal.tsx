@@ -1,6 +1,7 @@
 "use client";
 
 import { SignInLink } from "@/components/auth/SignInLink";
+import { AgeGateForm } from "@/components/compliance/AgeGateForm";
 import { AmountInput } from "@/components/ui/amount-input";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -15,6 +16,8 @@ import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQ
 import { usePaymentRouteQuery } from "@/hooks/query/usePaymentRouteQuery";
 import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery";
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isAgeRequiredError } from "@/lib/cash-gate-error";
 import { cashJurisdictionLockMessage, isCashJurisdictionLocked } from "@/lib/cash-jurisdiction";
 import {
   softCommunityJoinStatusMessage,
@@ -110,14 +113,25 @@ export function PaymentEnrollModal({
   const enroll = useTournamentEnrollMutation(token);
   const checkout = useCheckoutMutation(token);
   const [topUpAmount, setTopUpAmount] = useState("");
+  /** Show DOB gate after enroll returns age_required (or eligibility already says so). */
+  const [forceAgeGate, setForceAgeGate] = useState(false);
   const suggestedTopUpRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
       setTopUpAmount("");
       suggestedTopUpRef.current = false;
+      setForceAgeGate(false);
     }
   }, [open]);
+
+  const eligibilityKey = (eligibilityQuery.data?.error_key || "").trim();
+  const ageBlocked =
+    Boolean(tournament) &&
+    !tournament?.is_free &&
+    ((eligibilityQuery.isFetched && eligibilityKey === "age_required") || forceAgeGate);
+  /** Form copy only - never surface age_required_error (looks like raw API English). */
+  const ageGateBlurb = (cashChrome?.age_gate_blurb || "").trim();
 
   // Suggest shortfall once wallet is known (never while still loading → fake "0" balance).
   useEffect(() => {
@@ -206,6 +220,8 @@ export function PaymentEnrollModal({
     !tournament.is_free &&
     (!flagsSettled ||
       !geoSettled ||
+      !eligibilityQuery.isFetched ||
+      cashChromeQuery.isLoading ||
       (Boolean(country) && (walletQuery.isLoading || !balanceReady)));
   const canAfford = tournament.is_free || (balanceReady && balance != null && balance >= fee);
   const topUpValid = parsePositiveDecimal(topUpAmount) != null;
@@ -213,6 +229,10 @@ export function PaymentEnrollModal({
   const onEnroll = () => {
     if (cashLocked) {
       if (cashLockMessage) toast.error(cashLockMessage);
+      return;
+    }
+    if (ageBlocked) {
+      // DOB gate already visible - no toast (never enroll_failed / API JSON).
       return;
     }
     enroll.mutate(
@@ -234,8 +254,13 @@ export function PaymentEnrollModal({
             router.replace(freeJoinPlayHref(tournament.id));
             return;
           }
-          const msg = tournamentEnrollErrorChrome(err, chrome);
-          if (msg) toast.error(msg);
+          if (isAgeRequiredError(err)) {
+            // Open DOB gate in-modal; never toast enroll_failed or API JSON.
+            setForceAgeGate(true);
+            return;
+          }
+          const msg = tournamentEnrollErrorChrome(err, chrome, cashChrome);
+          if (msg) chromeOnlyToastError(msg, { id: "enroll-error" });
         },
       },
     );
@@ -264,18 +289,20 @@ export function PaymentEnrollModal({
             {softPaymentModalTitle(chrome.title)}
           </Dialog.Title>
           <Dialog.Description className="mt-2 text-sm text-[var(--dama-muted)]">
-            {cashLocked
-              ? cashLockMessage || softCommunityJoinStatusMessage(chrome.blurb)
-              : resolving
-                ? chrome.balance_pending
-                : countryMissing
-                  ? chrome.country_required_hint
-                  : canAfford
-                    ? softCommunityJoinStatusMessage(chrome.blurb)
-                    : softCommunityJoinStatusMessage(chrome.insufficient_blurb)}
+            {ageBlocked
+              ? ageGateBlurb || softCommunityJoinStatusMessage(chrome.blurb)
+              : cashLocked
+                ? cashLockMessage || softCommunityJoinStatusMessage(chrome.blurb)
+                : resolving
+                  ? chrome.balance_pending
+                  : countryMissing
+                    ? chrome.country_required_hint
+                    : canAfford
+                      ? softCommunityJoinStatusMessage(chrome.blurb)
+                      : softCommunityJoinStatusMessage(chrome.insufficient_blurb)}
           </Dialog.Description>
 
-          {cashLocked ? (
+          {cashLocked && !ageBlocked ? (
             <p className="mt-4 text-sm text-[var(--dama-danger)]">
               {cashLockMessage || cashChrome?.cash_rmg_unavailable || ""}
             </p>
@@ -332,7 +359,21 @@ export function PaymentEnrollModal({
             </div>
           </div>
 
-          {cashLocked ? (
+          {ageBlocked ? (
+            <div className="mt-6 space-y-3">
+              <AgeGateForm
+                onVerified={() => {
+                  setForceAgeGate(false);
+                  void eligibilityQuery.refetch();
+                }}
+              />
+              <Dialog.Close asChild>
+                <Button type="button" variant="outline">
+                  {softHostingCancelAction(chrome.cancel_action)}
+                </Button>
+              </Dialog.Close>
+            </div>
+          ) : cashLocked ? (
             <div className="mt-6">
               <Dialog.Close asChild>
                 <Button type="button" variant="outline">

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dama_mobile/core/cup_lifecycle.dart';
+import 'package:dama_mobile/core/errors/api_user_message.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/payment_modal_chrome.dart';
@@ -757,9 +758,12 @@ class _TournamentsViewState extends State<_TournamentsView> {
           );
         }
       } else if ((st.error ?? '').trim().isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(st.error!.trim())),
-        );
+        final errMsg = chromeOnlyUserMessage(st.error);
+        if (errMsg != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errMsg)),
+          );
+        }
       }
       if (goPlay) {
         await _openCupLobby(context, t.id, accessToken: token.trim());

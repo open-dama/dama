@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/cup_lifecycle.dart';
 import 'package:dama_mobile/core/cache/skip_store.dart';
+import 'package:dama_mobile/core/errors/api_user_message.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/types/types.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
@@ -191,10 +192,18 @@ class TournamentsCubit extends Cubit<TournamentsState> {
         return true;
       }
       if (res.statusCode >= 300) {
-        emit(state.copyWith(
-          busy: false,
-          error: softCommunityJoinStatusMessage(chrome.enrollFailed),
-        ));
+        // Free path should not hit cash gates; still never toast enroll_failed+API JSON.
+        final key = apiErrorKeyFromBody(res.body);
+        final mapped = chromeOnlyUserMessage(
+          isCashGateErrorKey(key)
+              ? cashGateChromeFromBody(
+                  responseBody: res.body,
+                  cashChrome: null,
+                  fallback: '',
+                )
+              : softCommunityJoinStatusMessage(chrome.enrollFailed),
+        );
+        emit(state.copyWith(busy: false, error: mapped));
         return false;
       }
       QueryCache.invalidate(CacheKeys.tournaments);
@@ -211,7 +220,9 @@ class TournamentsCubit extends Cubit<TournamentsState> {
     } catch (_) {
       emit(state.copyWith(
         busy: false,
-        error: softCommunityJoinStatusMessage(chrome.enrollFailed),
+        error: chromeOnlyUserMessage(
+          softCommunityJoinStatusMessage(chrome.enrollFailed),
+        ),
       ));
       return false;
     }
@@ -242,9 +253,18 @@ class TournamentsCubit extends Cubit<TournamentsState> {
         return;
       }
       if (res.statusCode >= 300) {
+        final key = apiErrorKeyFromBody(res.body);
         emit(state.copyWith(
           busy: false,
-          error: softCommunityJoinStatusMessage(chrome.enrollFailed),
+          error: chromeOnlyUserMessage(
+            isCashGateErrorKey(key)
+                ? cashGateChromeFromBody(
+                    responseBody: res.body,
+                    cashChrome: null,
+                    fallback: '',
+                  )
+                : softCommunityJoinStatusMessage(chrome.enrollFailed),
+          ),
         ));
         return;
       }
@@ -273,7 +293,9 @@ class TournamentsCubit extends Cubit<TournamentsState> {
     } catch (_) {
       emit(state.copyWith(
         busy: false,
-        error: softCommunityJoinStatusMessage(chrome.enrollFailed),
+        error: chromeOnlyUserMessage(
+          softCommunityJoinStatusMessage(chrome.enrollFailed),
+        ),
       ));
     }
   }

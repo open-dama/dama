@@ -106,13 +106,16 @@ export function eventsAdminChromeApiToast(
 /** True when a string looks like a raw API JSON envelope (never show in toasts). */
 export function isRawApiJsonEnvelope(msg: string): boolean {
   const t = (msg || "").trim();
-  if (!t.startsWith("{") && !t.startsWith("[")) return false;
-  return (
-    t.includes('"error"') ||
-    t.includes("'error'") ||
-    t.includes('"error_key"') ||
-    t.includes("'error_key'")
-  );
+  if (!t) return false;
+  // Full JSON body OR chrome text that accidentally appended a JSON blob.
+  if (t.includes('"error_key"') || t.includes("'error_key'")) return true;
+  if (
+    (t.startsWith("{") || t.startsWith("[")) &&
+    (t.includes('"error"') || t.includes("'error'"))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
