@@ -80,6 +80,7 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   final OverlayPortalController _portal = OverlayPortalController();
   final OverlayPortalController _fabPortal = OverlayPortalController();
   final GlobalKey _boardKey = GlobalKey();
+  final GlobalKey _spacerKey = GlobalKey();
   bool _collapsed = false;
   bool _overlayOwnsBoard = false;
   bool? _lastCompact;
@@ -171,9 +172,20 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   void _scheduleSpacerSync() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final box = _boardKey.currentContext?.findRenderObject() as RenderBox?;
-      if (box == null || !box.hasSize) return;
-      final next = box.size.height;
+      final boardBox =
+          _boardKey.currentContext?.findRenderObject() as RenderBox?;
+      if (boardBox == null || !boardBox.hasSize) return;
+      // Web parity: spacer = boardBottom − spacerTop (not raw height). Overlay
+      // sits above the in-tree slot; raw height leaves a band under the seat.
+      final spacerBox =
+          _spacerKey.currentContext?.findRenderObject() as RenderBox?;
+      double next = boardBox.size.height;
+      if (spacerBox != null && spacerBox.hasSize) {
+        final boardBottom =
+            boardBox.localToGlobal(Offset(0, boardBox.size.height)).dy;
+        final spacerTop = spacerBox.localToGlobal(Offset.zero).dy;
+        next = (boardBottom - spacerTop).clamp(0.0, double.infinity);
+      }
       // Wider epsilon stops 1px layout oscillation (zoom thrash on real devices).
       if ((next - _spacerH).abs() <= 2) return;
       setState(() => _spacerH = next);
@@ -264,9 +276,10 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   }
 
   Widget _scoped(Widget child, {required bool expanded}) {
-    // Minimized smart board: hug (width square). Expanded: budget height-fit.
+    // Always hug on compact smart boards (web parity). Budget+host-height feedback
+    // causes infinite zoom / postage-stamp collapse on real devices.
     return BoardStackLayoutScope(
-      hug: !expanded,
+      hug: true,
       child: SmartBoardChromeScope(
         onChromeDoubleTap: _toggle,
         onToggleButton: _toggle,
@@ -313,13 +326,16 @@ class _SmartBoardShellState extends State<SmartBoardShell>
 
   Widget _boardColumn({required bool expanded}) {
     // No in-tree FAB - portaled below board so it cannot be cropped or cover clocks.
-    // Horizontal inset keeps rank/file coords inside the screen (L/R clip parity).
+    // Inline: full section width. Pop only: regular side inset (web max-lg:px-3 parity).
+    final column = _scoped(widget.child, expanded: expanded);
     return KeyedSubtree(
       key: _boardKey,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: _scoped(widget.child, expanded: expanded),
-      ),
+      child: expanded
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: column,
+            )
+          : column,
     );
   }
 
@@ -376,13 +392,11 @@ class _SmartBoardShellState extends State<SmartBoardShell>
         controller: _portal,
         overlayChildBuilder: (context) {
           if (!boardInOverlay) return const SizedBox.shrink();
-          // Height-budget under status/app chrome so the square never clips
-          // under the browser/app header (web header-offset + svh parity).
+          // Pop covers app bar (web top-0 / z-60 parity). Hug section sizing only.
           final pad = MediaQuery.paddingOf(context);
           final stableH =
               media.height; // MediaQuery size is stable vs viewInsets churn
-          final maxBoardH =
-              (stableH - pad.top - pad.bottom - 56).clamp(280.0, stableH);
+          final maxBoardH = (stableH - pad.bottom - 56).clamp(280.0, stableH);
           return Align(
             alignment: Alignment.topCenter,
             child: FadeTransition(
@@ -390,17 +404,20 @@ class _SmartBoardShellState extends State<SmartBoardShell>
               child: SlideTransition(
                 position: _slide,
                 child: Material(
-                  color: tokens.card,
-                  elevation: 2,
-                  shadowColor: Colors.black.withValues(alpha: 0.12),
-                  child: SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+                  color: Colors.transparent,
+                  elevation: 0,
+                  child: Padding(
+                    // Status-bar only; board card covers the app bar below it.
+                    padding: EdgeInsets.only(top: pad.top),
+                    child: Material(
+                      color: tokens.card,
+                      elevation: 2,
+                      shadowColor: Colors.black.withValues(alpha: 0.12),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
                           maxWidth: media.width,
-                          maxHeight: maxBoardH,
+                          maxHeight:
+                              (maxBoardH - pad.top).clamp(280.0, maxBoardH),
                         ),
                         child: _boardColumn(expanded: true),
                       ),
@@ -413,6 +430,7 @@ class _SmartBoardShellState extends State<SmartBoardShell>
         },
         child: boardInOverlay
             ? SizedBox(
+                key: _spacerKey,
                 height: _spacerH > 0
                     ? _spacerH
                     : (media.width * 0.92 + 80)
