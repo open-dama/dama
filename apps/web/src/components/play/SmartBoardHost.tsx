@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  BoardStackLayoutContext,
+  type BoardStackLayoutMode,
+} from "@/components/play/board-stack-layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -63,6 +67,12 @@ function isOutsideBoardToggleTarget(target: EventTarget | null) {
 
 type Props = {
   active: boolean;
+  /**
+   * Rising edge while `active` forces maximize (match/spectate start).
+   * Needed because home idle already sets `active` - without this, starting a
+   * game while minimized stays hug and the top rank clips under Safari chrome.
+   */
+  popSignal?: boolean;
   className?: string;
   children: ReactNode;
 };
@@ -89,32 +99,49 @@ function MaximizeFabPortal({
 
   useLayoutEffect(() => {
     let ro: ResizeObserver | null = null;
+    let observed: Element | null = null;
     const sync = () => {
-      const el = anchorRef.current;
-      if (!el) return;
+      const host = anchorRef.current;
+      if (!host) return;
+      // Anchor to seats+square stack (not the full fixed overlay shell height).
+      const el = host.querySelector<HTMLElement>("[data-smart-board-stack]") ?? host;
       const r = el.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) return;
-      setPos({
-        top: Math.round(r.bottom + FAB_GAP),
-        left: Math.round(r.right - FAB_SIZE - 4),
-      });
+      const vv = window.visualViewport;
+      const viewW = Math.round(vv?.width ?? window.innerWidth);
+      const viewH = Math.round(vv?.height ?? window.innerHeight);
+      // Keep FAB on-screen above bottom nav / home indicator.
+      const bottomSafe = 56;
+      const top = Math.min(
+        Math.round(r.bottom + FAB_GAP),
+        Math.max(8, viewH - FAB_SIZE - bottomSafe),
+      );
+      const left = Math.min(
+        Math.max(8, Math.round(r.right - FAB_SIZE - 4)),
+        Math.max(8, viewW - FAB_SIZE - 8),
+      );
+      setPos((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
+      if (typeof ResizeObserver !== "undefined" && observed !== el) {
+        ro?.disconnect();
+        ro = new ResizeObserver(() => sync());
+        ro.observe(el);
+        observed = el;
+      }
     };
     sync();
-    const el = anchorRef.current;
-    if (el && typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(() => sync());
-      ro.observe(el);
-    }
     window.addEventListener("resize", sync);
     window.addEventListener("scroll", sync, true);
+    window.visualViewport?.addEventListener("resize", sync);
+    window.visualViewport?.addEventListener("scroll", sync);
     const poll = window.setInterval(sync, 200);
     return () => {
       ro?.disconnect();
       window.removeEventListener("resize", sync);
       window.removeEventListener("scroll", sync, true);
+      window.visualViewport?.removeEventListener("resize", sync);
+      window.visualViewport?.removeEventListener("scroll", sync);
       window.clearInterval(poll);
     };
-    // Expand toggles host size; ResizeObserver + poll re-anchor the FAB.
   }, [anchorRef]);
 
   if (!pos || typeof document === "undefined") return null;
@@ -170,13 +197,13 @@ function MaximizeFabPortal({
 
 /**
  * Phone/tablet smart board.
- * - Idle: fill parent 52dvh so PlayBoardColumn cannot shrink-loop / vanish.
- * - Live hug: content height (seats + square) - no 52dvh letterbox under seat.
+ * - Idle: fill parent 52svh so PlayBoardColumn cannot shrink-loop / vanish.
+ * - Live hug: content height (seats + square) - no 52svh letterbox under seat.
  * - Expanded: portaled fixed overlay hugging content; shell pointer-events-none
  *   so the Live rail scrolls like the pre-game lobby.
  * - FAB: floating on the bottom edge of the board section (lobby FAB language).
  */
-export function SmartBoardHost({ active, className, children }: Props) {
+export function SmartBoardHost({ active, popSignal = false, className, children }: Props) {
   const maxLg = useMaxLg();
   const [expanded, setExpanded] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
@@ -184,6 +211,7 @@ export function SmartBoardHost({ active, className, children }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const prevActiveRef = useRef(false);
+  const prevPopRef = useRef(false);
   const toggleLockUntilRef = useRef(0);
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
   const ignoreNextClickRef = useRef(false);
@@ -202,12 +230,29 @@ export function SmartBoardHost({ active, className, children }: Props) {
       lastTapRef.current = null;
       toggleLockUntilRef.current = 0;
       setSpacerPx(0);
+      prevPopRef.current = false;
     }
     prevActiveRef.current = active;
   }, [active]);
 
+  // Match/spectate start: pop maximized even if the idle board was already active+minimized.
+  useEffect(() => {
+    if (!active) {
+      prevPopRef.current = false;
+      return;
+    }
+    if (popSignal && !prevPopRef.current) {
+      setExpanded(true);
+      toggleLockUntilRef.current = Date.now() + TOGGLE_LOCK_MS;
+    }
+    prevPopRef.current = popSignal;
+  }, [active, popSignal]);
+
   const live = Boolean(maxLg && active);
   const topped = Boolean(live && expanded);
+  // Minimized smart board: width-square hug (no height feedback loop).
+  // Idle budget + expanded overlay: height-fit into a definite max host.
+  const layoutMode: BoardStackLayoutMode = live && !topped ? "hug" : "budget";
 
   // Spacer = painted board card bottom (not FAB overhang) so rail sits flush
   // under seats; FAB floats half into the grid gap / rail top.
@@ -222,15 +267,17 @@ export function SmartBoardHost({ active, className, children }: Props) {
       const host = hostRef.current;
       const wrap = wrapRef.current;
       if (!host || !wrap) return;
-      if (typeof ResizeObserver !== "undefined" && observed !== host) {
+      // Prefer the seats+square stack height (not the full fixed overlay shell).
+      const stack = host.querySelector<HTMLElement>("[data-smart-board-stack]") ?? host;
+      if (typeof ResizeObserver !== "undefined" && observed !== stack) {
         ro?.disconnect();
         ro = new ResizeObserver(() => sync());
-        ro.observe(host);
-        observed = host;
+        ro.observe(stack);
+        observed = stack;
       }
-      const hostBottom = Math.round(host.getBoundingClientRect().bottom);
+      const stackBottom = Math.round(stack.getBoundingClientRect().bottom);
       const wrapTop = Math.max(0, Math.round(wrap.getBoundingClientRect().top));
-      const next = Math.max(0, hostBottom - wrapTop);
+      const next = Math.max(0, stackBottom - wrapTop);
       setSpacerPx((prev) => (Math.abs(prev - next) <= 2 ? prev : next));
     };
     sync();
@@ -309,40 +356,46 @@ export function SmartBoardHost({ active, className, children }: Props) {
   }, [topped]);
 
   const boardFrame = (
-    <div
-      ref={hostRef}
-      className={cn(
-        "relative flex min-h-0 w-full min-w-0 flex-col",
-        topped
-          ? "pointer-events-none fixed inset-x-0 top-0 z-[60] h-auto w-full max-w-none overflow-visible bg-[var(--dama-card)] px-2 pb-0 pt-[max(0.25rem,env(safe-area-inset-top))]"
-          : live
-            ? "h-auto overflow-visible"
-            : "h-full overflow-hidden",
-      )}
-      data-smart-board={topped ? "expanded" : live ? "hug" : "inline"}
-      data-dama-smart-frame=""
-      onDoubleClickCapture={onDoubleClick}
-      onPointerUp={onPointerUp}
-      onClickCapture={(e) => {
-        if (!ignoreNextClickRef.current) return;
-        ignoreNextClickRef.current = false;
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
+    <BoardStackLayoutContext.Provider value={layoutMode}>
       <div
+        ref={hostRef}
         className={cn(
-          "relative z-10 flex min-h-0 w-full min-w-0 flex-col overflow-visible",
+          // max-lg:px-3 keeps rank/file coords inside the screen (L/R clip on phones).
+          "relative flex min-h-0 w-full min-w-0 flex-col max-lg:box-border max-lg:px-3",
           topped
-            ? "pointer-events-auto mx-auto h-auto max-w-[min(100%,calc(100dvh-1rem))]"
+            ? // Explicit height (not h-auto): children use h-full for budget measure.
+              // Below sticky header (z-50); svh avoids iOS URL-bar zoom thrash.
+              // z-[45] under header (z-50) so chrome never covers the top rank.
+              "pointer-events-none fixed inset-x-0 top-[var(--dama-mobile-header-height,3.5rem)] z-[45] w-full max-w-none overflow-hidden bg-[var(--dama-card)] pb-0 h-[calc(100svh-var(--dama-mobile-header-height,3.5rem)-var(--dama-bottom-nav-height,0px)-2.75rem)]"
             : live
-              ? "h-auto"
-              : "h-full flex-1 overflow-hidden",
+              ? "h-auto overflow-visible"
+              : "h-full overflow-hidden",
         )}
+        data-smart-board={topped ? "expanded" : live ? "hug" : "inline"}
+        data-dama-smart-frame=""
+        onDoubleClickCapture={onDoubleClick}
+        onPointerUp={onPointerUp}
+        onClickCapture={(e) => {
+          if (!ignoreNextClickRef.current) return;
+          ignoreNextClickRef.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+        }}
       >
-        {children}
+        <div
+          className={cn(
+            "relative z-10 flex min-h-0 w-full min-w-0 flex-col",
+            topped
+              ? "pointer-events-auto mx-auto h-full min-h-0 w-full max-w-full overflow-hidden"
+              : live
+                ? "h-auto overflow-visible"
+                : "h-full flex-1 overflow-hidden",
+          )}
+        >
+          {children}
+        </div>
       </div>
-    </div>
+    </BoardStackLayoutContext.Provider>
   );
 
   return (

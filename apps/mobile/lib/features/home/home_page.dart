@@ -24,6 +24,7 @@ import 'package:dama_mobile/features/events/events_shell.dart';
 import 'package:dama_mobile/features/game/cubit/feature_flags_cubit.dart';
 import 'package:dama_mobile/features/game/draughts_board_3d.dart';
 import 'package:dama_mobile/features/game/play_board_frame.dart';
+import 'package:dama_mobile/features/game/smart_board_shell.dart';
 import 'package:dama_mobile/features/game/game_lobby_page.dart';
 import 'package:dama_mobile/features/game/match_board_page.dart';
 import 'package:dama_mobile/features/game/matchmaking_page.dart';
@@ -1718,8 +1719,8 @@ class _HomePreviewBoard3D extends StatelessWidget {
         interactive: false,
       ),
     );
-    // Frame owns square board + top/bottom seats (do not force outer square).
-    return frame;
+    // Same smart maximize / FAB / pop flow as live boards (web parity).
+    return SmartBoardShell(active: true, popSignal: true, child: frame);
   }
 }
 
@@ -1843,8 +1844,8 @@ class _HomePreviewBoard extends StatelessWidget {
         },
       ),
     );
-    // Frame owns square board + top/bottom seats (do not force outer square).
-    return frame;
+    // Same smart maximize / FAB / pop flow as live boards (web parity).
+    return SmartBoardShell(active: true, popSignal: true, child: frame);
   }
 }
 

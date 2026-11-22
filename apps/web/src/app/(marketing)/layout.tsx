@@ -65,9 +65,10 @@ function MarketingShell({
     <div
       className={cn(
         "bg-[var(--dama-bg)] text-[var(--dama-text)]",
-        // Locked play: flex + h-dvh at ALL breakpoints so board fits seats and rail scrolls.
+        // Locked play: flex + h-svh (not dvh) so iOS Safari URL-bar show/hide cannot
+        // resize the board host in a measure loop. Rail still scrolls inside.
         // Unlocked embeds (leaderboard/match): page scroll; md+ row with left rail.
-        lockViewport ? "flex h-dvh max-h-dvh overflow-hidden" : "min-h-screen md:flex",
+        lockViewport ? "flex h-svh max-h-svh overflow-hidden" : "min-h-screen md:flex",
       )}
     >
       <Suspense fallback={<aside className="hidden h-screen w-[15.5rem] shrink-0 md:block" />}>

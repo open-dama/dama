@@ -1,9 +1,10 @@
 /**
  * Home (`/`) play-shell flag: play hub / spectate use the Chess.com board|rail layout.
  *
- * When locked, marketing shell uses `h-dvh overflow-hidden` at all breakpoints so the
- * right rail body (`[data-dama-rail-scroll]`) is the scroller. Board host is height-budgeted
- * so PlayBoardColumn can fit top seat + board + bottom seat without clipping.
+ * When locked, marketing shell uses `h-svh overflow-hidden` at all breakpoints so the
+ * right rail body (`[data-dama-rail-scroll]`) is the scroller. `svh` (not `dvh`) keeps
+ * the board host height stable when iOS Safari shows/hides the URL bar. Board host is
+ * height-budgeted so PlayBoardColumn can fit top seat + board + bottom seat without clipping.
  *
  * Tournaments browse (Official|Community|All; legacy view=events) stays locked
  * (center column scrolls; rail stays). Full-page embeds (leaderboard,

@@ -2461,17 +2461,19 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
                     ),
                   if (_board != null && _boardSize > 0)
                     const SizedBox(height: 10),
-                  // Live: hug board (no Expanded letterbox under seats - web parity).
-                  // Idle/finished: Expanded so the square still gets a height budget.
+                  // Smart maximize FAB for any visible board (idle preview + live).
+                  // Compact+active: hug (no Expanded letterbox). Else Expanded budget.
                   Builder(
                     builder: (context) {
-                      final boardLive = _gameStartedAt != null &&
-                          _outcome == null &&
-                          !_draw &&
-                          _endReason != 'clock_flag' &&
-                          _endReason != 'clock_draw';
+                      final hasBoard = _board != null && _boardSize > 0;
+                      final compact = MediaQuery.sizeOf(context).width <=
+                          kSmartBoardCompactMaxWidth;
                       final shell = SmartBoardShell(
-                        active: boardLive,
+                        active: hasBoard,
+                        popSignal: hasBoard &&
+                            _gameStartedAt != null &&
+                            _outcome == null &&
+                            !_draw,
                         child: PlayBoardFrame(
                           vsLabel: _railChrome?.vsSeparator ?? '',
                           topSeat: MatchSeatAvatars(
@@ -2669,7 +2671,7 @@ class _MatchBoardPageState extends State<MatchBoardPage> with RouteAware {
                           coverOverlay: _boardCoverOverlay(chrome),
                         ),
                       );
-                      if (boardLive) return shell;
+                      if (hasBoard && compact) return shell;
                       return Expanded(child: shell);
                     },
                   ),

@@ -45,6 +45,7 @@ class PlayBoardFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hug = BoardStackLayoutScope.maybeOf(context)?.hug ?? false;
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxW = constraints.maxWidth;
@@ -54,14 +55,15 @@ class PlayBoardFrame extends StatelessWidget {
         }
 
         final reserved = _seatRowH * 2 + _seatGap * 2;
-        // Prefer full width on phone/tablet when height allows; otherwise fit height.
+        // Hug (smart minimized): width square only - never feed host height back
+        // into side (kills infinite zoom when MediaQuery/safe-area jitters).
+        // Budget: height-fit when bounded; clamp to host width (L/R clip fix).
         final double side;
-        if (maxH.isFinite && maxH > 0) {
-          final availH = maxH - reserved;
-          side = (maxW <= availH ? maxW : availH).clamp(0.0, double.infinity);
-        } else {
-          // Unbounded height (rare): size from width only.
+        if (hug || !maxH.isFinite || maxH <= 0) {
           side = maxW;
+        } else {
+          final availH = maxH - reserved;
+          side = (maxW <= availH ? maxW : availH).clamp(0.0, maxW);
         }
 
         if (side <= 0) {
@@ -85,14 +87,16 @@ class PlayBoardFrame extends StatelessWidget {
                 SizedBox(
                   width: side,
                   height: side,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    clipBehavior: Clip.hardEdge,
-                    children: [
-                      board,
-                      if (coverOverlay != null)
-                        Positioned.fill(child: coverOverlay!),
-                    ],
+                  child: ClipRect(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      clipBehavior: Clip.hardEdge,
+                      children: [
+                        board,
+                        if (coverOverlay != null)
+                          Positioned.fill(child: coverOverlay!),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: _seatGap),
