@@ -464,7 +464,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
 
   @override
   void dispose() {
-    widget.onPaintReady?.call(false);
+    // Do not call onPaintReady(false) - parent paint gates latch true; false remount-loops.
     WidgetsBinding.instance.removeObserver(this);
     _cancelStallWatch();
     _anim.dispose();

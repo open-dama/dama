@@ -457,6 +457,11 @@ export function LivePlayHub({
     setBoardPlaneReady(boardView === "2d");
   }, [boardView, gameIdParam]);
 
+  /** Latch true only - ignore false so SmartBoardHost remounts cannot infinite-loop hydrate. */
+  const onBoardPlanePaintReady = useCallback((ready: boolean) => {
+    if (ready) setBoardPlaneReady(true);
+  }, []);
+
   const [matchIntroActive, setMatchIntroActive] = useState(false);
   const [matchResultActive, setMatchResultActive] = useState(false);
   const matchIntroSeenRef = useRef<string | null>(null);
@@ -2119,7 +2124,7 @@ export function LivePlayHub({
             onPlyAnimated={
               replayIndex == null && phase === "playing" ? handlePlyAnimated : undefined
             }
-            onPaintReady={setBoardPlaneReady}
+            onPaintReady={onBoardPlanePaintReady}
           />
         )}
         {phase === "playing" && showMoveHighlights && game.must_continue ? (
@@ -2508,7 +2513,8 @@ export function LivePlayHub({
         // Menu / finished / playing - same maximize FAB + pop flow as home idle.
         // Gate on surfaceActive so keep-alive hidden hubs do not portal a second FAB.
         // Skeleton stays budget/full-column (never hug stamp while seats+board shimmer).
-        active={surfaceActive && !showBoardSkeleton && !boardPlaneHydrating}
+        // Never gate active on boardPlaneHydrating - that remount-looped the 3D Canvas.
+        active={surfaceActive && !showBoardSkeleton}
         // Rising edge only on match start (surface enter already pops via `active`).
         popSignal={surfaceActive && phase === "playing"}
         className={cn(

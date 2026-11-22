@@ -1735,17 +1735,18 @@ class _HomePreviewBoard3DState extends State<_HomePreviewBoard3D> {
         onSelectSquare: (_, __) {},
         interactive: false,
         onPaintReady: (ready) {
-          if (!mounted || _painted == ready) return;
-          setState(() => _painted = ready);
+          // Latch true only - ignore false (shell remount must not re-open hydrate).
+          if (!mounted || !ready || _painted) return;
+          setState(() => _painted = true);
         },
       ),
     );
-    // Until first paint: fill column with visible seats+board (budget) so WebGL can
-    // paint - Offstage/offscreen GL often never fires onPaintReady (infinite shimmer).
-    // After paint: same smart maximize / FAB / pop flow as live boards (web parity).
+    // Until first paint: fill column with visible seats+board (budget) so GL can
+    // paint. Keep SmartBoardShell active across paint (don't flip active on paint -
+    // that remount-looped the 3D board). Height expand only until first paint.
     final shell = SmartBoardShell(
-      active: _painted,
-      popSignal: _painted,
+      active: true,
+      popSignal: true,
       child: frame,
     );
     return _painted ? shell : SizedBox.expand(child: shell);

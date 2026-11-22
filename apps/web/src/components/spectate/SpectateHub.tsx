@@ -329,6 +329,11 @@ export default function SpectateHub({
     setBoardPlaneReady(boardView === "2d");
   }, [boardView, gameId]);
 
+  /** Latch true only - ignore false so SmartBoardHost remounts cannot infinite-loop hydrate. */
+  const onBoardPlanePaintReady = useCallback((ready: boolean) => {
+    if (ready) setBoardPlaneReady(true);
+  }, []);
+
   // Seed from React Query so leave→back paints the board without a forced REST flash.
   const [game, setGame] = useState<GamePayload | null>(() => {
     if (!initialSpectateGameId) return null;
@@ -877,7 +882,7 @@ export default function SpectateHub({
           yourPlayer={1}
           replayMode={replayIndex != null}
           onPlyAnimated={replayIndex == null ? handlePlyAnimated : undefined}
-          onPaintReady={setBoardPlaneReady}
+          onPaintReady={onBoardPlanePaintReady}
         />
       );
   } else if (showBoardSkeleton) {
@@ -897,7 +902,7 @@ export default function SpectateHub({
         moveHistory={[]}
         yourPlayer={1}
         replayMode
-        onPaintReady={setBoardPlaneReady}
+        onPaintReady={onBoardPlanePaintReady}
       />
     );
   } else {
@@ -976,7 +981,8 @@ export default function SpectateHub({
         // Preview + live spectate - same maximize FAB + pop flow as play hubs.
         // Gate on surfaceActive so keep-alive under Play does not portal a second FAB.
         // Skeleton stays budget/full-column (never hug stamp while seats+board shimmer).
-        active={surfaceActive && !fullColumnHost}
+        // Gate active only on skeleton swap - never on 3D paint hydrate (remount loop).
+        active={surfaceActive && !fullColumnShimmer}
         popSignal={surfaceActive && Boolean(game)}
         className={cn(
           // Always overflow-hidden: FAB is body-portaled; overflow-visible was rubber-banding the header.

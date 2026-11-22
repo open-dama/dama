@@ -315,6 +315,11 @@ export function HomePlayHub({
     // Switching 2D↔3D must re-enter full-column host until the new plane paints.
     setPreview3dPainted(false);
   }, [boardView]);
+
+  /** Latch true only - ignore false (Canvas remount must not re-open the hydrate gate). */
+  const onPreview3dPaintReady = useCallback((ready: boolean) => {
+    if (ready) setPreview3dPainted(true);
+  }, []);
   /** Center tournaments grid (not a rail tab). */
   const [showTournaments, setShowTournaments] = useState(false);
   const router = useRouter();
@@ -1298,8 +1303,8 @@ export function HomePlayHub({
           <SmartBoardHost
             // Same smart maximize / FAB / pop flow for idle preview and live play.
             // Lobby visible OR embedded live: keep-alive hidden surfaces must not portal FABs.
-            // Pending full-column shimmer / 3D hydrate must stay budget-sized (hug = stamp).
-            active={isPlayBoard && (lobbySurfaceVisible || liveActive) && !fullColumnHost}
+            // Gate active only on skeleton swap - never on 3D paint hydrate (that remount-looped Canvas).
+            active={isPlayBoard && (lobbySurfaceVisible || liveActive) && !fullColumnShimmer}
             // Re-pop on lobby enter + match start (even if shell stayed active+minimized).
             popSignal={Boolean(liveActive || lobbySurfaceVisible)}
             className={cn(
@@ -1414,7 +1419,7 @@ export function HomePlayHub({
                       moveHistory={[]}
                       yourPlayer={1}
                       replayMode
-                      onPaintReady={setPreview3dPainted}
+                      onPaintReady={onPreview3dPaintReady}
                     />
                   ) : (
                     <BoardAreaSkeleton />

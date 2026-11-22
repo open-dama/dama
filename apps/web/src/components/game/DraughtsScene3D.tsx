@@ -1129,12 +1129,10 @@ export default function DraughtsScene3D(props: Props) {
     return () => window.clearTimeout(id);
   }, [props.illegalShakeKey]);
 
+  // Latch-friendly: notify current readiness only. Never force `false` on cleanup -
+  // that remounted Canvas under SmartBoardHost portals and infinite-looped paint gates.
   useEffect(() => {
     onPaintReadyRef.current?.(glReady);
-    return () => {
-      // Leaving / remounting: parent must treat plane as not ready again.
-      onPaintReadyRef.current?.(false);
-    };
   }, [glReady]);
 
   if (size <= 0) {
