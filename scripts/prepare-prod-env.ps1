@@ -168,9 +168,9 @@ $webOrigin = if ($WebHost -eq $Domain -or $WebHost -eq "www.$Domain") {
 $adminOrigin = "https://$AdminHost"
 
 $chapaBase = Get-MapVal $m @("CHAPA_BASE_URL") "https://api.chapa.co/v1"
-$paddleEnv = Get-MapVal $m @("PADDLE_ENV") "live"
+$paddleEnv = Get-MapVal $m @("DAMA_PADDLE_ENV", "PADDLE_ENV") "live"
 $mediaCdn = Get-MapVal $m @("NEXT_PUBLIC_MEDIA_CDN_HOST") "res.cloudinary.com"
-$paddleClient = Get-MapVal $m @("PADDLE_CLIENT_TOKEN", "NEXT_PUBLIC_PADDLE_CLIENT_TOKEN")
+$paddleClient = Get-MapVal $m @("DAMA_PADDLE_CLIENT_TOKEN", "PADDLE_CLIENT_TOKEN", "NEXT_PUBLIC_DAMA_PADDLE_CLIENT_TOKEN", "NEXT_PUBLIC_PADDLE_CLIENT_TOKEN")
 
 $render = @"
 # =============================================================================
@@ -206,11 +206,11 @@ CHAPA_WEBHOOK_SECRET=$(Get-MapVal $m @("CHAPA_WEBHOOK_SECRET"))
 CHAPA_BASE_URL=$chapaBase
 CHAPA_TEST_MODE=false
 CHAPA_WEBHOOK_URL=$apiBase/api/v1/payments/local/webhook
-PADDLE_API_KEY=$(Get-MapVal $m @("PADDLE_API_KEY"))
-PADDLE_WEBHOOK_SECRET=$(Get-MapVal $m @("PADDLE_WEBHOOK_SECRET"))
-PADDLE_CLIENT_TOKEN=$paddleClient
-PADDLE_ENV=$paddleEnv
-PADDLE_WEBHOOK_URL=$apiBase/api/v1/payments/international/webhook
+DAMA_PADDLE_API_KEY=$(Get-MapVal $m @("DAMA_PADDLE_API_KEY", "PADDLE_API_KEY"))
+DAMA_PADDLE_WEBHOOK_SECRET=$(Get-MapVal $m @("DAMA_PADDLE_WEBHOOK_SECRET", "PADDLE_WEBHOOK_SECRET"))
+DAMA_PADDLE_CLIENT_TOKEN=$paddleClient
+DAMA_PADDLE_ENV=$paddleEnv
+DAMA_PADDLE_WEBHOOK_URL=$apiBase/api/v1/payments/international/webhook
 "@
 
 $webVercel = @"
@@ -235,8 +235,8 @@ NEXT_PUBLIC_APP_PATH_AUTH_CALLBACK=/auth/callback
 NEXT_PUBLIC_APP_PATH_OAUTH_COMPLETE=/auth/oauth/complete
 NEXT_PUBLIC_SUPABASE_ENV_MISSING=Supabase Auth is not configured.
 NEXT_PUBLIC_MEDIA_CDN_HOST=$mediaCdn
-NEXT_PUBLIC_PADDLE_CLIENT_TOKEN=$paddleClient
-NEXT_PUBLIC_PADDLE_ENV=$paddleEnv
+NEXT_PUBLIC_DAMA_PADDLE_CLIENT_TOKEN=$paddleClient
+NEXT_PUBLIC_DAMA_PADDLE_ENV=$paddleEnv
 "@
 
 $adminVercel = @"

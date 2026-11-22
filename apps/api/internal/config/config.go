@@ -89,9 +89,9 @@ func Load() Config {
 			os.Getenv("DAMA_CHAPA_BASE_URL"),
 			"https://api.chapa.co/v1",
 		), "/"),
-		PaddleAPIKey:        firstNonEmpty(os.Getenv("PADDLE_API_KEY"), os.Getenv("DAMA_PADDLE_API_KEY"), ""),
-		PaddleWebhookSecret: firstNonEmpty(os.Getenv("PADDLE_WEBHOOK_SECRET"), os.Getenv("DAMA_PADDLE_WEBHOOK_SECRET"), ""),
-		PaddleClientToken:   firstNonEmpty(os.Getenv("PADDLE_CLIENT_TOKEN"), os.Getenv("DAMA_PADDLE_CLIENT_TOKEN"), ""),
+		PaddleAPIKey:        firstNonEmpty(os.Getenv("DAMA_PADDLE_API_KEY"), os.Getenv("PADDLE_API_KEY"), ""),
+		PaddleWebhookSecret: firstNonEmpty(os.Getenv("DAMA_PADDLE_WEBHOOK_SECRET"), os.Getenv("PADDLE_WEBHOOK_SECRET"), ""),
+		PaddleClientToken:   firstNonEmpty(os.Getenv("DAMA_PADDLE_CLIENT_TOKEN"), os.Getenv("PADDLE_CLIENT_TOKEN"), ""),
 		PaddleEnv:           paddleEnv(),
 		PaddleAPIBase:       paddleAPIBase(),
 		PublicAPIBase:       getenv("DAMA_PUBLIC_API_BASE", "http://localhost:8080"),
@@ -190,11 +190,11 @@ func getenvInt(key string, fallback int) int {
 	return n
 }
 
-// paddleEnv returns live|sandbox from PADDLE_ENV / DAMA_PADDLE_ENV (default live).
+// paddleEnv returns live|sandbox from DAMA_PADDLE_ENV / PADDLE_ENV (default live).
 func paddleEnv() string {
 	env := strings.ToLower(strings.TrimSpace(firstNonEmpty(
-		os.Getenv("PADDLE_ENV"),
 		os.Getenv("DAMA_PADDLE_ENV"),
+		os.Getenv("PADDLE_ENV"),
 		"live",
 	)))
 	switch env {
@@ -209,8 +209,8 @@ func paddleEnv() string {
 // Docs: live https://api.paddle.com | sandbox https://sandbox-api.paddle.com
 func paddleAPIBase() string {
 	if override := strings.TrimRight(firstNonEmpty(
-		os.Getenv("PADDLE_API_BASE"),
 		os.Getenv("DAMA_PADDLE_API_BASE"),
+		os.Getenv("PADDLE_API_BASE"),
 	), "/"); override != "" {
 		return override
 	}

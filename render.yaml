@@ -29,7 +29,7 @@ services:
         value: "false"
       - key: CHAPA_TEST_MODE
         value: "false"
-      - key: PADDLE_ENV
+      - key: DAMA_PADDLE_ENV
         value: live
       # Secrets / URLs - set in dashboard (sync: false) from apps/api/.env.render
       - key: DATABASE_URL
@@ -74,11 +74,11 @@ services:
         sync: false
       - key: CHAPA_WEBHOOK_URL
         sync: false
-      - key: PADDLE_API_KEY
+      - key: DAMA_PADDLE_API_KEY
         sync: false
-      - key: PADDLE_WEBHOOK_SECRET
+      - key: DAMA_PADDLE_WEBHOOK_SECRET
         sync: false
-      - key: PADDLE_CLIENT_TOKEN
+      - key: DAMA_PADDLE_CLIENT_TOKEN
         sync: false
-      - key: PADDLE_WEBHOOK_URL
+      - key: DAMA_PADDLE_WEBHOOK_URL
         sync: false
