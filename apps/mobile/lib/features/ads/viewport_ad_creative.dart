@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:dama_mobile/core/ads/resolve_viewport_creative.dart';
+import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/ads.dart';
 import 'package:flutter/material.dart';
@@ -104,6 +107,13 @@ class _YouTubeEmbedState extends State<_YouTubeEmbed> {
           'https://www.youtube-nocookie.com/embed/$id?rel=0&modestbranding=1&playsinline=1';
       _controller.loadRequest(Uri.parse(src));
     }
+  }
+
+  @override
+  void dispose() {
+    // YouTube WebView steals audio focus - re-warm land SFX when the ad goes away.
+    unawaited(GameNotify.unlock(force: true));
+    super.dispose();
   }
 
   @override

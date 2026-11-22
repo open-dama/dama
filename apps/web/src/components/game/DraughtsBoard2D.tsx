@@ -8,7 +8,7 @@
 
 import { BoardSquareCoords } from "@/components/game/BoardSquareCoords";
 import { PalacePieceMark } from "@/components/game/PalacePieceMark";
-import { pieceLandKind, playPieceLandSound } from "@/lib/audio-notify";
+import { pieceLandKind, playPieceLandSound, unlockGameAudio } from "@/lib/audio-notify";
 import { cn } from "@/lib/utils";
 import type { BoardCell, LegalMove, MoveHistoryEntry } from "@/types/game";
 import {
@@ -67,6 +67,8 @@ type ActiveAnimation = {
   boardApplied?: boolean;
   /** One land SFX per animation (land phase + finish must not double). */
   soundPlayed?: boolean;
+  /** Prevent double finishAndAdvance in one rAF turn. */
+  finishQueued?: boolean;
 };
 
 function isDark(row: number, col: number) {
@@ -264,7 +266,6 @@ export default function DraughtsBoard2D({
   const size = board.length;
   const [shake, setShake] = useState(false);
   const [renderBoard, setRenderBoard] = useState<BoardGrid>(board);
-  const [flyProgress, setFlyProgress] = useState(0);
   const [activeFly, setActiveFly] = useState<ActiveAnimation | null>(null);
 
   const animationRef = useRef<ActiveAnimation | null>(null);
@@ -276,6 +277,12 @@ export default function DraughtsBoard2D({
   const replayModeRef = useRef(replayMode);
   const rafRef = useRef(0);
   const lastTsRef = useRef<number | null>(null);
+  const loopRunningRef = useRef(false);
+  const flyElRef = useRef<HTMLDivElement>(null);
+  const sizeRef = useRef(size);
+  const flipRef = useRef(flipBoard);
+  sizeRef.current = size;
+  flipRef.current = flipBoard;
   const historyPresent = moveHistory.length > 0;
 
   useEffect(() => {
@@ -297,6 +304,28 @@ export default function DraughtsBoard2D({
     return () => window.clearTimeout(t);
   }, [illegalShakeKey]);
 
+  /** Drive fly piece via DOM (Chess.com / Lichess style) - never setState every frame. */
+  const applyFlyDom = useCallback((anim: ActiveAnimation, progress: number) => {
+    const el = flyElRef.current;
+    const sz = sizeRef.current;
+    if (!el || sz <= 0) return;
+    const t = travelT(progress);
+    const scale = flyScale(progress);
+    const flip = flipRef.current;
+    const fromR = flip ? sz - 1 - anim.from[0] : anim.from[0];
+    const fromC = flip ? sz - 1 - anim.from[1] : anim.from[1];
+    const toR = flip ? sz - 1 - anim.to[0] : anim.to[0];
+    const toC = flip ? sz - 1 - anim.to[1] : anim.to[1];
+    const vr = fromR + (toR - fromR) * t;
+    const vc = fromC + (toC - fromC) * t;
+    const cell = 100 / sz;
+    el.style.left = `${vc * cell + cell / 2}%`;
+    el.style.top = `${vr * cell + cell / 2}%`;
+    el.style.width = `${cell * 0.78}%`;
+    el.style.height = `${cell * 0.78}%`;
+    el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  }, []);
+
   const commitBoardAfter = useCallback((anim: ActiveAnimation) => {
     if (!anim.boardAfter?.length) return;
     if (!anim.boardApplied) {
@@ -313,20 +342,60 @@ export default function DraughtsBoard2D({
     }
   }, []);
 
+  const ensureAnimLoop = useCallback(() => {
+    if (loopRunningRef.current) return;
+    loopRunningRef.current = true;
+    const tick = (ts: number) => {
+      const anim = animationRef.current;
+      if (!anim) {
+        loopRunningRef.current = false;
+        lastTsRef.current = null;
+        return;
+      }
+      // Tab/ad blur: freeze clock (Chess.com-style) so return does not fast-forward/glitch.
+      if (typeof document !== "undefined" && document.hidden) {
+        lastTsRef.current = null;
+        rafRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
+      const prevTs = lastTsRef.current ?? ts;
+      const delta = Math.min(0.05, (ts - prevTs) / 1000);
+      lastTsRef.current = ts;
+      const prev = anim.progress;
+      anim.progress = Math.min(1, anim.progress + delta / anim.duration);
+      applyFlyDom(anim, anim.progress);
+      if (prev < LAND_PHASE_START && anim.progress >= LAND_PHASE_START) {
+        commitBoardAfter(anim);
+      }
+      if (anim.progress >= 1 && !anim.finishQueued) {
+        anim.finishQueued = true;
+        finishAndAdvanceRef.current();
+      }
+      if (animationRef.current) {
+        rafRef.current = window.requestAnimationFrame(tick);
+      } else {
+        loopRunningRef.current = false;
+        lastTsRef.current = null;
+      }
+    };
+    rafRef.current = window.requestAnimationFrame(tick);
+  }, [applyFlyDom, commitBoardAfter]);
+
+  const finishAndAdvanceRef = useRef<() => void>(() => {});
+
   const startNext = useCallback(() => {
     const next = queueRef.current.shift();
     if (!next) {
       animationRef.current = null;
       setActiveFly(null);
-      setFlyProgress(0);
       lastTsRef.current = null;
       return;
     }
     animationRef.current = next;
     setActiveFly(next);
-    setFlyProgress(0);
     lastTsRef.current = null;
-  }, []);
+    ensureAnimLoop();
+  }, [ensureAnimLoop]);
 
   const finishAndAdvance = useCallback(() => {
     const finished = animationRef.current;
@@ -337,29 +406,18 @@ export default function DraughtsBoard2D({
     }
   }, [commitBoardAfter, startNext]);
 
-  // rAF progress ticker (2D equivalent of R3F useFrame).
+  finishAndAdvanceRef.current = finishAndAdvance;
+
   useEffect(() => {
-    const tick = (ts: number) => {
-      const anim = animationRef.current;
-      if (anim) {
-        const prevTs = lastTsRef.current ?? ts;
-        const delta = Math.min(0.05, (ts - prevTs) / 1000);
-        lastTsRef.current = ts;
-        const prev = anim.progress;
-        anim.progress = Math.min(1, anim.progress + delta / anim.duration);
-        if (prev < LAND_PHASE_START && anim.progress >= LAND_PHASE_START) {
-          commitBoardAfter(anim);
-        }
-        setFlyProgress(anim.progress);
-        if (anim.progress >= 1) {
-          finishAndAdvance();
-        }
-      }
-      rafRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      loopRunningRef.current = false;
+      window.cancelAnimationFrame(rafRef.current);
     };
-    rafRef.current = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(rafRef.current);
-  }, [commitBoardAfter, finishAndAdvance]);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (activeFly) applyFlyDom(activeFly, activeFly.progress);
+  }, [activeFly, applyFlyDom]);
 
   useLayoutEffect(() => {
     if (!size) return;
@@ -369,7 +427,6 @@ export default function DraughtsBoard2D({
       animationRef.current = null;
       holdSyncRef.current = false;
       setActiveFly(null);
-      setFlyProgress(0);
       setRenderBoard(board);
       return;
     }
@@ -390,7 +447,6 @@ export default function DraughtsBoard2D({
       animationRef.current = null;
       holdSyncRef.current = false;
       setActiveFly(null);
-      setFlyProgress(0);
       setRenderBoard(board);
       return;
     }
@@ -468,11 +524,12 @@ export default function DraughtsBoard2D({
 
   const hiddenKeys = useMemo(() => {
     const anim = activeFly;
-    if (!anim || flyProgress >= 1) return new Set<string>();
+    // Hide for the whole flight; progress is DOM-driven so do not depend on per-frame state.
+    if (!anim) return new Set<string>();
     const set = new Set<string>([`${anim.from[0]},${anim.from[1]}`, `${anim.to[0]},${anim.to[1]}`]);
     for (const c of anim.captures) set.add(`${c[0]},${c[1]}`);
     return set;
-  }, [activeFly, flyProgress]);
+  }, [activeFly]);
 
   const [lastMoveToken, setLastMoveToken] = useState("");
   useEffect(() => {
@@ -496,26 +553,6 @@ export default function DraughtsBoard2D({
       to: `${last.to[0]},${last.to[1]}`,
     };
   }, [activeFly, lastMoveToken, moveHistory, replayMode]);
-
-  const flyStyle = useMemo(() => {
-    if (!activeFly || size <= 0) return null;
-    const t = travelT(flyProgress);
-    const scale = flyScale(flyProgress);
-    const fromR = flipBoard ? size - 1 - activeFly.from[0] : activeFly.from[0];
-    const fromC = flipBoard ? size - 1 - activeFly.from[1] : activeFly.from[1];
-    const toR = flipBoard ? size - 1 - activeFly.to[0] : activeFly.to[0];
-    const toC = flipBoard ? size - 1 - activeFly.to[1] : activeFly.to[1];
-    const vr = fromR + (toR - fromR) * t;
-    const vc = fromC + (toC - fromC) * t;
-    const cell = 100 / size;
-    return {
-      left: `${vc * cell + cell / 2}%`,
-      top: `${vr * cell + cell / 2}%`,
-      width: `${cell * 0.78}%`,
-      height: `${cell * 0.78}%`,
-      transform: `translate(-50%, -50%) scale(${scale})`,
-    } as const;
-  }, [activeFly, flipBoard, flyProgress, size]);
 
   if (size <= 0) return null;
 
@@ -541,6 +578,10 @@ export default function DraughtsBoard2D({
       role="grid"
       aria-rowcount={size}
       aria-colcount={size}
+      onPointerDown={() => {
+        // Unlock on pick (not only on put) so land SFX works after ads / first gesture.
+        void unlockGameAudio();
+      }}
     >
       {/* Opaque board plane under cells - same continuous surface idea as 3D mesh. */}
       <div
@@ -651,9 +692,9 @@ export default function DraughtsBoard2D({
         })}
       </div>
 
-      {activeFly && flyStyle ? (
+      {activeFly ? (
         <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
-          <div className="absolute flex items-center justify-center" style={flyStyle}>
+          <div ref={flyElRef} className="absolute flex items-center justify-center will-change-transform">
             <PieceDisc
               player={activeFly.player}
               isKing={activeFly.isKing}

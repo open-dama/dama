@@ -187,7 +187,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
 
   Set<String> get _hiddenKeys {
     final a = _active;
-    if (a == null || _progress >= 1) return {};
+    // Hide for the whole flight; progress is AnimatedBuilder-driven.
+    if (a == null) return {};
     final set = <String>{'${a.fromR}:${a.fromC}', '${a.toR}:${a.toC}'};
     for (final c in a.captures) {
       set.add('${c.$1}:${c.$2}');
@@ -206,33 +207,34 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     _anim = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
       ..addListener(() {
-        setState(() {
-          final prev = _progress;
-          _progress = _anim.value;
-          final active = _active;
-          // Commit board as the piece puts down (captures disappear with the land).
-          if (active != null &&
-              active.boardAfter != null &&
-              active.boardAfter!.isNotEmpty &&
-              prev < _landPhaseStart &&
-              _progress >= _landPhaseStart) {
-            if (!active.boardApplied) {
-              active.boardApplied = true;
+        // Flight paints via AnimatedBuilder - avoid full setState every tick.
+        final prev = _progress;
+        _progress = _anim.value;
+        final active = _active;
+        // Commit board as the piece puts down (captures disappear with the land).
+        if (active != null &&
+            active.boardAfter != null &&
+            active.boardAfter!.isNotEmpty &&
+            prev < _landPhaseStart &&
+            _progress >= _landPhaseStart) {
+          if (!active.boardApplied) {
+            active.boardApplied = true;
+            setState(() {
               _renderBoard = _cloneBoard(active.boardAfter!);
-              widget.onPlyAnimated?.call(active.boardAfter!);
-            }
-            if (!active.soundPlayed && !widget.replayMode) {
-              active.soundPlayed = true;
-              // Put-down only - wood + piece contact (never during travel).
-              unawaited(
-                GameNotify.playPiecePlace(
-                  captured: active.isCapture,
-                  promoted: active.isPromotion,
-                ),
-              );
-            }
+            });
+            widget.onPlyAnimated?.call(active.boardAfter!);
           }
-        });
+          if (!active.soundPlayed && !widget.replayMode) {
+            active.soundPlayed = true;
+            // Put-down only - wood + piece contact (never during travel).
+            unawaited(
+              GameNotify.playPiecePlace(
+                captured: active.isCapture,
+                promoted: active.isPromotion,
+              ),
+            );
+          }
+        }
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
@@ -240,10 +242,11 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         }
       });
     // Illegal-destination reject shake (horizontal). Captures never trigger this.
+    // Shake + fly share AnimatedBuilder below - no per-tick setState.
     _shakeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
-    )..addListener(() => setState(() {}));
+    );
     _schedulePaintReady();
   }
 
@@ -548,62 +551,73 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     final display = (_holdSync || _active != null || _queue.isNotEmpty)
         ? _renderBoard
         : widget.board;
-    (double, double, double, double, double)? fly;
-    if (_active != null && _progress < 1) {
-      fly = _pieceTransform(
-        _progress,
-        _active!.fromR,
-        _active!.fromC,
-        _active!.toR,
-        _active!.toC,
-        _active!.isCapture,
-      );
-    }
-    // Horizontal reject only (decay with shake controller). Captures do not shake.
-    final shakeT = _shakeCtrl.value;
-    final shakeAmp = (1.0 - shakeT) * 6.0;
-    final shakeDx =
-        shakeAmp > 0.05 ? math.sin(shakeT * math.pi * 10) * shakeAmp : 0.0;
-    final burstT = () {
-      final a = _active;
-      if (a == null || !a.isCapture || _progress <= _holdPhaseEnd) return 0.0;
-      if (_progress >= _landPhaseStart) return 1.0;
-      return (_progress - _holdPhaseEnd) / (_landPhaseStart - _holdPhaseEnd);
-    }();
 
-    final boardPaint = CustomPaint(
-      painter: _Board3DPainter(
-        board: display,
-        size: widget.boardSize,
-        pitch: _pitch,
-        yaw: _yaw,
-        flipBoard: widget.flipBoard,
-        selectedRow: widget.selectedRow,
-        selectedCol: widget.selectedCol,
-        highlights: _highlights,
-        destinationKeys: _destinationKeys,
-        lastMoveKeys: _lastMoveKeys,
-        hiddenKeys: _hiddenKeys,
-        light: tokens.boardLight,
-        dark: tokens.boardDark,
-        frame: const Color(0xFF4A0012),
-        pieceLight: tokens.pieceLight,
-        pieceDark: tokens.pieceDark,
-        pieceDarkSplit: tokens.pieceDarkSplit,
-        gold: tokens.boardSelected,
-        lastMove: tokens.lastMove,
-        bg: const Color(0xFF4A0012),
-        flyCol: fly?.$1,
-        flyRow: fly?.$2,
-        flyLift: fly?.$3,
-        flyScale: fly?.$4 ?? 1,
-        flyYaw: fly?.$5 ?? 0,
-        flyPlayer: _active?.player,
-        flyKing: _active?.isKing ?? false,
-        captureBursts: _active?.captures ?? const [],
-        burstProgress: burstT,
-      ),
-      child: const SizedBox.expand(),
+    final boardPaint = AnimatedBuilder(
+      animation: Listenable.merge([_anim, _shakeCtrl]),
+      builder: (context, _) {
+        (double, double, double, double, double)? fly;
+        final progress = _anim.isAnimating || _active != null ? _anim.value : 0.0;
+        if (_active != null && progress < 1) {
+          fly = _pieceTransform(
+            progress,
+            _active!.fromR,
+            _active!.fromC,
+            _active!.toR,
+            _active!.toC,
+            _active!.isCapture,
+          );
+        }
+        final shakeT = _shakeCtrl.value;
+        final shakeAmp = (1.0 - shakeT) * 6.0;
+        final shakeDx = shakeAmp > 0.05
+            ? math.sin(shakeT * math.pi * 10) * shakeAmp
+            : 0.0;
+        final a = _active;
+        final burstT = () {
+          if (a == null || !a.isCapture || progress <= _holdPhaseEnd) {
+            return 0.0;
+          }
+          if (progress >= _landPhaseStart) return 1.0;
+          return (progress - _holdPhaseEnd) / (_landPhaseStart - _holdPhaseEnd);
+        }();
+        return Transform.translate(
+          offset: Offset(shakeDx, 0),
+          child: CustomPaint(
+            painter: _Board3DPainter(
+              board: display,
+              size: widget.boardSize,
+              pitch: _pitch,
+              yaw: _yaw,
+              flipBoard: widget.flipBoard,
+              selectedRow: widget.selectedRow,
+              selectedCol: widget.selectedCol,
+              highlights: _highlights,
+              destinationKeys: _destinationKeys,
+              lastMoveKeys: _lastMoveKeys,
+              hiddenKeys: _hiddenKeys,
+              light: tokens.boardLight,
+              dark: tokens.boardDark,
+              frame: const Color(0xFF4A0012),
+              pieceLight: tokens.pieceLight,
+              pieceDark: tokens.pieceDark,
+              pieceDarkSplit: tokens.pieceDarkSplit,
+              gold: tokens.boardSelected,
+              lastMove: tokens.lastMove,
+              bg: const Color(0xFF4A0012),
+              flyCol: fly?.$1,
+              flyRow: fly?.$2,
+              flyLift: fly?.$3,
+              flyScale: fly?.$4 ?? 1,
+              flyYaw: fly?.$5 ?? 0,
+              flyPlayer: _active?.player,
+              flyKing: _active?.isKing ?? false,
+              captureBursts: _active?.captures ?? const [],
+              burstProgress: burstT,
+            ),
+            child: const SizedBox.expand(),
+          ),
+        );
+      },
     );
 
     return AspectRatio(
@@ -674,12 +688,9 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
                   : null,
               child: Transform.scale(
                 scale: _zoom,
-                child: Transform.translate(
-                  offset: Offset(shakeDx, 0),
-                  child: widget.flipBoard
-                      ? Transform.rotate(angle: math.pi, child: boardPaint)
-                      : boardPaint,
-                ),
+                child: widget.flipBoard
+                    ? Transform.rotate(angle: math.pi, child: boardPaint)
+                    : boardPaint,
               ),
             ),
             if (!paintReady)
