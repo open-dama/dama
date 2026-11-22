@@ -8,6 +8,7 @@ import {
   isAgeRequiredError,
   isPhoneKycRequiredError,
 } from "@/lib/cash-gate-error";
+import { checkoutReturnUrlFromLocation } from "@/lib/checkout-return-url";
 import { invalidatePaymentRoute, invalidateWallet } from "@/lib/invalidate";
 import { walletChromeErrorMessage } from "@/lib/wallet-chrome-error";
 import type { CashRmgPayload } from "@/types/cash-rmg";
@@ -21,9 +22,12 @@ export function useCheckoutMutation(token: string | null | undefined) {
   return useMutation({
     mutationFn: async (payload: CheckoutInput): Promise<CheckoutResult> => {
       if (!token) throw new Error("");
-      const { data } = await restClient.post<CheckoutResult>("/payments/checkout", payload, {
-        headers: authHeaders(token),
-      });
+      const return_url = (payload.return_url || "").trim() || checkoutReturnUrlFromLocation();
+      const { data } = await restClient.post<CheckoutResult>(
+        "/payments/checkout",
+        { ...payload, return_url: return_url || undefined },
+        { headers: authHeaders(token) },
+      );
       return data;
     },
     onSuccess: (res) => {

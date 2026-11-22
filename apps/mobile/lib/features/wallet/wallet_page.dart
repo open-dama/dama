@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dama_mobile/core/errors/api_user_message.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
@@ -66,6 +68,7 @@ class WalletPage extends StatelessWidget {
         final cubit = WalletCubit(
           accessToken: token,
           focusPayoutHistoryId: historyId,
+          moneyBasePath: moneyBasePath,
           config: config,
         );
         unawaitedLoad(cubit);
@@ -112,7 +115,7 @@ class _WalletView extends StatefulWidget {
   State<_WalletView> createState() => _WalletViewState();
 }
 
-class _WalletViewState extends State<_WalletView> {
+class _WalletViewState extends State<_WalletView> with WidgetsBindingObserver {
   late final TextEditingController _amountCtrl;
   late final TextEditingController _providerCtrl;
   late final TextEditingController _accountCtrl;
@@ -136,12 +139,21 @@ class _WalletViewState extends State<_WalletView> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _amountCtrl = TextEditingController();
     _providerCtrl = TextEditingController();
     _accountCtrl = TextEditingController();
     _phoneCtrl = TextEditingController();
     _payoutAmountCtrl = TextEditingController();
     _dobCtrl = TextEditingController();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // After external Chapa/Paddle browser: refresh wallet (webhook may have credited).
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(context.read<WalletCubit>().refresh(force: true));
+    }
   }
 
   GlobalKey _historyRowKey(String id) =>
@@ -183,6 +195,7 @@ class _WalletViewState extends State<_WalletView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _amountCtrl.dispose();
     _providerCtrl.dispose();
     _accountCtrl.dispose();

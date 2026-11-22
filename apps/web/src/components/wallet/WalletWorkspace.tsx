@@ -54,6 +54,8 @@ import { useUrlSkip } from "@/hooks/useUrlSkip";
 import { apiToastMessage } from "@/lib/api-toast-message";
 import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { cashJurisdictionLockMessage, isCashJurisdictionLocked } from "@/lib/cash-jurisdiction";
+import { checkoutReturnUrl, isCheckoutSuccessSearch } from "@/lib/checkout-return-url";
+import { invalidateWallet } from "@/lib/invalidate";
 import { paidStatusTextClass } from "@/lib/payment-status-display";
 import { parsePositiveDecimal } from "@/lib/sanitize-decimal-input";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
@@ -64,7 +66,7 @@ import { isWalletChromeReady } from "@/types/wallet-chrome";
 import { useQueryClient } from "@tanstack/react-query";
 import { HandCoins, IdCard, Phone, Plus, Receipt } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -111,6 +113,7 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
   const hydrated = useAuthHydrated();
   const token = useAuthStore((s) => s.token);
   const router = useRouter();
+  const pathname = usePathname() || "";
   const searchParams = useSearchParams();
   const focusPayoutHistoryId = (searchParams.get("id") || "").trim();
   const focusParam = (searchParams.get("focus") || "").trim().toLowerCase();
@@ -135,6 +138,22 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
   /** After submit attempt - highlight empty required fields (chrome errors only). */
   const [formAttempted, setFormAttempted] = useState(false);
   const queryClient = useQueryClient();
+
+  // After Chapa/Paddle return: refresh wallet (credit is webhook-owned), strip success params.
+  const checkoutReturnHandled = useRef(false);
+  useEffect(() => {
+    if (!token || checkoutReturnHandled.current) return;
+    if (!isCheckoutSuccessSearch(searchParams)) return;
+    checkoutReturnHandled.current = true;
+    void invalidateWallet(queryClient);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("checkout");
+    next.delete("status");
+    next.delete("trx_ref");
+    next.delete("tx_ref");
+    const q = next.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }, [token, searchParams, queryClient, router, pathname]);
   const [payoutHistorySkip, setPayoutHistorySkip] = useUrlSkip("payouts_skip");
   const [methodsSkip, setMethodsSkip] = useUrlSkip("methods_skip");
   const [activeMethod, setActiveMethod] = useState<PayoutMethod | null>(null);
@@ -1010,6 +1029,8 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
                     amount: n,
                     purpose: "wallet_topup",
                     country_code: country,
+                    // Explicit portal return (events/ads/player) - same as Flutter moneyBasePath.
+                    return_url: checkoutReturnUrl(moneyBasePath) || undefined,
                   },
                   {
                     onSuccess: (res) => {

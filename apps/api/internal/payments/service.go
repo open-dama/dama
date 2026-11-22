@@ -280,7 +280,7 @@ func (s *Service) StartCheckout(ctx context.Context, req CheckoutRequest) (*Chec
 		if s.cfg.PaddleAPIKey == "" {
 			return nil, fmt.Errorf("payment provider temporarily unavailable")
 		}
-		url, err := s.initPaddle(intent, req.Email)
+		url, err := s.initPaddle(intent, req.Email, req.ReturnURL)
 		if err != nil {
 			return nil, err
 		}
@@ -2328,12 +2328,18 @@ func (s *Service) persistIntent(ctx context.Context, intent *Intent) {
 	s.mu.Unlock()
 }
 
+func (s *Service) checkoutReturnURL(clientReturn string) string {
+	return ResolveCheckoutReturnURL(clientReturn, s.cfg.PublicWebBase, s.cfg.CORSOrigins)
+}
+
 func (s *Service) initChapa(intent *Intent, email, returnURL string) (string, error) {
 	if s.cfg.ChapaSecretKey == "" {
 		return "", fmt.Errorf("payment provider temporarily unavailable")
 	}
+	// Prefer client return → public web wallet → last resort API base (legacy).
+	returnURL = s.checkoutReturnURL(returnURL)
 	if returnURL == "" {
-		returnURL = s.cfg.PublicAPIBase
+		returnURL = strings.TrimRight(s.cfg.PublicAPIBase, "/")
 	}
 	brandTitle := ""
 	if s.settings != nil {
@@ -2388,9 +2394,14 @@ func (s *Service) initChapa(intent *Intent, email, returnURL string) (string, er
 	return parsed.Data.CheckoutURL, nil
 }
 
-func (s *Service) initPaddle(intent *Intent, email string) (string, error) {
+func (s *Service) initPaddle(intent *Intent, email, returnURL string) (string, error) {
 	if s.cfg.PaddleAPIKey == "" {
 		return "", fmt.Errorf("payment provider temporarily unavailable")
+	}
+	returnURL = s.checkoutReturnURL(returnURL)
+	custom := map[string]any{"tx_ref": intent.TxRef, "user_id": intent.UserID}
+	if returnURL != "" {
+		custom["return_url"] = returnURL
 	}
 	payload := map[string]any{
 		"items": []map[string]any{{
@@ -2407,8 +2418,12 @@ func (s *Service) initPaddle(intent *Intent, email string) (string, error) {
 				},
 			},
 		}},
-		"custom_data": map[string]any{"tx_ref": intent.TxRef, "user_id": intent.UserID},
+		"custom_data": custom,
 		"customer":    map[string]any{"email": email},
+	}
+	// Point checkout payment link at our /pay bridge (Paddle.js sets successUrl).
+	if payURL := PaddlePayCheckoutURL(s.cfg.PublicWebBase, returnURL); payURL != "" {
+		payload["checkout"] = map[string]any{"url": payURL}
 	}
 	body, _ := json.Marshal(payload)
 	base := strings.TrimRight(s.cfg.PaddleAPIBase, "/")

@@ -341,6 +341,7 @@ class WalletCubit extends Cubit<WalletState> {
   WalletCubit({
     required this.accessToken,
     this.focusPayoutHistoryId = '',
+    this.moneyBasePath = '',
     ApiConfig? config,
     ImagePicker? picker,
   })  : _config = config ?? ApiConfig.defaults,
@@ -359,6 +360,9 @@ class WalletCubit extends Cubit<WalletState> {
 
   /// Deep-link `/wallet?id=` seeks this payout in history (API `id` query).
   final String focusPayoutHistoryId;
+
+  /// Portal prefix for checkout return_url (`/events`, `/ads`). Empty = player `/wallet`.
+  final String moneyBasePath;
   final ApiConfig _config;
   final ImagePicker _picker;
 
@@ -1251,11 +1255,7 @@ class WalletCubit extends Cubit<WalletState> {
           'Authorization': 'Bearer $accessToken',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'amount': amount,
-          'purpose': 'wallet_topup',
-          'country_code': country,
-        }),
+        body: jsonEncode(_checkoutBody(amount: amount, country: country)),
       );
       if (res.statusCode >= 300) {
         final key = apiErrorKeyFromBody(res.body);
@@ -1313,6 +1313,30 @@ class WalletCubit extends Cubit<WalletState> {
       emit(state.copyWith(loading: false, error: fail));
       return null;
     }
+  }
+
+  /// Public web wallet URL for gateway return (requires --dart-define=DAMA_WEB_ORIGIN).
+  String _checkoutReturnUrl() {
+    final origin = ApiConfig.webOrigin;
+    if (origin.isEmpty) return '';
+    final base = moneyBasePath.trim().replaceAll(RegExp(r'/+$'), '');
+    final path = base.isEmpty ? '/wallet' : '$base/wallet';
+    return '$origin$path?checkout=success';
+  }
+
+  Map<String, dynamic> _checkoutBody({
+    required double amount,
+    required String country,
+  }) {
+    final body = <String, dynamic>{
+      'amount': amount,
+      'purpose': 'wallet_topup',
+      'country_code': country,
+    };
+    // HTTPS wallet return (Paddle successUrl / Chapa return_url). Webhook still credits.
+    final ret = _checkoutReturnUrl();
+    if (ret.isNotEmpty) body['return_url'] = ret;
+    return body;
   }
 
   static bool _isManualCheckout(CheckoutResponse checkout) {

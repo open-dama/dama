@@ -33,6 +33,7 @@ import 'package:dama_mobile/features/leaderboard/leaderboard_cubit.dart'
 import 'package:dama_mobile/features/notifications/notification_app_bar_actions.dart';
 import 'package:dama_mobile/features/notifications/notification_href_nav.dart';
 import 'package:dama_mobile/features/wallet/portal_wallet_focus.dart';
+import 'package:dama_mobile/features/wallet/wallet_checkout_resume.dart';
 import 'package:dama_mobile/features/wallet/wallet_cubit.dart';
 import 'package:dama_mobile/features/wallet/wallet_page.dart';
 import 'package:dama_mobile/widgets/host_trust_badge.dart';
@@ -1921,592 +1922,719 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
 
     return BlocProvider(
       create: (_) {
-        final cubit = WalletCubit(accessToken: widget.accessToken);
+        final cubit = WalletCubit(
+          accessToken: widget.accessToken,
+          moneyBasePath: '/events',
+        );
         WalletPage.unawaitedLoad(cubit);
         return cubit;
       },
-      child: BlocConsumer<WalletCubit, WalletState>(
-        listenWhen: (p, n) =>
-            p.checkoutMessage != n.checkoutMessage ||
-            p.error != n.error ||
-            p.balance != n.balance,
-        listener: (context, state) {
-          final msg = chromeOnlyUserMessage(
-            state.checkoutMessage ?? state.error,
-          );
-          if (msg != null) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text(msg)));
-          }
-          final bal = state.balance;
-          final fee = hostFee;
-          if (bal == null || fee == null || fee <= 0) return;
-          final need = _walletNeedForCreate(fee);
-          if (bal >= need) return;
-          if (_amountCtrl.text.trim().isNotEmpty) return;
-          final shortfall = need - bal;
-          if (shortfall <= 0) return;
-          final s = sanitizeDecimalInput(shortfall.toString());
-          if (s.isEmpty) return;
-          _amountCtrl.value = TextEditingValue(
-            text: s,
-            selection: TextSelection.collapsed(offset: s.length),
-          );
-          context.read<WalletCubit>().setAmountText(s);
-        },
-        builder: (context, wallet) {
-          final balance = wallet.balance;
-          final walletNeed = hostFee != null && hostFee > 0
-              ? _walletNeedForCreate(hostFee)
-              : null;
-          final canAfford = balance != null &&
-              walletNeed != null &&
-              walletNeed > 0 &&
-              balance >= walletNeed;
-          final countryMissing =
-              !wallet.locating && wallet.country.trim().isEmpty;
-          final pay = _payChrome;
+      child: WalletCheckoutResumeRefresher(
+        child: BlocConsumer<WalletCubit, WalletState>(
+          listenWhen: (p, n) =>
+              p.checkoutMessage != n.checkoutMessage ||
+              p.error != n.error ||
+              p.balance != n.balance,
+          listener: (context, state) {
+            final msg = chromeOnlyUserMessage(
+              state.checkoutMessage ?? state.error,
+            );
+            if (msg != null) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(msg)));
+            }
+            final bal = state.balance;
+            final fee = hostFee;
+            if (bal == null || fee == null || fee <= 0) return;
+            final need = _walletNeedForCreate(fee);
+            if (bal >= need) return;
+            if (_amountCtrl.text.trim().isNotEmpty) return;
+            final shortfall = need - bal;
+            if (shortfall <= 0) return;
+            final s = sanitizeDecimalInput(shortfall.toString());
+            if (s.isEmpty) return;
+            _amountCtrl.value = TextEditingValue(
+              text: s,
+              selection: TextSelection.collapsed(offset: s.length),
+            );
+            context.read<WalletCubit>().setAmountText(s);
+          },
+          builder: (context, wallet) {
+            final balance = wallet.balance;
+            final walletNeed = hostFee != null && hostFee > 0
+                ? _walletNeedForCreate(hostFee)
+                : null;
+            final canAfford = balance != null &&
+                walletNeed != null &&
+                walletNeed > 0 &&
+                balance >= walletNeed;
+            final countryMissing =
+                !wallet.locating && wallet.country.trim().isEmpty;
+            final pay = _payChrome;
 
-          return AlertDialog(
-            insetPadding: shell.insetPadding,
-            title: Text(softHostingCreateTitle(chrome.createTitle)),
-            content: ConstrainedBox(
-              constraints: shellConstraints,
-              child: SingleChildScrollView(
-                controller: _createScrollCtrl,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      softHostingCreateBlurb(chrome.createBlurb),
-                      style: TextStyle(color: tokens.onSurfaceMuted),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _titleCtrl,
-                      decoration: InputDecoration(
-                        labelText: softHostingTitleLabel(chrome.titleLabel),
-                        hintText: chrome.titlePlaceholder,
-                        border: const OutlineInputBorder(),
-                        errorText: _attempted && _titleCtrl.text.trim().isEmpty
-                            ? (chrome.errTitleRequired.isNotEmpty
-                                ? chrome.errTitleRequired
-                                : null)
-                            : null,
+            return AlertDialog(
+              insetPadding: shell.insetPadding,
+              title: Text(softHostingCreateTitle(chrome.createTitle)),
+              content: ConstrainedBox(
+                constraints: shellConstraints,
+                child: SingleChildScrollView(
+                  controller: _createScrollCtrl,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        softHostingCreateBlurb(chrome.createBlurb),
+                        style: TextStyle(color: tokens.onSurfaceMuted),
                       ),
-                      onChanged: (_) {
-                        if (_attempted) setState(() {});
-                      },
-                    ),
-                    if (chrome.descriptionLabel.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       TextField(
-                        controller: _descriptionCtrl,
-                        maxLines: 4,
+                        controller: _titleCtrl,
                         decoration: InputDecoration(
-                          labelText: chrome.descriptionLabel,
-                          hintText: chrome.descriptionPlaceholder,
+                          labelText: softHostingTitleLabel(chrome.titleLabel),
+                          hintText: chrome.titlePlaceholder,
                           border: const OutlineInputBorder(),
+                          errorText:
+                              _attempted && _titleCtrl.text.trim().isEmpty
+                                  ? (chrome.errTitleRequired.isNotEmpty
+                                      ? chrome.errTitleRequired
+                                      : null)
+                                  : null,
                         ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    ChromeSelectField(
-                      label: chrome.formatLabel,
-                      valueLabel: () {
-                        final id = _formatId;
-                        if (id == null) return '';
-                        for (final f in catalog.formats) {
-                          if (f.id == id) return f.label;
-                        }
-                        return '';
-                      }(),
-                      onTap: () async {
-                        final picked = await showChromeOptionSheet<String>(
-                          context: context,
-                          title: chrome.formatLabel,
-                          selected: _formatId,
-                          options: [
-                            for (final f in catalog.formats)
-                              if (f.label.isNotEmpty)
-                                ChromeSelectOption(
-                                  value: f.id,
-                                  label: f.label,
-                                ),
-                          ],
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            _formatId = picked;
-                            final allowed = catalog.sizes
-                                .where(
-                                    (s) => s.allowedFormatIds.contains(picked))
-                                .toList();
-                            if (_sizeId == null ||
-                                !allowed.any((s) => s.id == _sizeId)) {
-                              _sizeId =
-                                  allowed.isNotEmpty ? allowed.first.id : null;
-                            }
-                            if (_prizePoolDisplay) {
-                              final options =
-                                  payoutModeOptions(_clientEnums, picked);
-                              final cur = _payoutMode.trim();
-                              if (cur.isEmpty ||
-                                  (options.isNotEmpty &&
-                                      !options.contains(cur))) {
-                                _payoutMode = defaultPayoutModeForFormat(
-                                  _clientEnums,
-                                  picked,
-                                );
-                              }
-                            }
-                          });
-                        }
-                      },
-                    ),
-                    if (_attempted &&
-                        (_formatId ?? '').trim().isEmpty &&
-                        chrome.errFormatSizeRequired.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        chrome.errFormatSizeRequired,
-                        style: TextStyle(
-                          color: tokens.danger,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                    if (_arenaFormatSelected) ...[
-                      const SizedBox(height: 12),
-                      ArenaDurationField(
-                        chrome: ArenaDurationFieldChrome(
-                          label: chrome.arenaDurationLabel,
-                          requiredHint: chrome.arenaDurationRequired,
-                          unitLabel: chrome.arenaDurationUnitLabel,
-                          unitMinutes: chrome.arenaDurationUnitMinutes,
-                          unitHours: chrome.arenaDurationUnitHours,
-                          unitDays: chrome.arenaDurationUnitDays,
-                          unitWeeks: chrome.arenaDurationUnitWeeks,
-                          unitMonths: chrome.arenaDurationUnitMonths,
-                          modeLength: chrome.arenaDurationModeLength,
-                          modeEndsAt: chrome.arenaDurationModeEndsAt,
-                          endsAtLabel: chrome.arenaDurationEndsAtLabel,
-                          endsAtPlaceholder:
-                              chrome.arenaDurationEndsAtPlaceholder,
-                          lengthPlaceholder:
-                              chrome.arenaDurationLengthPlaceholder,
-                          endsAtPast: chrome.arenaDurationEndsAtPast,
-                          blurb: chrome.arenaDurationBlurb,
-                        ),
-                        minutesValue: _arenaDurationCtrl.text,
-                        errorText: _attempted &&
-                                (int.tryParse(_arenaDurationCtrl.text.trim()) ??
-                                        0) <
-                                    1
-                            ? chrome.arenaDurationRequired
-                            : null,
-                        onMinutesChanged: (v) {
-                          _arenaDurationCtrl.text = v;
+                        onChanged: (_) {
                           if (_attempted) setState(() {});
                         },
                       ),
-                    ],
-                    const SizedBox(height: 12),
-                    ChromeSelectField(
-                      label: chrome.sizeLabel,
-                      valueLabel: () {
-                        final id = _sizeId;
-                        if (id == null) return '';
-                        for (final s in catalog.sizes) {
-                          if (s.id == id && s.label.isNotEmpty) {
-                            final fee =
-                                catalog.effectiveHostFee(s, _visibility);
-                            final feeText = fee != null ? '$fee' : emptyCell;
-                            final maxText = formatSeatCapDisplay(
-                              s.maxPlayers,
-                              catalog.swissRoundsByMaxPlayers,
-                              chrome.unlimitedPlayersLabel,
-                              emptyCell,
-                            );
-                            // Avoid "Unlimited · Unlimited" when catalog label already is Unlimited chrome.
-                            final seatSeg =
-                                maxText.isNotEmpty && maxText != s.label
-                                    ? '${chrome.metaSeparator}$maxText'
-                                    : '';
-                            return '${s.label}$seatSeg${chrome.metaSeparator}$feeText${chrome.amountCurrencySeparator}${s.hostFeeCurrency}';
-                          }
-                        }
-                        return '';
-                      }(),
-                      onTap: () async {
-                        final fmt = _formatId;
-                        final sizeOptions = [
-                          for (final s in catalog.sizes)
-                            if (s.label.isNotEmpty &&
-                                fmt != null &&
-                                s.allowedFormatIds.contains(fmt))
-                              ChromeSelectOption(
-                                value: s.id,
-                                label: () {
-                                  final maxText = formatSeatCapDisplay(
-                                    s.maxPlayers,
-                                    catalog.swissRoundsByMaxPlayers,
-                                    chrome.unlimitedPlayersLabel,
-                                    emptyCell,
-                                  );
-                                  final seatSeg =
-                                      maxText.isNotEmpty && maxText != s.label
-                                          ? '${chrome.metaSeparator}$maxText'
-                                          : '';
-                                  return '${s.label}$seatSeg${chrome.metaSeparator}${catalog.effectiveHostFee(s, _visibility) ?? emptyCell}${chrome.amountCurrencySeparator}${s.hostFeeCurrency}';
-                                }(),
-                              ),
-                        ];
-                        final picked = await showChromeOptionSheet<String>(
-                          context: context,
-                          title: chrome.sizeLabel,
-                          selected: _sizeId,
-                          options: sizeOptions,
-                        );
-                        if (picked != null) {
-                          setState(() => _sizeId = picked);
-                        }
-                      },
-                    ),
-                    if (_attempted &&
-                        (_sizeId ?? '').trim().isEmpty &&
-                        chrome.errFormatSizeRequired.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        chrome.errFormatSizeRequired,
-                        style: TextStyle(
-                          color: tokens.danger,
-                          fontSize: 12,
+                      if (chrome.descriptionLabel.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _descriptionCtrl,
+                          maxLines: 4,
+                          decoration: InputDecoration(
+                            labelText: chrome.descriptionLabel,
+                            hintText: chrome.descriptionPlaceholder,
+                            border: const OutlineInputBorder(),
+                          ),
                         ),
-                      ),
-                    ],
-                    if (size != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        '${chrome.maxPlayersLabel}${chrome.metaSeparator}${formatSeatCapDisplay(size.maxPlayers, catalog.swissRoundsByMaxPlayers, chrome.unlimitedPlayersLabel, emptyCell)}',
-                        style: TextStyle(color: tokens.onSurfaceMuted),
-                      ),
-                      Text(
-                        '${chrome.hostFeeLabel}${chrome.metaSeparator}${hostFee ?? emptyCell}${chrome.amountCurrencySeparator}$hostCur',
-                        style: TextStyle(
-                          color: tokens.gold,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    Text(
-                      softCommunityJoinStatusMessage(
-                          chrome.forceAutoApproveNote),
-                      style: TextStyle(color: tokens.onSurfaceMuted),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _brandColorCtrl,
-                      decoration: InputDecoration(
-                        labelText: chrome.brandColorLabel,
-                        hintText: chrome.brandColorPlaceholder,
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                    if (catalog.hostedEventVisibilities.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                      ],
+                      const SizedBox(height: 12),
                       ChromeSelectField(
-                        label: chrome.visibilityLabel,
+                        label: chrome.formatLabel,
                         valueLabel: () {
-                          final v = _visibility;
-                          final pub =
-                              catalog.hostedEventPublicVisibility.trim();
-                          final priv =
-                              catalog.hostedEventPrivateVisibility.trim();
-                          if (pub.isNotEmpty && v == pub) {
-                            return chrome.visibilityPublicLabel;
+                          final id = _formatId;
+                          if (id == null) return '';
+                          for (final f in catalog.formats) {
+                            if (f.id == id) return f.label;
                           }
-                          if (priv.isNotEmpty && v == priv) {
-                            return chrome.visibilityPrivateLabel;
-                          }
-                          return chrome.emptyValue;
+                          return '';
                         }(),
                         onTap: () async {
-                          final options = <ChromeSelectOption<String>>[];
-                          final pub =
-                              catalog.hostedEventPublicVisibility.trim();
-                          final priv =
-                              catalog.hostedEventPrivateVisibility.trim();
-                          for (final v in catalog.hostedEventVisibilities) {
-                            if (pub.isNotEmpty &&
-                                v == pub &&
-                                !catalog.publicEventsEnabled) {
-                              continue;
-                            }
-                            final label = (pub.isNotEmpty && v == pub)
-                                ? chrome.visibilityPublicLabel
-                                : (priv.isNotEmpty && v == priv)
-                                    ? chrome.visibilityPrivateLabel
-                                    : chrome.emptyValue;
-                            if (label.isEmpty) continue;
-                            options.add(
-                              ChromeSelectOption(
-                                value: v,
-                                label: label,
-                              ),
-                            );
-                          }
-                          if (options.isEmpty) return;
                           final picked = await showChromeOptionSheet<String>(
                             context: context,
-                            title: chrome.visibilityLabel,
-                            selected: _visibility,
-                            options: options,
+                            title: chrome.formatLabel,
+                            selected: _formatId,
+                            options: [
+                              for (final f in catalog.formats)
+                                if (f.label.isNotEmpty)
+                                  ChromeSelectOption(
+                                    value: f.id,
+                                    label: f.label,
+                                  ),
+                            ],
                           );
                           if (picked != null) {
                             setState(() {
-                              _visibility = picked;
-                              // Manual pick cancels Host CTA prefer upgrade.
-                              _preferPublicPending = false;
+                              _formatId = picked;
+                              final allowed = catalog.sizes
+                                  .where((s) =>
+                                      s.allowedFormatIds.contains(picked))
+                                  .toList();
+                              if (_sizeId == null ||
+                                  !allowed.any((s) => s.id == _sizeId)) {
+                                _sizeId = allowed.isNotEmpty
+                                    ? allowed.first.id
+                                    : null;
+                              }
+                              if (_prizePoolDisplay) {
+                                final options =
+                                    payoutModeOptions(_clientEnums, picked);
+                                final cur = _payoutMode.trim();
+                                if (cur.isEmpty ||
+                                    (options.isNotEmpty &&
+                                        !options.contains(cur))) {
+                                  _payoutMode = defaultPayoutModeForFormat(
+                                    _clientEnums,
+                                    picked,
+                                  );
+                                }
+                              }
                             });
                           }
                         },
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        () {
-                          final pub =
-                              catalog.hostedEventPublicVisibility.trim();
-                          if (pub.isNotEmpty && _visibility == pub) {
-                            return catalog.publicEventsEnabled
-                                ? softHostingVisibilityPublicBlurb(
-                                    chrome.visibilityPublicBlurb,
-                                  )
-                                : softHostingPublicDisabled(
-                                    chrome.publicDisabled);
-                          }
-                          return softHostingVisibilityPrivateBlurb(
-                            chrome.visibilityPrivateBlurb,
-                          );
-                        }(),
-                        style: TextStyle(
-                          color: tokens.onSurfaceMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                      if (() {
-                        final pub = catalog.hostedEventPublicVisibility.trim();
-                        return pub.isNotEmpty &&
-                            _visibility == pub &&
-                            catalog.publicEventsEnabled;
-                      }()) ...[
+                      if (_attempted &&
+                          (_formatId ?? '').trim().isEmpty &&
+                          chrome.errFormatSizeRequired.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
-                          softCommunityJoinStatusMessage(
-                            catalog.publicEventMatchesRated
-                                ? chrome.publicRatedOnBlurb
-                                : chrome.publicRatedOffBlurb,
-                          ),
+                          chrome.errFormatSizeRequired,
                           style: TextStyle(
-                            color: tokens.onSurfaceMuted,
+                            color: tokens.danger,
                             fontSize: 12,
                           ),
                         ),
                       ],
-                    ],
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(chrome.entryFreeLabel),
-                      value: _freeEntry,
-                      onChanged: (v) {
-                        setState(() {
-                          _freeEntry = v;
-                          if (v) {
-                            _prizePoolDisplay = false;
-                            _prizePoolGuarantee = false;
-                            _payoutMode = '';
-                            _prizePercent1Ctrl.clear();
-                            _prizePercent2Ctrl.clear();
-                            _prizePercent3Ctrl.clear();
-                            _quoteCommission = null;
-                            _quoteNet = null;
-                            _quotePercent = null;
+                      if (_arenaFormatSelected) ...[
+                        const SizedBox(height: 12),
+                        ArenaDurationField(
+                          chrome: ArenaDurationFieldChrome(
+                            label: chrome.arenaDurationLabel,
+                            requiredHint: chrome.arenaDurationRequired,
+                            unitLabel: chrome.arenaDurationUnitLabel,
+                            unitMinutes: chrome.arenaDurationUnitMinutes,
+                            unitHours: chrome.arenaDurationUnitHours,
+                            unitDays: chrome.arenaDurationUnitDays,
+                            unitWeeks: chrome.arenaDurationUnitWeeks,
+                            unitMonths: chrome.arenaDurationUnitMonths,
+                            modeLength: chrome.arenaDurationModeLength,
+                            modeEndsAt: chrome.arenaDurationModeEndsAt,
+                            endsAtLabel: chrome.arenaDurationEndsAtLabel,
+                            endsAtPlaceholder:
+                                chrome.arenaDurationEndsAtPlaceholder,
+                            lengthPlaceholder:
+                                chrome.arenaDurationLengthPlaceholder,
+                            endsAtPast: chrome.arenaDurationEndsAtPast,
+                            blurb: chrome.arenaDurationBlurb,
+                          ),
+                          minutesValue: _arenaDurationCtrl.text,
+                          errorText: _attempted &&
+                                  (int.tryParse(
+                                              _arenaDurationCtrl.text.trim()) ??
+                                          0) <
+                                      1
+                              ? chrome.arenaDurationRequired
+                              : null,
+                          onMinutesChanged: (v) {
+                            _arenaDurationCtrl.text = v;
+                            if (_attempted) setState(() {});
+                          },
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      ChromeSelectField(
+                        label: chrome.sizeLabel,
+                        valueLabel: () {
+                          final id = _sizeId;
+                          if (id == null) return '';
+                          for (final s in catalog.sizes) {
+                            if (s.id == id && s.label.isNotEmpty) {
+                              final fee =
+                                  catalog.effectiveHostFee(s, _visibility);
+                              final feeText = fee != null ? '$fee' : emptyCell;
+                              final maxText = formatSeatCapDisplay(
+                                s.maxPlayers,
+                                catalog.swissRoundsByMaxPlayers,
+                                chrome.unlimitedPlayersLabel,
+                                emptyCell,
+                              );
+                              // Avoid "Unlimited · Unlimited" when catalog label already is Unlimited chrome.
+                              final seatSeg =
+                                  maxText.isNotEmpty && maxText != s.label
+                                      ? '${chrome.metaSeparator}$maxText'
+                                      : '';
+                              return '${s.label}$seatSeg${chrome.metaSeparator}$feeText${chrome.amountCurrencySeparator}${s.hostFeeCurrency}';
+                            }
                           }
-                        });
-                        if (!v) {
-                          _refreshEntryFeeQuote();
-                        }
-                      },
-                    ),
-                    if (!_freeEntry) ...[
-                      TextField(
-                        controller: _entryFeeCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-                        ],
-                        decoration: InputDecoration(
-                          labelText: chrome.entryFeeLabel,
-                          hintText: chrome.entryFeePlaceholder,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) {
-                          setState(() {});
-                          _refreshEntryFeeQuote();
+                          return '';
+                        }(),
+                        onTap: () async {
+                          final fmt = _formatId;
+                          final sizeOptions = [
+                            for (final s in catalog.sizes)
+                              if (s.label.isNotEmpty &&
+                                  fmt != null &&
+                                  s.allowedFormatIds.contains(fmt))
+                                ChromeSelectOption(
+                                  value: s.id,
+                                  label: () {
+                                    final maxText = formatSeatCapDisplay(
+                                      s.maxPlayers,
+                                      catalog.swissRoundsByMaxPlayers,
+                                      chrome.unlimitedPlayersLabel,
+                                      emptyCell,
+                                    );
+                                    final seatSeg =
+                                        maxText.isNotEmpty && maxText != s.label
+                                            ? '${chrome.metaSeparator}$maxText'
+                                            : '';
+                                    return '${s.label}$seatSeg${chrome.metaSeparator}${catalog.effectiveHostFee(s, _visibility) ?? emptyCell}${chrome.amountCurrencySeparator}${s.hostFeeCurrency}';
+                                  }(),
+                                ),
+                          ];
+                          final picked = await showChromeOptionSheet<String>(
+                            context: context,
+                            title: chrome.sizeLabel,
+                            selected: _sizeId,
+                            options: sizeOptions,
+                          );
+                          if (picked != null) {
+                            setState(() => _sizeId = picked);
+                          }
                         },
                       ),
-                      const SizedBox(height: 6),
-                      if (_quotePercent != null) ...[
+                      if (_attempted &&
+                          (_sizeId ?? '').trim().isEmpty &&
+                          chrome.errFormatSizeRequired.isNotEmpty) ...[
+                        const SizedBox(height: 4),
                         Text(
-                          [
-                            chrome.commissionPercentLabel,
-                            chrome.metaSeparator,
-                            '$_quotePercent',
-                          ].join(),
+                          chrome.errFormatSizeRequired,
                           style: TextStyle(
-                            color: tokens.onSurfaceMuted,
-                            fontSize: 12,
-                          ),
-                        ),
-                        Text(
-                          chrome.commissionBlurbTemplate.replaceAll(
-                            '{percent}',
-                            '$_quotePercent',
-                          ),
-                          style: TextStyle(
-                            color: tokens.onSurfaceMuted,
+                            color: tokens.danger,
                             fontSize: 12,
                           ),
                         ),
                       ],
-                      if (_quoteCommission != null && _quoteNet != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            [
-                              chrome.paymentsCommissionLabel,
-                              chrome.metaSeparator,
-                              '$_quoteCommission',
-                              chrome.metaSeparator,
-                              chrome.paymentsOrganizerNetLabel,
-                              chrome.metaSeparator,
-                              '$_quoteNet',
-                            ].join(),
+                      if (size != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '${chrome.maxPlayersLabel}${chrome.metaSeparator}${formatSeatCapDisplay(size.maxPlayers, catalog.swissRoundsByMaxPlayers, chrome.unlimitedPlayersLabel, emptyCell)}',
+                          style: TextStyle(color: tokens.onSurfaceMuted),
+                        ),
+                        Text(
+                          '${chrome.hostFeeLabel}${chrome.metaSeparator}${hostFee ?? emptyCell}${chrome.amountCurrencySeparator}$hostCur',
+                          style: TextStyle(
+                            color: tokens.gold,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      Text(
+                        softCommunityJoinStatusMessage(
+                            chrome.forceAutoApproveNote),
+                        style: TextStyle(color: tokens.onSurfaceMuted),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _brandColorCtrl,
+                        decoration: InputDecoration(
+                          labelText: chrome.brandColorLabel,
+                          hintText: chrome.brandColorPlaceholder,
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      if (catalog.hostedEventVisibilities.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        ChromeSelectField(
+                          label: chrome.visibilityLabel,
+                          valueLabel: () {
+                            final v = _visibility;
+                            final pub =
+                                catalog.hostedEventPublicVisibility.trim();
+                            final priv =
+                                catalog.hostedEventPrivateVisibility.trim();
+                            if (pub.isNotEmpty && v == pub) {
+                              return chrome.visibilityPublicLabel;
+                            }
+                            if (priv.isNotEmpty && v == priv) {
+                              return chrome.visibilityPrivateLabel;
+                            }
+                            return chrome.emptyValue;
+                          }(),
+                          onTap: () async {
+                            final options = <ChromeSelectOption<String>>[];
+                            final pub =
+                                catalog.hostedEventPublicVisibility.trim();
+                            final priv =
+                                catalog.hostedEventPrivateVisibility.trim();
+                            for (final v in catalog.hostedEventVisibilities) {
+                              if (pub.isNotEmpty &&
+                                  v == pub &&
+                                  !catalog.publicEventsEnabled) {
+                                continue;
+                              }
+                              final label = (pub.isNotEmpty && v == pub)
+                                  ? chrome.visibilityPublicLabel
+                                  : (priv.isNotEmpty && v == priv)
+                                      ? chrome.visibilityPrivateLabel
+                                      : chrome.emptyValue;
+                              if (label.isEmpty) continue;
+                              options.add(
+                                ChromeSelectOption(
+                                  value: v,
+                                  label: label,
+                                ),
+                              );
+                            }
+                            if (options.isEmpty) return;
+                            final picked = await showChromeOptionSheet<String>(
+                              context: context,
+                              title: chrome.visibilityLabel,
+                              selected: _visibility,
+                              options: options,
+                            );
+                            if (picked != null) {
+                              setState(() {
+                                _visibility = picked;
+                                // Manual pick cancels Host CTA prefer upgrade.
+                                _preferPublicPending = false;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          () {
+                            final pub =
+                                catalog.hostedEventPublicVisibility.trim();
+                            if (pub.isNotEmpty && _visibility == pub) {
+                              return catalog.publicEventsEnabled
+                                  ? softHostingVisibilityPublicBlurb(
+                                      chrome.visibilityPublicBlurb,
+                                    )
+                                  : softHostingPublicDisabled(
+                                      chrome.publicDisabled);
+                            }
+                            return softHostingVisibilityPrivateBlurb(
+                              chrome.visibilityPrivateBlurb,
+                            );
+                          }(),
+                          style: TextStyle(
+                            color: tokens.onSurfaceMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (() {
+                          final pub =
+                              catalog.hostedEventPublicVisibility.trim();
+                          return pub.isNotEmpty &&
+                              _visibility == pub &&
+                              catalog.publicEventsEnabled;
+                        }()) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            softCommunityJoinStatusMessage(
+                              catalog.publicEventMatchesRated
+                                  ? chrome.publicRatedOnBlurb
+                                  : chrome.publicRatedOffBlurb,
+                            ),
                             style: TextStyle(
                               color: tokens.onSurfaceMuted,
                               fontSize: 12,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
                             ),
                           ),
-                        ),
-                    ],
-                    if (!_freeEntry && (catalog.prizePoolDisplayEnabled)) ...[
+                        ],
+                      ],
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: Text(chrome.prizePoolDisplayLabel),
-                        subtitle: Text(
-                          chrome.prizePoolDisplayBlurb,
-                          style: TextStyle(
-                            color: tokens.onSurfaceMuted,
-                            fontSize: 12,
-                          ),
-                        ),
-                        value: _prizePoolDisplay,
+                        title: Text(chrome.entryFreeLabel),
+                        value: _freeEntry,
                         onChanged: (v) {
                           setState(() {
-                            _prizePoolDisplay = v;
-                            if (!v) {
+                            _freeEntry = v;
+                            if (v) {
+                              _prizePoolDisplay = false;
                               _prizePoolGuarantee = false;
                               _payoutMode = '';
                               _prizePercent1Ctrl.clear();
                               _prizePercent2Ctrl.clear();
                               _prizePercent3Ctrl.clear();
-                            } else {
-                              _applyPayoutDefaults();
+                              _quoteCommission = null;
+                              _quoteNet = null;
+                              _quotePercent = null;
                             }
                           });
+                          if (!v) {
+                            _refreshEntryFeeQuote();
+                          }
                         },
                       ),
-                      if (_prizePoolDisplay && _clientEnums != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          chrome.payoutModeLabel,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
+                      if (!_freeEntry) ...[
+                        TextField(
+                          controller: _entryFeeCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                          ],
+                          decoration: InputDecoration(
+                            labelText: chrome.entryFeeLabel,
+                            hintText: chrome.entryFeePlaceholder,
+                            border: const OutlineInputBorder(),
+                          ),
+                          onChanged: (_) {
+                            setState(() {});
+                            _refreshEntryFeeQuote();
+                          },
                         ),
-                        if (chrome.payoutModeBlurb.trim().isNotEmpty) ...[
-                          const SizedBox(height: 4),
+                        const SizedBox(height: 6),
+                        if (_quotePercent != null) ...[
                           Text(
-                            chrome.payoutModeBlurb,
+                            [
+                              chrome.commissionPercentLabel,
+                              chrome.metaSeparator,
+                              '$_quotePercent',
+                            ].join(),
+                            style: TextStyle(
+                              color: tokens.onSurfaceMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                          Text(
+                            chrome.commissionBlurbTemplate.replaceAll(
+                              '{percent}',
+                              '$_quotePercent',
+                            ),
                             style: TextStyle(
                               color: tokens.onSurfaceMuted,
                               fontSize: 12,
                             ),
                           ),
                         ],
-                        const SizedBox(height: 8),
-                        ChromeSelectField(
-                          label: chrome.payoutModeLabel,
-                          valueLabel: _payoutMode.trim().isEmpty
-                              ? ''
-                              : _payoutModeOptionLabel(
-                                  _payoutMode.trim(),
-                                  chrome,
-                                ),
-                          onTap: () async {
-                            final fmt = (_formatId ?? '').trim();
-                            final options = [
-                              for (final m in payoutModeOptions(
-                                _clientEnums,
-                                fmt,
-                              ))
-                                ChromeSelectOption(
-                                  value: m,
-                                  label: _payoutModeOptionLabel(m, chrome),
-                                ),
-                            ];
-                            if (options.isEmpty) return;
-                            final picked = await showChromeOptionSheet<String>(
-                              context: context,
-                              title: chrome.payoutModeLabel,
-                              selected: _payoutMode.trim().isEmpty
-                                  ? null
-                                  : _payoutMode.trim(),
-                              options: options,
-                            );
-                            if (picked != null) {
-                              setState(() => _payoutMode = picked);
-                            }
+                        if (_quoteCommission != null && _quoteNet != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              [
+                                chrome.paymentsCommissionLabel,
+                                chrome.metaSeparator,
+                                '$_quoteCommission',
+                                chrome.metaSeparator,
+                                chrome.paymentsOrganizerNetLabel,
+                                chrome.metaSeparator,
+                                '$_quoteNet',
+                              ].join(),
+                              style: TextStyle(
+                                color: tokens.onSurfaceMuted,
+                                fontSize: 12,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                      if (!_freeEntry && (catalog.prizePoolDisplayEnabled)) ...[
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(chrome.prizePoolDisplayLabel),
+                          subtitle: Text(
+                            chrome.prizePoolDisplayBlurb,
+                            style: TextStyle(
+                              color: tokens.onSurfaceMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                          value: _prizePoolDisplay,
+                          onChanged: (v) {
+                            setState(() {
+                              _prizePoolDisplay = v;
+                              if (!v) {
+                                _prizePoolGuarantee = false;
+                                _payoutMode = '';
+                                _prizePercent1Ctrl.clear();
+                                _prizePercent2Ctrl.clear();
+                                _prizePercent3Ctrl.clear();
+                              } else {
+                                _applyPayoutDefaults();
+                              }
+                            });
                           },
                         ),
-                        if (_placesPercentPayoutMode &&
-                            chrome.prizePlacePercentsSectionLabel
-                                .trim()
-                                .isNotEmpty) ...[
-                          const SizedBox(height: 12),
+                        if (_prizePoolDisplay && _clientEnums != null) ...[
+                          const SizedBox(height: 8),
                           Text(
-                            chrome.prizePlacePercentsSectionLabel,
+                            chrome.payoutModeLabel,
                             style: const TextStyle(fontWeight: FontWeight.w500),
                           ),
-                          if (chrome.prizePlacePercentsBlurb.trim().isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                chrome.prizePlacePercentsBlurb,
+                          if (chrome.payoutModeBlurb.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              chrome.payoutModeBlurb,
+                              style: TextStyle(
+                                color: tokens.onSurfaceMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          ChromeSelectField(
+                            label: chrome.payoutModeLabel,
+                            valueLabel: _payoutMode.trim().isEmpty
+                                ? ''
+                                : _payoutModeOptionLabel(
+                                    _payoutMode.trim(),
+                                    chrome,
+                                  ),
+                            onTap: () async {
+                              final fmt = (_formatId ?? '').trim();
+                              final options = [
+                                for (final m in payoutModeOptions(
+                                  _clientEnums,
+                                  fmt,
+                                ))
+                                  ChromeSelectOption(
+                                    value: m,
+                                    label: _payoutModeOptionLabel(m, chrome),
+                                  ),
+                              ];
+                              if (options.isEmpty) return;
+                              final picked =
+                                  await showChromeOptionSheet<String>(
+                                context: context,
+                                title: chrome.payoutModeLabel,
+                                selected: _payoutMode.trim().isEmpty
+                                    ? null
+                                    : _payoutMode.trim(),
+                                options: options,
+                              );
+                              if (picked != null) {
+                                setState(() => _payoutMode = picked);
+                              }
+                            },
+                          ),
+                          if (_placesPercentPayoutMode &&
+                              chrome.prizePlacePercentsSectionLabel
+                                  .trim()
+                                  .isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              chrome.prizePlacePercentsSectionLabel,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            if (chrome.prizePlacePercentsBlurb
+                                .trim()
+                                .isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  chrome.prizePlacePercentsBlurb,
+                                  style: TextStyle(
+                                    color: tokens.onSurfaceMuted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 8),
+                            if (chrome.prizePlacePercent1Label
+                                .trim()
+                                .isNotEmpty)
+                              TextField(
+                                controller: _prizePercent1Ctrl,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'[\d.]'),
+                                  ),
+                                ],
+                                decoration: InputDecoration(
+                                  labelText: chrome.prizePlacePercent1Label,
+                                  hintText:
+                                      chrome.prizePlacePercent1Placeholder,
+                                  border: const OutlineInputBorder(),
+                                ),
+                                onChanged: (_) {
+                                  if (_attempted) setState(() {});
+                                },
+                              ),
+                            if (chrome.prizePlacePercent2Label
+                                .trim()
+                                .isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: TextField(
+                                  controller: _prizePercent2Ctrl,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                      RegExp(r'[\d.]'),
+                                    ),
+                                  ],
+                                  decoration: InputDecoration(
+                                    labelText: chrome.prizePlacePercent2Label,
+                                    hintText:
+                                        chrome.prizePlacePercent2Placeholder,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                  onChanged: (_) {
+                                    if (_attempted) setState(() {});
+                                  },
+                                ),
+                              ),
+                            if (chrome.prizePlacePercent3Label
+                                .trim()
+                                .isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: TextField(
+                                  controller: _prizePercent3Ctrl,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                      RegExp(r'[\d.]'),
+                                    ),
+                                  ],
+                                  decoration: InputDecoration(
+                                    labelText: chrome.prizePlacePercent3Label,
+                                    hintText:
+                                        chrome.prizePlacePercent3Placeholder,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                  onChanged: (_) {
+                                    if (_attempted) setState(() {});
+                                  },
+                                ),
+                              ),
+                            if (_attempted &&
+                                placePercentsSumInvalid(
+                                  _prizePercent1Ctrl.text,
+                                  _prizePercent2Ctrl.text,
+                                  _prizePercent3Ctrl.text,
+                                ) &&
+                                chrome.errPrizePlacePercentsSum
+                                    .trim()
+                                    .isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                chrome.errPrizePlacePercentsSum,
                                 style: TextStyle(
-                                  color: tokens.onSurfaceMuted,
+                                  color: tokens.danger,
                                   fontSize: 12,
                                 ),
                               ),
+                            ],
+                          ],
+                        ],
+                        if (_prizePoolDisplay &&
+                            catalog.prizePoolGuaranteeEnabled) ...[
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(chrome.prizePoolGuaranteeLabel),
+                            subtitle: Text(
+                              chrome.prizePoolGuaranteeBlurb,
+                              style: TextStyle(
+                                color: tokens.onSurfaceMuted,
+                                fontSize: 12,
+                              ),
                             ),
-                          const SizedBox(height: 8),
-                          if (chrome.prizePlacePercent1Label.trim().isNotEmpty)
+                            value: _prizePoolGuarantee,
+                            onChanged: (v) =>
+                                setState(() => _prizePoolGuarantee = v),
+                          ),
+                          if (_prizePoolGuarantee) ...[
+                            const SizedBox(height: 4),
                             TextField(
-                              controller: _prizePercent1Ctrl,
+                              controller: _guaranteeAmountCtrl,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
                                 decimal: true,
@@ -2517,290 +2645,189 @@ class _CreateEventDialogState extends State<_CreateEventDialog>
                                 ),
                               ],
                               decoration: InputDecoration(
-                                labelText: chrome.prizePlacePercent1Label,
-                                hintText: chrome.prizePlacePercent1Placeholder,
+                                labelText: chrome.prizePoolGuaranteeAmountLabel,
+                                hintText:
+                                    chrome.prizePoolGuaranteeAmountPlaceholder,
                                 border: const OutlineInputBorder(),
                               ),
-                              onChanged: (_) {
-                                if (_attempted) setState(() {});
-                              },
-                            ),
-                          if (chrome.prizePlacePercent2Label.trim().isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: TextField(
-                                controller: _prizePercent2Ctrl,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'[\d.]'),
-                                  ),
-                                ],
-                                decoration: InputDecoration(
-                                  labelText: chrome.prizePlacePercent2Label,
-                                  hintText:
-                                      chrome.prizePlacePercent2Placeholder,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                onChanged: (_) {
-                                  if (_attempted) setState(() {});
-                                },
-                              ),
-                            ),
-                          if (chrome.prizePlacePercent3Label.trim().isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: TextField(
-                                controller: _prizePercent3Ctrl,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'[\d.]'),
-                                  ),
-                                ],
-                                decoration: InputDecoration(
-                                  labelText: chrome.prizePlacePercent3Label,
-                                  hintText:
-                                      chrome.prizePlacePercent3Placeholder,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                onChanged: (_) {
-                                  if (_attempted) setState(() {});
-                                },
-                              ),
-                            ),
-                          if (_attempted &&
-                              placePercentsSumInvalid(
-                                _prizePercent1Ctrl.text,
-                                _prizePercent2Ctrl.text,
-                                _prizePercent3Ctrl.text,
-                              ) &&
-                              chrome.errPrizePlacePercentsSum
-                                  .trim()
-                                  .isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              chrome.errPrizePlacePercentsSum,
-                              style: TextStyle(
-                                color: tokens.danger,
-                                fontSize: 12,
-                              ),
+                              onChanged: (_) => setState(() {}),
                             ),
                           ],
                         ],
                       ],
-                      if (_prizePoolDisplay &&
-                          catalog.prizePoolGuaranteeEnabled) ...[
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(chrome.prizePoolGuaranteeLabel),
-                          subtitle: Text(
-                            chrome.prizePoolGuaranteeBlurb,
-                            style: TextStyle(
-                              color: tokens.onSurfaceMuted,
-                              fontSize: 12,
-                            ),
+                      if (pay != null) ...[
+                        const SizedBox(height: 8),
+                        if (wallet.locating || wallet.loading)
+                          Text(
+                            pay.balancePending,
+                            style: TextStyle(color: tokens.onSurfaceMuted),
+                          )
+                        else if (countryMissing)
+                          Text(
+                            pay.countryRequiredHint,
+                            style: TextStyle(color: tokens.danger),
+                          )
+                        else
+                          Text(
+                            () {
+                              if (balance == null) return pay.balancePending;
+                              final cur = (wallet.walletCurrency ?? '').trim();
+                              final sep = chrome.amountCurrencySeparator;
+                              if (cur.isEmpty || sep.isEmpty) {
+                                return pay.balancePending;
+                              }
+                              return '${pay.balanceLabel} $balance$sep$cur';
+                            }(),
                           ),
-                          value: _prizePoolGuarantee,
-                          onChanged: (v) =>
-                              setState(() => _prizePoolGuarantee = v),
-                        ),
-                        if (_prizePoolGuarantee) ...[
-                          const SizedBox(height: 4),
-                          TextField(
-                            controller: _guaranteeAmountCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                RegExp(r'[\d.]'),
-                              ),
-                            ],
-                            decoration: InputDecoration(
-                              labelText: chrome.prizePoolGuaranteeAmountLabel,
-                              hintText:
-                                  chrome.prizePoolGuaranteeAmountPlaceholder,
-                              border: const OutlineInputBorder(),
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ],
                       ],
-                    ],
-                    if (pay != null) ...[
-                      const SizedBox(height: 8),
-                      if (wallet.locating || wallet.loading)
-                        Text(
-                          pay.balancePending,
-                          style: TextStyle(color: tokens.onSurfaceMuted),
-                        )
-                      else if (countryMissing)
-                        Text(
-                          pay.countryRequiredHint,
-                          style: TextStyle(color: tokens.danger),
-                        )
-                      else
-                        Text(
-                          () {
-                            if (balance == null) return pay.balancePending;
-                            final cur = (wallet.walletCurrency ?? '').trim();
-                            final sep = chrome.amountCurrencySeparator;
-                            if (cur.isEmpty || sep.isEmpty) {
-                              return pay.balancePending;
-                            }
-                            return '${pay.balanceLabel} $balance$sep$cur';
-                          }(),
-                        ),
-                    ],
-                    if (!canAfford && balance != null) ...[
-                      KeyedSubtree(
-                        key: _topUpSectionKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const SizedBox(height: 8),
-                            Text(
-                              () {
-                                // Prefight: if fee alone fits but fee+guarantee does not, show guarantee chrome.
-                                final fee = hostFee ?? 0.0;
-                                final g = _prizeGuaranteeActive
-                                    ? (parsePositiveDecimal(
-                                            _guaranteeAmountCtrl.text) ??
-                                        0.0)
-                                    : 0.0;
-                                if (g > 0 &&
-                                    balance >= fee &&
-                                    balance < fee + g) {
-                                  return chrome.insufficientPrizeGuarantee;
-                                }
-                                return chrome.insufficientHostFee;
-                              }(),
-                              style: TextStyle(color: tokens.danger),
-                            ),
-                            if (pay != null &&
-                                wallet.routeProvider != 'manual_transfer') ...[
+                      if (!canAfford && balance != null) ...[
+                        KeyedSubtree(
+                          key: _topUpSectionKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
                               const SizedBox(height: 8),
-                              TextField(
-                                controller: _amountCtrl,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'[\d.]'),
-                                  ),
-                                ],
-                                decoration: InputDecoration(
-                                  labelText: pay.amountLabel,
-                                  hintText: pay.amountPlaceholder,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                onChanged: (v) {
-                                  final s = sanitizeDecimalInput(v);
-                                  if (s != v) {
-                                    _amountCtrl.value = TextEditingValue(
-                                      text: s,
-                                      selection: TextSelection.collapsed(
-                                        offset: s.length,
-                                      ),
-                                    );
+                              Text(
+                                () {
+                                  // Prefight: if fee alone fits but fee+guarantee does not, show guarantee chrome.
+                                  final fee = hostFee ?? 0.0;
+                                  final g = _prizeGuaranteeActive
+                                      ? (parsePositiveDecimal(
+                                              _guaranteeAmountCtrl.text) ??
+                                          0.0)
+                                      : 0.0;
+                                  if (g > 0 &&
+                                      balance >= fee &&
+                                      balance < fee + g) {
+                                    return chrome.insufficientPrizeGuarantee;
                                   }
-                                  context.read<WalletCubit>().setAmountText(s);
-                                  setState(() {});
-                                },
+                                  return chrome.insufficientHostFee;
+                                }(),
+                                style: TextStyle(color: tokens.danger),
                               ),
-                              const SizedBox(height: 8),
-                              FilledButton(
-                                onPressed: wallet.loading ||
-                                        wallet.country.trim().isEmpty ||
-                                        parsePositiveDecimal(
-                                              _amountCtrl.text,
-                                            ) ==
-                                            null
-                                    ? null
-                                    : () =>
-                                        context.read<WalletCubit>().checkout(),
-                                child: Text(pay.checkoutAction),
-                              ),
-                            ],
-                            if (chrome.portalWalletHref.trim().isNotEmpty &&
-                                chrome.topUpAction.trim().isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              OutlinedButton(
-                                onPressed: () {
-                                  // Web parity: portal_wallet_href + focus=topup.
-                                  final href = withWalletFocusParam(
-                                    chrome.portalWalletHref.trim(),
-                                    'topup',
-                                  );
-                                  Navigator.of(context).pop();
-                                  if (isWalletHrefPath(href)) {
-                                    final focus =
-                                        portalWalletFocusFromHref(href);
-                                    final base = moneyBasePathFromHref(href);
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => WalletPage(
-                                          token: widget.accessToken,
-                                          moneyBasePath: base,
-                                          showOrganizerPayoutBlurb: true,
-                                          focusPayout: focus.focusPayout,
-                                          focusTopUp: focus.focusTopUp,
-                                          focusPayoutHistoryId: focus.historyId,
+                              if (pay != null &&
+                                  wallet.routeProvider !=
+                                      'manual_transfer') ...[
+                                const SizedBox(height: 8),
+                                TextField(
+                                  controller: _amountCtrl,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                      RegExp(r'[\d.]'),
+                                    ),
+                                  ],
+                                  decoration: InputDecoration(
+                                    labelText: pay.amountLabel,
+                                    hintText: pay.amountPlaceholder,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                  onChanged: (v) {
+                                    final s = sanitizeDecimalInput(v);
+                                    if (s != v) {
+                                      _amountCtrl.value = TextEditingValue(
+                                        text: s,
+                                        selection: TextSelection.collapsed(
+                                          offset: s.length,
                                         ),
-                                      ),
+                                      );
+                                    }
+                                    context
+                                        .read<WalletCubit>()
+                                        .setAmountText(s);
+                                    setState(() {});
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                FilledButton(
+                                  onPressed: wallet.loading ||
+                                          wallet.country.trim().isEmpty ||
+                                          parsePositiveDecimal(
+                                                _amountCtrl.text,
+                                              ) ==
+                                              null
+                                      ? null
+                                      : () => context
+                                          .read<WalletCubit>()
+                                          .checkout(),
+                                  child: Text(pay.checkoutAction),
+                                ),
+                              ],
+                              if (chrome.portalWalletHref.trim().isNotEmpty &&
+                                  chrome.topUpAction.trim().isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                OutlinedButton(
+                                  onPressed: () {
+                                    // Web parity: portal_wallet_href + focus=topup.
+                                    final href = withWalletFocusParam(
+                                      chrome.portalWalletHref.trim(),
+                                      'topup',
                                     );
-                                  } else {
-                                    navigateNotificationHref(
-                                      context,
-                                      href: href,
-                                      accessToken: widget.accessToken,
-                                    );
-                                  }
-                                },
-                                child: Text(chrome.topUpAction),
-                              ),
+                                    Navigator.of(context).pop();
+                                    if (isWalletHrefPath(href)) {
+                                      final focus =
+                                          portalWalletFocusFromHref(href);
+                                      final base = moneyBasePathFromHref(href);
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => WalletPage(
+                                            token: widget.accessToken,
+                                            moneyBasePath: base,
+                                            showOrganizerPayoutBlurb: true,
+                                            focusPayout: focus.focusPayout,
+                                            focusTopUp: focus.focusTopUp,
+                                            focusPayoutHistoryId:
+                                                focus.historyId,
+                                          ),
+                                        ),
+                                      );
+                                    } else {
+                                      navigateNotificationHref(
+                                        context,
+                                        href: href,
+                                        accessToken: widget.accessToken,
+                                      );
+                                    }
+                                  },
+                                  child: Text(chrome.topUpAction),
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
+                      ],
+                      if (_error.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(_error, style: TextStyle(color: tokens.danger)),
+                      ],
                     ],
-                    if (_error.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(_error, style: TextStyle(color: tokens.danger)),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(
-                  chrome.dialogCloseLabel.trim().isNotEmpty
-                      ? chrome.dialogCloseLabel
-                      : softHostingCancelAction(chrome.cancelAction),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(
+                    chrome.dialogCloseLabel.trim().isNotEmpty
+                        ? chrome.dialogCloseLabel
+                        : softHostingCancelAction(chrome.cancelAction),
+                  ),
                 ),
-              ),
-              FilledButton(
-                onPressed: _submitting
-                    ? null
-                    : () => _submit(context.read<WalletCubit>()),
-                child: Text(
-                  _submitting ? chrome.createPending : chrome.payCreateAction,
+                FilledButton(
+                  onPressed: _submitting
+                      ? null
+                      : () => _submit(context.read<WalletCubit>()),
+                  child: Text(
+                    _submitting ? chrome.createPending : chrome.payCreateAction,
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }

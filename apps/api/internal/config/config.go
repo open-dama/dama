@@ -28,10 +28,12 @@ type Config struct {
 	PaddleEnv           string // live | sandbox
 	PaddleAPIBase       string // https://api.paddle.com | https://sandbox-api.paddle.com
 	PublicAPIBase       string
-	RateLimitPerMinute  int
-	SecretsKey          string
-	AllowLocalMedia     bool
-	AllowYouTubeStub    bool
+	// PublicWebBase is the player web origin (Paddle /pay bridge + checkout return fallbacks).
+	PublicWebBase      string
+	RateLimitPerMinute int
+	SecretsKey         string
+	AllowLocalMedia    bool
+	AllowYouTubeStub   bool
 	// MediaPublicBase is the client-facing media origin (custom CDN/CNAME).
 	// When set, avatar URLs never embed the upstream CDN vendor hostname.
 	MediaPublicBase string
@@ -95,7 +97,11 @@ func Load() Config {
 		PaddleEnv:           paddleEnv(),
 		PaddleAPIBase:       paddleAPIBase(),
 		PublicAPIBase:       getenv("DAMA_PUBLIC_API_BASE", "http://localhost:8080"),
-		RateLimitPerMinute:  getenvInt("DAMA_RATE_LIMIT_PER_MINUTE", 120),
+		PublicWebBase: strings.TrimRight(firstNonEmpty(
+			os.Getenv("DAMA_PUBLIC_WEB_BASE"),
+			os.Getenv("NEXT_PUBLIC_SITE_URL"),
+		), "/"),
+		RateLimitPerMinute: getenvInt("DAMA_RATE_LIMIT_PER_MINUTE", 120),
 		SecretsKey: firstNonEmpty(
 			os.Getenv("DAMA_SECRETS_KEY"),
 			os.Getenv("SECRETS_ENCRYPTION_KEY"),

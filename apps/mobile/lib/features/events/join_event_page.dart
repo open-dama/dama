@@ -22,6 +22,7 @@ import 'package:dama_mobile/features/events/event_report_dialog.dart';
 import 'package:dama_mobile/features/game/spectate_page.dart';
 import 'package:dama_mobile/features/notifications/notification_href_nav.dart';
 import 'package:dama_mobile/features/wallet/portal_wallet_focus.dart';
+import 'package:dama_mobile/features/wallet/wallet_checkout_resume.dart';
 import 'package:dama_mobile/features/wallet/wallet_cubit.dart';
 import 'package:dama_mobile/features/wallet/wallet_page.dart';
 import 'package:flutter/material.dart';
@@ -741,559 +742,569 @@ class _JoinEventPageState extends State<JoinEventPage> {
     final auth = context.watch<AuthCubit>().state;
     final content = BlocProvider(
       create: (_) {
-        final cubit = WalletCubit(accessToken: widget.accessToken);
+        final cubit = WalletCubit(
+          accessToken: widget.accessToken,
+          moneyBasePath: '/events',
+        );
         if (auth.isAuthenticated) WalletPage.unawaitedLoad(cubit);
         return cubit;
       },
-      child: BlocConsumer<WalletCubit, WalletState>(
-        listenWhen: (p, n) => p.balance != n.balance,
-        listener: (context, state) {
-          final ev = _event;
-          if (ev == null || ev.isFreeEntry) return;
-          final fee = ev.entryFeeAmount;
-          final bal = state.balance;
-          if (bal == null || fee == null || fee <= 0 || bal >= fee) return;
-          if (_amountCtrl.text.trim().isNotEmpty) return;
-          final shortfall = fee - bal;
-          if (shortfall <= 0) return;
-          final s = sanitizeDecimalInput(shortfall.toString());
-          if (s.isEmpty) return;
-          _amountCtrl.value = TextEditingValue(
-            text: s,
-            selection: TextSelection.collapsed(offset: s.length),
-          );
-          context.read<WalletCubit>().setAmountText(s);
-        },
-        builder: (context, wallet) {
-          final ev = _event;
-          final fee = ev == null || ev.isFreeEntry ? null : ev.entryFeeAmount;
-          final bal = wallet.balance;
-          final canAfford =
-              fee == null || fee <= 0 || (bal != null && bal >= fee);
-          final showTopUp = _needsTopUp ||
-              (fee != null && fee > 0 && bal != null && !canAfford);
+      child: WalletCheckoutResumeRefresher(
+        child: BlocConsumer<WalletCubit, WalletState>(
+          listenWhen: (p, n) => p.balance != n.balance,
+          listener: (context, state) {
+            final ev = _event;
+            if (ev == null || ev.isFreeEntry) return;
+            final fee = ev.entryFeeAmount;
+            final bal = state.balance;
+            if (bal == null || fee == null || fee <= 0 || bal >= fee) return;
+            if (_amountCtrl.text.trim().isNotEmpty) return;
+            final shortfall = fee - bal;
+            if (shortfall <= 0) return;
+            final s = sanitizeDecimalInput(shortfall.toString());
+            if (s.isEmpty) return;
+            _amountCtrl.value = TextEditingValue(
+              text: s,
+              selection: TextSelection.collapsed(offset: s.length),
+            );
+            context.read<WalletCubit>().setAmountText(s);
+          },
+          builder: (context, wallet) {
+            final ev = _event;
+            final fee = ev == null || ev.isFreeEntry ? null : ev.entryFeeAmount;
+            final bal = wallet.balance;
+            final canAfford =
+                fee == null || fee <= 0 || (bal != null && bal >= fee);
+            final showTopUp = _needsTopUp ||
+                (fee != null && fee > 0 && bal != null && !canAfford);
 
-          // Full-width portal body (same as other player pages). Dialog
-          // panel_max_width is for modals only - do not shrink this surface.
-          final insetH = double.tryParse(chrome.dialogShellInsetH.trim());
-          final insetV = double.tryParse(chrome.dialogShellInsetV.trim());
-          if (insetH == null || insetH < 0 || insetV == null || insetV < 0) {
-            return const SizedBox.shrink();
-          }
-          return ListView(
-            padding: EdgeInsets.symmetric(horizontal: insetH, vertical: insetV),
-            children: [
-              Text(
-                softCommunityJoinTitle(chrome.joinTitle),
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                softCommunityJoinBlurb(chrome.joinBlurb),
-                style: TextStyle(color: tokens.onSurfaceMuted),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _codeCtrl,
-                textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  labelText: softCommunityCodeLabel(chrome.codeLabel),
-                  hintText:
-                      softCommunityCodePlaceholder(chrome.codePlaceholder),
-                  border: const OutlineInputBorder(),
-                  errorText: _joinAttempted && _codeCtrl.text.trim().isEmpty
-                      ? (chrome.errCodeRequired.isNotEmpty
-                          ? softCommunityErrCodeRequired(chrome.errCodeRequired)
-                          : null)
-                      : null,
-                  suffixIcon: _loadingEvent
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : null,
-                ),
-                onChanged: _onCodeChanged,
-                onSubmitted: (_) => _lookup(_codeCtrl.text),
-              ),
-              if (ev != null && !ev.isFreeEntry) ...[
-                const SizedBox(height: 12),
+            // Full-width portal body (same as other player pages). Dialog
+            // panel_max_width is for modals only - do not shrink this surface.
+            final insetH = double.tryParse(chrome.dialogShellInsetH.trim());
+            final insetV = double.tryParse(chrome.dialogShellInsetV.trim());
+            if (insetH == null || insetH < 0 || insetV == null || insetV < 0) {
+              return const SizedBox.shrink();
+            }
+            return ListView(
+              padding:
+                  EdgeInsets.symmetric(horizontal: insetH, vertical: insetV),
+              children: [
                 Text(
-                  [
-                    ev.entryFeeAmount != null
-                        ? '${ev.entryFeeAmount}'
-                        : chrome.emptyValue,
-                    chrome.amountCurrencySeparator,
-                    ev.entryFeeCurrency.trim().isNotEmpty
-                        ? ev.entryFeeCurrency
-                        : chrome.emptyValue,
-                  ].join(),
-                  style: TextStyle(
-                    color: tokens.gold,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-                Builder(
-                  builder: (context) {
-                    final payBlurb = softCommunityJoinStatusMessage(
-                      chrome.entryFeePayBlurb,
-                    );
-                    if (payBlurb.isEmpty) return const SizedBox.shrink();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 4),
-                        Text(
-                          payBlurb,
-                          style: TextStyle(
-                            color: tokens.onSurfaceMuted,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ],
-              if (showTopUp) ...[
-                const SizedBox(height: 12),
-                Text(
-                  softCommunityJoinStatusMessage(chrome.insufficientEntryFee),
-                  style: TextStyle(color: tokens.danger),
-                ),
-                const SizedBox(height: 8),
-                if (_payChrome != null &&
-                    wallet.routeProvider != 'manual_transfer') ...[
-                  TextField(
-                    controller: _amountCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: _payChrome!.amountLabel,
-                      hintText: _payChrome!.amountPlaceholder,
-                      border: const OutlineInputBorder(),
-                    ),
-                    onChanged: (v) {
-                      final s = sanitizeDecimalInput(v);
-                      if (s != v) {
-                        _amountCtrl.value = TextEditingValue(
-                          text: s,
-                          selection: TextSelection.collapsed(offset: s.length),
-                        );
-                      }
-                      context.read<WalletCubit>().setAmountText(s);
-                      setState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  FilledButton(
-                    onPressed: wallet.loading ||
-                            wallet.country.trim().isEmpty ||
-                            parsePositiveDecimal(_amountCtrl.text) == null
-                        ? null
-                        : () => context.read<WalletCubit>().checkout(),
-                    child: Text(
-                      wallet.loading
-                          ? (_payChrome!.checkoutPending.trim().isNotEmpty
-                              ? _payChrome!.checkoutPending
-                              : _payChrome!.checkoutAction)
-                          : _payChrome!.checkoutAction,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                if (chrome.topUpHref.trim().isNotEmpty)
-                  OutlinedButton(
-                    onPressed: () {
-                      final href = withWalletFocusParam(
-                        chrome.topUpHref.trim(),
-                        'topup',
-                      );
-                      if (isWalletHrefPath(href)) {
-                        final focus = portalWalletFocusFromHref(href);
-                        final base = moneyBasePathFromHref(href);
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => WalletPage(
-                              token: widget.accessToken,
-                              moneyBasePath: base,
-                              showOrganizerPayoutBlurb: base.isNotEmpty,
-                              focusPayout: focus.focusPayout,
-                              focusTopUp: focus.focusTopUp,
-                              focusPayoutHistoryId: focus.historyId,
-                            ),
-                          ),
-                        );
-                      } else {
-                        navigateNotificationHref(
-                          context,
-                          href: href,
-                          accessToken: widget.accessToken,
-                        );
-                      }
-                    },
-                    child: Text(chrome.topUpAction),
-                  ),
-              ],
-              if (_statusBlurb.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _statusBlurb,
-                  style: TextStyle(
-                    color: _statusIsError ? tokens.danger : tokens.gold,
-                  ),
-                ),
-              ],
-              // Web JoinPanel: Join CTA after event card / top-up (not above).
-              const SizedBox(height: 12),
-              if (!auth.isAuthenticated)
-                FutureBuilder<AuthProvidersChrome?>(
-                  future: fetchAuthProvidersChrome(),
-                  builder: (context, snap) {
-                    final label = (snap.data?.navSignInLabel ?? '').trim();
-                    if (label.isEmpty) return const SizedBox.shrink();
-                    return TextButton(
-                      onPressed: () => showSignInDialog(context),
-                      child: Text(label),
-                    );
-                  },
-                )
-              else
-                FilledButton(
-                  onPressed: _joining
-                      ? null
-                      : () => _join(context.read<WalletCubit>()),
-                  child: _joining
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(softTournamentsJoinAction(chrome.joinAction)),
-                ),
-              if (ev != null) ...[
-                const SizedBox(height: 20),
-                Builder(
-                  builder: (context) {
-                    final images = ev.carouselImages;
-                    final brand = (ev.brandColor ?? '').trim();
-                    Color fallback = tokens.surfaceMuted;
-                    if (brand.isNotEmpty) {
-                      final hex =
-                          brand.startsWith('#') ? brand.substring(1) : brand;
-                      final parsed = int.tryParse(
-                        hex.length == 6 ? 'FF$hex' : hex,
-                        radix: 16,
-                      );
-                      if (parsed != null) fallback = Color(parsed);
-                    }
-                    if (images.isEmpty && brand.isEmpty) {
-                      return const SizedBox.shrink();
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: images.isEmpty
-                            ? AspectRatio(
-                                aspectRatio: 16 / 10,
-                                child: ColoredBox(color: fallback),
-                              )
-                            : GalleryCarousel(
-                                images: images,
-                                semanticsLabel: softCommunityCarouselAria(
-                                  chrome.carouselAria,
-                                ),
-                                aspectRatio: 16 / 10,
-                              ),
+                  softCommunityJoinTitle(chrome.joinTitle),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                    );
-                  },
                 ),
+                const SizedBox(height: 8),
                 Text(
-                  ev.title,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  ev.statusLabel.isNotEmpty
-                      ? ev.statusLabel
-                      : chrome.emptyValue,
+                  softCommunityJoinBlurb(chrome.joinBlurb),
                   style: TextStyle(color: tokens.onSurfaceMuted),
                 ),
-                if (ev.description.trim().isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  if (chrome.detailDescriptionLabel.trim().isNotEmpty)
-                    Text(
-                      chrome.detailDescriptionLabel.trim(),
-                      style: TextStyle(
-                        color: tokens.onSurfaceMuted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                    labelText: softCommunityCodeLabel(chrome.codeLabel),
+                    hintText:
+                        softCommunityCodePlaceholder(chrome.codePlaceholder),
+                    border: const OutlineInputBorder(),
+                    errorText: _joinAttempted && _codeCtrl.text.trim().isEmpty
+                        ? (chrome.errCodeRequired.isNotEmpty
+                            ? softCommunityErrCodeRequired(
+                                chrome.errCodeRequired)
+                            : null)
+                        : null,
+                    suffixIcon: _loadingEvent
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : null,
+                  ),
+                  onChanged: _onCodeChanged,
+                  onSubmitted: (_) => _lookup(_codeCtrl.text),
+                ),
+                if (ev != null && !ev.isFreeEntry) ...[
+                  const SizedBox(height: 12),
                   Text(
-                    ev.description.trim(),
+                    [
+                      ev.entryFeeAmount != null
+                          ? '${ev.entryFeeAmount}'
+                          : chrome.emptyValue,
+                      chrome.amountCurrencySeparator,
+                      ev.entryFeeCurrency.trim().isNotEmpty
+                          ? ev.entryFeeCurrency
+                          : chrome.emptyValue,
+                    ].join(),
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontSize: 13,
-                      height: 1.35,
+                      color: tokens.gold,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
-                ],
-                Builder(
-                  builder: (context) {
-                    final poolLines = hostedEventPrizePoolLines(
-                      ev,
-                      PrizePoolCardLabels.fromPlayer(chrome),
-                    );
-                    final empty = chrome.emptyValue;
-                    final approved = ev.approvedCount != null
-                        ? '${ev.approvedCount}'
-                        : empty;
-                    final playersLbl =
-                        softTournamentsPlayersLabel(chrome.playersLabel);
-                    final fillRight = seatCapFillRight(
-                      ev.maxPlayers,
-                      ev.seatCapUnlimited,
-                      chrome.unlimitedPlayersLabel,
-                    );
-                    final playersLine = fillRight != null
-                        ? '$approved/$fillRight $playersLbl'.trim()
-                        : '$approved $playersLbl'.trim();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final line in poolLines) ...[
+                  Builder(
+                    builder: (context) {
+                      final payBlurb = softCommunityJoinStatusMessage(
+                        chrome.entryFeePayBlurb,
+                      );
+                      if (payBlurb.isEmpty) return const SizedBox.shrink();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           const SizedBox(height: 4),
                           Text(
-                            line,
+                            payBlurb,
                             style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
+                              color: tokens.onSurfaceMuted,
                               fontSize: 13,
-                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
-                        const SizedBox(height: 4),
-                        Text(
-                          playersLine,
-                          style: TextStyle(
-                            color: tokens.onSurfaceMuted,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-                if (() {
-                  final pub =
-                      (_catalog?.hostedEventPublicVisibility ?? '').trim();
-                  final priv =
-                      (_catalog?.hostedEventPrivateVisibility ?? '').trim();
-                  return (pub.isNotEmpty && ev.visibility == pub) ||
-                      (priv.isNotEmpty && ev.visibility == priv);
-                }()) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    () {
-                      final pub =
-                          (_catalog?.hostedEventPublicVisibility ?? '').trim();
-                      if (pub.isNotEmpty && ev.visibility == pub) {
-                        return softCommunityVisibilityPublicBlurb(
-                          chrome.visibilityPublicBlurb,
-                        );
-                      }
-                      return softCommunityVisibilityPrivateBlurb(
-                        chrome.visibilityPrivateBlurb,
-                      );
-                    }(),
-                    style: TextStyle(
-                      color: tokens.onSurfaceMuted,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (() {
-                  final pub =
-                      (_catalog?.hostedEventPublicVisibility ?? '').trim();
-                  return pub.isNotEmpty && ev.visibility == pub;
-                }()) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    softCommunityJoinStatusMessage(
-                      (_catalog?.publicEventMatchesRated ?? false)
-                          ? chrome.publicRatedOnBlurb
-                          : chrome.publicRatedOffBlurb,
-                    ),
-                    style: TextStyle(
-                      color: tokens.onSurfaceMuted,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (auth.isAuthenticated) ...[
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () => _report(ev),
-                    child: Text(softCommunityReportAction(chrome.reportAction)),
-                  ),
-                ],
-                if (_entries.any((e) => e.placement != null)) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    softCommunityWinnersTitle(chrome.winnersTitle),
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (chrome.shareResultAction.isNotEmpty)
-                        OutlinedButton(
-                          onPressed: () => _shareWinnersText(chrome),
-                          child: Text(
-                            softCommunityShareResultAction(
-                                chrome.shareResultAction),
-                          ),
-                        ),
-                      if (_resultCardImageReady(chrome)) ...[
-                        OutlinedButton(
-                          onPressed: () =>
-                              _shareResultCardImage(chrome, preferShare: true),
-                          child: Text(
-                            softCommunityResultCardShareImageAction(
-                              chrome.resultCardShareImageAction,
-                            ),
-                          ),
-                        ),
-                        OutlinedButton(
-                          onPressed: () =>
-                              _shareResultCardImage(chrome, preferShare: false),
-                          child: Text(
-                            softCommunityResultCardDownloadAction(
-                              chrome.resultCardDownloadAction,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  EventWinnersBoard(
-                    title: '',
-                    entries: _entries,
-                    emptyValue: chrome.emptyValue,
-                    logoUrl: _event?.logoUrl,
-                    sponsorLogoUrl: _event?.sponsorLogoUrl,
-                    sponsorName: _event?.sponsorName,
-                  ),
-                ],
-                if (_showStandingsSection()) ...[
-                  const SizedBox(height: 16),
-                  if (_standingsLoading)
-                    const LinearProgressIndicator()
-                  else
-                    EventStandingsView(
-                      standings: _standings,
-                      standingsTitle: chrome.standingsTitle,
-                      playedLabel: chrome.standingsPlayedLabel,
-                      winsLabel: chrome.standingsWinsLabel,
-                      lossesLabel: chrome.standingsLossesLabel,
-                      pointsLabel: chrome.standingsPointsLabel,
-                      emptyValue: chrome.emptyValue,
-                      groupLabelTemplate: chrome.groupLabelTemplate,
-                    ),
-                ],
-                if (_bracket.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  EventBracketView(
-                    matches: _bracket,
-                    bracketTitle:
-                        softCommunityBracketTitle(chrome.bracketTitle),
-                    startGameAction: '',
-                    openMatchAction:
-                        softCommunitySpectateAction(chrome.spectateAction),
-                    metaSeparator: chrome.metaSeparator,
-                    byeLabel: chrome.bracketByeLabel,
-                    vsLabel: chrome.bracketVsLabel,
-                    emptySeatLabel: chrome.bracketEmptySeat,
-                    emptyValue: chrome.emptyValue,
-                    phaseGroupLabel: chrome.phaseGroupLabel,
-                    phaseKnockoutLabel: chrome.phaseKnockoutLabel,
-                    phaseSwissLabel: chrome.phaseSwissLabel,
-                    phaseRoundRobinLabel: chrome.phaseRoundRobinLabel,
-                    groupLabelTemplate: chrome.groupLabelTemplate,
-                    swissRoundLabelTemplate: chrome.swissRoundLabelTemplate,
-                    phaseGroupId: _catalog?.hostedEventPhaseGroup ?? '',
-                    phaseKnockoutId: _catalog?.hostedEventPhaseKnockout ?? '',
-                    phaseSwissId: _catalog?.hostedEventPhaseSwiss ?? '',
-                    phaseRoundRobinId:
-                        _catalog?.hostedEventPhaseRoundRobin ?? '',
-                    pageCardPad: chrome.pageCardPad,
-                    pageCardGap: chrome.pageCardGap,
-                    onOpenMatch: (m) {
-                      final gid = (m.gameId ?? '').trim();
-                      if (gid.isEmpty) return;
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SpectatePage(
-                            accessToken: widget.accessToken,
-                            initialGameId: gid,
-                          ),
-                        ),
                       );
                     },
                   ),
                 ],
-              ],
-              if (_catalog?.publicEventsEnabled == true &&
-                  softCommunityPublicListTitle(chrome.publicListTitle)
-                      .isNotEmpty) ...[
-                const SizedBox(height: 28),
-                // Browse lives on Tournaments → Community (no second public list).
-                if (softCommunityPublicListBlurb(chrome.publicListBlurb)
-                    .isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      softCommunityPublicListBlurb(chrome.publicListBlurb),
-                      style: TextStyle(
-                        color: damaColorsOf(context).onSurfaceMuted,
-                        fontSize: 13,
+                if (showTopUp) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    softCommunityJoinStatusMessage(chrome.insufficientEntryFee),
+                    style: TextStyle(color: tokens.danger),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_payChrome != null &&
+                      wallet.routeProvider != 'manual_transfer') ...[
+                    TextField(
+                      controller: _amountCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: _payChrome!.amountLabel,
+                        hintText: _payChrome!.amountPlaceholder,
+                        border: const OutlineInputBorder(),
+                      ),
+                      onChanged: (v) {
+                        final s = sanitizeDecimalInput(v);
+                        if (s != v) {
+                          _amountCtrl.value = TextEditingValue(
+                            text: s,
+                            selection:
+                                TextSelection.collapsed(offset: s.length),
+                          );
+                        }
+                        context.read<WalletCubit>().setAmountText(s);
+                        setState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton(
+                      onPressed: wallet.loading ||
+                              wallet.country.trim().isEmpty ||
+                              parsePositiveDecimal(_amountCtrl.text) == null
+                          ? null
+                          : () => context.read<WalletCubit>().checkout(),
+                      child: Text(
+                        wallet.loading
+                            ? (_payChrome!.checkoutPending.trim().isNotEmpty
+                                ? _payChrome!.checkoutPending
+                                : _payChrome!.checkoutAction)
+                            : _payChrome!.checkoutAction,
                       ),
                     ),
+                  ],
+                  const SizedBox(height: 8),
+                  if (chrome.topUpHref.trim().isNotEmpty)
+                    OutlinedButton(
+                      onPressed: () {
+                        final href = withWalletFocusParam(
+                          chrome.topUpHref.trim(),
+                          'topup',
+                        );
+                        if (isWalletHrefPath(href)) {
+                          final focus = portalWalletFocusFromHref(href);
+                          final base = moneyBasePathFromHref(href);
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => WalletPage(
+                                token: widget.accessToken,
+                                moneyBasePath: base,
+                                showOrganizerPayoutBlurb: base.isNotEmpty,
+                                focusPayout: focus.focusPayout,
+                                focusTopUp: focus.focusTopUp,
+                                focusPayoutHistoryId: focus.historyId,
+                              ),
+                            ),
+                          );
+                        } else {
+                          navigateNotificationHref(
+                            context,
+                            href: href,
+                            accessToken: widget.accessToken,
+                          );
+                        }
+                      },
+                      child: Text(chrome.topUpAction),
+                    ),
+                ],
+                if (_statusBlurb.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _statusBlurb,
+                    style: TextStyle(
+                      color: _statusIsError ? tokens.danger : tokens.gold,
+                    ),
                   ),
-                OutlinedButton(
-                  onPressed: () {
-                    navigateNotificationHref(
-                      context,
-                      href: '/?view=tournaments&source=community',
-                      accessToken: widget.accessToken,
-                    );
-                  },
-                  child: Text(
-                    softCommunityPublicListTitle(chrome.publicListTitle),
+                ],
+                // Web JoinPanel: Join CTA after event card / top-up (not above).
+                const SizedBox(height: 12),
+                if (!auth.isAuthenticated)
+                  FutureBuilder<AuthProvidersChrome?>(
+                    future: fetchAuthProvidersChrome(),
+                    builder: (context, snap) {
+                      final label = (snap.data?.navSignInLabel ?? '').trim();
+                      if (label.isEmpty) return const SizedBox.shrink();
+                      return TextButton(
+                        onPressed: () => showSignInDialog(context),
+                        child: Text(label),
+                      );
+                    },
+                  )
+                else
+                  FilledButton(
+                    onPressed: _joining
+                        ? null
+                        : () => _join(context.read<WalletCubit>()),
+                    child: _joining
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(softTournamentsJoinAction(chrome.joinAction)),
                   ),
-                ),
+                if (ev != null) ...[
+                  const SizedBox(height: 20),
+                  Builder(
+                    builder: (context) {
+                      final images = ev.carouselImages;
+                      final brand = (ev.brandColor ?? '').trim();
+                      Color fallback = tokens.surfaceMuted;
+                      if (brand.isNotEmpty) {
+                        final hex =
+                            brand.startsWith('#') ? brand.substring(1) : brand;
+                        final parsed = int.tryParse(
+                          hex.length == 6 ? 'FF$hex' : hex,
+                          radix: 16,
+                        );
+                        if (parsed != null) fallback = Color(parsed);
+                      }
+                      if (images.isEmpty && brand.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: images.isEmpty
+                              ? AspectRatio(
+                                  aspectRatio: 16 / 10,
+                                  child: ColoredBox(color: fallback),
+                                )
+                              : GalleryCarousel(
+                                  images: images,
+                                  semanticsLabel: softCommunityCarouselAria(
+                                    chrome.carouselAria,
+                                  ),
+                                  aspectRatio: 16 / 10,
+                                ),
+                        ),
+                      );
+                    },
+                  ),
+                  Text(
+                    ev.title,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ev.statusLabel.isNotEmpty
+                        ? ev.statusLabel
+                        : chrome.emptyValue,
+                    style: TextStyle(color: tokens.onSurfaceMuted),
+                  ),
+                  if (ev.description.trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    if (chrome.detailDescriptionLabel.trim().isNotEmpty)
+                      Text(
+                        chrome.detailDescriptionLabel.trim(),
+                        style: TextStyle(
+                          color: tokens.onSurfaceMuted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    Text(
+                      ev.description.trim(),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                  Builder(
+                    builder: (context) {
+                      final poolLines = hostedEventPrizePoolLines(
+                        ev,
+                        PrizePoolCardLabels.fromPlayer(chrome),
+                      );
+                      final empty = chrome.emptyValue;
+                      final approved = ev.approvedCount != null
+                          ? '${ev.approvedCount}'
+                          : empty;
+                      final playersLbl =
+                          softTournamentsPlayersLabel(chrome.playersLabel);
+                      final fillRight = seatCapFillRight(
+                        ev.maxPlayers,
+                        ev.seatCapUnlimited,
+                        chrome.unlimitedPlayersLabel,
+                      );
+                      final playersLine = fillRight != null
+                          ? '$approved/$fillRight $playersLbl'.trim()
+                          : '$approved $playersLbl'.trim();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final line in poolLines) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              line,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 4),
+                          Text(
+                            playersLine,
+                            style: TextStyle(
+                              color: tokens.onSurfaceMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  if (() {
+                    final pub =
+                        (_catalog?.hostedEventPublicVisibility ?? '').trim();
+                    final priv =
+                        (_catalog?.hostedEventPrivateVisibility ?? '').trim();
+                    return (pub.isNotEmpty && ev.visibility == pub) ||
+                        (priv.isNotEmpty && ev.visibility == priv);
+                  }()) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      () {
+                        final pub =
+                            (_catalog?.hostedEventPublicVisibility ?? '')
+                                .trim();
+                        if (pub.isNotEmpty && ev.visibility == pub) {
+                          return softCommunityVisibilityPublicBlurb(
+                            chrome.visibilityPublicBlurb,
+                          );
+                        }
+                        return softCommunityVisibilityPrivateBlurb(
+                          chrome.visibilityPrivateBlurb,
+                        );
+                      }(),
+                      style: TextStyle(
+                        color: tokens.onSurfaceMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (() {
+                    final pub =
+                        (_catalog?.hostedEventPublicVisibility ?? '').trim();
+                    return pub.isNotEmpty && ev.visibility == pub;
+                  }()) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      softCommunityJoinStatusMessage(
+                        (_catalog?.publicEventMatchesRated ?? false)
+                            ? chrome.publicRatedOnBlurb
+                            : chrome.publicRatedOffBlurb,
+                      ),
+                      style: TextStyle(
+                        color: tokens.onSurfaceMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (auth.isAuthenticated) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: () => _report(ev),
+                      child:
+                          Text(softCommunityReportAction(chrome.reportAction)),
+                    ),
+                  ],
+                  if (_entries.any((e) => e.placement != null)) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      softCommunityWinnersTitle(chrome.winnersTitle),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (chrome.shareResultAction.isNotEmpty)
+                          OutlinedButton(
+                            onPressed: () => _shareWinnersText(chrome),
+                            child: Text(
+                              softCommunityShareResultAction(
+                                  chrome.shareResultAction),
+                            ),
+                          ),
+                        if (_resultCardImageReady(chrome)) ...[
+                          OutlinedButton(
+                            onPressed: () => _shareResultCardImage(chrome,
+                                preferShare: true),
+                            child: Text(
+                              softCommunityResultCardShareImageAction(
+                                chrome.resultCardShareImageAction,
+                              ),
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: () => _shareResultCardImage(chrome,
+                                preferShare: false),
+                            child: Text(
+                              softCommunityResultCardDownloadAction(
+                                chrome.resultCardDownloadAction,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    EventWinnersBoard(
+                      title: '',
+                      entries: _entries,
+                      emptyValue: chrome.emptyValue,
+                      logoUrl: _event?.logoUrl,
+                      sponsorLogoUrl: _event?.sponsorLogoUrl,
+                      sponsorName: _event?.sponsorName,
+                    ),
+                  ],
+                  if (_showStandingsSection()) ...[
+                    const SizedBox(height: 16),
+                    if (_standingsLoading)
+                      const LinearProgressIndicator()
+                    else
+                      EventStandingsView(
+                        standings: _standings,
+                        standingsTitle: chrome.standingsTitle,
+                        playedLabel: chrome.standingsPlayedLabel,
+                        winsLabel: chrome.standingsWinsLabel,
+                        lossesLabel: chrome.standingsLossesLabel,
+                        pointsLabel: chrome.standingsPointsLabel,
+                        emptyValue: chrome.emptyValue,
+                        groupLabelTemplate: chrome.groupLabelTemplate,
+                      ),
+                  ],
+                  if (_bracket.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    EventBracketView(
+                      matches: _bracket,
+                      bracketTitle:
+                          softCommunityBracketTitle(chrome.bracketTitle),
+                      startGameAction: '',
+                      openMatchAction:
+                          softCommunitySpectateAction(chrome.spectateAction),
+                      metaSeparator: chrome.metaSeparator,
+                      byeLabel: chrome.bracketByeLabel,
+                      vsLabel: chrome.bracketVsLabel,
+                      emptySeatLabel: chrome.bracketEmptySeat,
+                      emptyValue: chrome.emptyValue,
+                      phaseGroupLabel: chrome.phaseGroupLabel,
+                      phaseKnockoutLabel: chrome.phaseKnockoutLabel,
+                      phaseSwissLabel: chrome.phaseSwissLabel,
+                      phaseRoundRobinLabel: chrome.phaseRoundRobinLabel,
+                      groupLabelTemplate: chrome.groupLabelTemplate,
+                      swissRoundLabelTemplate: chrome.swissRoundLabelTemplate,
+                      phaseGroupId: _catalog?.hostedEventPhaseGroup ?? '',
+                      phaseKnockoutId: _catalog?.hostedEventPhaseKnockout ?? '',
+                      phaseSwissId: _catalog?.hostedEventPhaseSwiss ?? '',
+                      phaseRoundRobinId:
+                          _catalog?.hostedEventPhaseRoundRobin ?? '',
+                      pageCardPad: chrome.pageCardPad,
+                      pageCardGap: chrome.pageCardGap,
+                      onOpenMatch: (m) {
+                        final gid = (m.gameId ?? '').trim();
+                        if (gid.isEmpty) return;
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SpectatePage(
+                              accessToken: widget.accessToken,
+                              initialGameId: gid,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+                if (_catalog?.publicEventsEnabled == true &&
+                    softCommunityPublicListTitle(chrome.publicListTitle)
+                        .isNotEmpty) ...[
+                  const SizedBox(height: 28),
+                  // Browse lives on Tournaments → Community (no second public list).
+                  if (softCommunityPublicListBlurb(chrome.publicListBlurb)
+                      .isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        softCommunityPublicListBlurb(chrome.publicListBlurb),
+                        style: TextStyle(
+                          color: damaColorsOf(context).onSurfaceMuted,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  OutlinedButton(
+                    onPressed: () {
+                      navigateNotificationHref(
+                        context,
+                        href: '/?view=tournaments&source=community',
+                        accessToken: widget.accessToken,
+                      );
+                    },
+                    child: Text(
+                      softCommunityPublicListTitle(chrome.publicListTitle),
+                    ),
+                  ),
+                ],
               ],
-            ],
-          );
-        },
+            );
+          },
+        ),
       ),
     );
 

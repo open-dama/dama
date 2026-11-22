@@ -41,6 +41,7 @@ class ManualTransferPage extends StatelessWidget {
       create: (_) {
         final cubit = WalletCubit(
           accessToken: accessToken,
+          moneyBasePath: moneyBasePath,
           config: config,
         );
         final prefill = initialAmount.trim();
