@@ -19,10 +19,10 @@ function ShimmerBlock({
 }
 
 /**
- * Original product shimmer (pre board-dark flush tint): 8×8 card shell.
- * Cells = `.dama-shimmer` track only - never `--dama-board-dark` / board palette.
+ * Live dama board is 10×10 - shimmer plane matches that grid.
+ * Card shell + `.dama-shimmer` track only - never `--dama-board-dark` / board palette.
  */
-const BOARD_SKELETON_SIZE = 8;
+const BOARD_SKELETON_SIZE = 10;
 
 const BOARD_SKELETON_CELLS: { row: number; col: number }[] = (() => {
   const cells: { row: number; col: number }[] = [];

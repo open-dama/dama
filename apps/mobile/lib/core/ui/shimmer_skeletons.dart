@@ -742,10 +742,10 @@ class BoardSeatBarSkeleton extends StatelessWidget {
 }
 
 /// Checkerboard plane only (web [BoardAreaSkeleton]).
-/// Standard shimmer card shell - no board-palette tint.
+/// Standard shimmer card shell - no board-palette tint. Grid is 10×10 like live dama.
 class BoardAreaSkeleton extends StatelessWidget {
-  /// Default 8×8 matches original web card-shell shimmer (not live 10×10 board).
-  const BoardAreaSkeleton({super.key, this.wrapRoot = true, this.size = 8});
+  /// Default 10×10 matches the live dama board grid (card shell, not board-dark tint).
+  const BoardAreaSkeleton({super.key, this.wrapRoot = true, this.size = 10});
 
   final bool wrapRoot;
   final int size;
