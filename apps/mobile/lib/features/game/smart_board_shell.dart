@@ -71,6 +71,9 @@ class SmartBoardShell extends StatefulWidget {
   final bool popSignal;
   final Widget child;
 
+  /// Play-rail compose sheet is open - tuck the popped board (web SmartBoardHost parity).
+  static final ValueNotifier<bool> suppressExpand = ValueNotifier<bool>(false);
+
   @override
   State<SmartBoardShell> createState() => _SmartBoardShellState();
 }
@@ -101,12 +104,22 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   }
 
   bool _wantExpanded(BuildContext context) {
-    return _isCompact(context) && widget.active && !_collapsed;
+    return _isCompact(context) &&
+        widget.active &&
+        !_collapsed &&
+        !SmartBoardShell.suppressExpand.value;
+  }
+
+  void _onSuppressExpand() {
+    if (!mounted) return;
+    setState(() {});
+    _syncPortal(force: true);
   }
 
   @override
   void initState() {
     super.initState();
+    SmartBoardShell.suppressExpand.addListener(_onSuppressExpand);
     _anim = AnimationController(vsync: this, duration: _animMs);
     _fade = CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic);
     _slide = Tween<Offset>(
@@ -269,6 +282,7 @@ class _SmartBoardShellState extends State<SmartBoardShell>
 
   @override
   void dispose() {
+    SmartBoardShell.suppressExpand.removeListener(_onSuppressExpand);
     if (_portal.isShowing) _portal.hide();
     if (_fabPortal.isShowing) _fabPortal.hide();
     _anim.dispose();
@@ -393,10 +407,14 @@ class _SmartBoardShellState extends State<SmartBoardShell>
         overlayChildBuilder: (context) {
           if (!boardInOverlay) return const SizedBox.shrink();
           // Pop covers app bar (web top-0 / z-60 parity). Hug section sizing only.
+          // Leave play-rail min height so character fields stay tappable under the
+          // popped board (web PLAY_RAIL_MIN_PX / --dama-play-rail-min parity).
           final pad = MediaQuery.paddingOf(context);
           final stableH =
               media.height; // MediaQuery size is stable vs viewInsets churn
-          final maxBoardH = (stableH - pad.bottom - 56).clamp(280.0, stableH);
+          const railMin = 220.0;
+          final maxBoardH =
+              (stableH - pad.bottom - railMin).clamp(280.0, stableH);
           return Align(
             alignment: Alignment.topCenter,
             child: FadeTransition(

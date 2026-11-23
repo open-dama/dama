@@ -6,6 +6,7 @@ import {
 } from "@/components/play/board-stack-layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import {
   type CSSProperties,
   type ReactNode,
@@ -24,6 +25,8 @@ const MAX_LG_MQ = "(max-width: 1023px)";
 const DBL_MS = 320;
 const DBL_PX = 28;
 const TOGGLE_LOCK_MS = 900;
+/** Keep play-rail character fields tappable under a popped board (Flutter railH parity). */
+const PLAY_RAIL_MIN_PX = 220;
 
 function subscribeMaxLg(onStoreChange: () => void) {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -31,7 +34,15 @@ function subscribeMaxLg(onStoreChange: () => void) {
   }
   const mq = window.matchMedia(MAX_LG_MQ);
   mq.addEventListener("change", onStoreChange);
-  return () => mq.removeEventListener("change", onStoreChange);
+  window.addEventListener("resize", onStoreChange);
+  // Same as hooks/useMaxLg: SSR false must not stick on a real max-lg viewport.
+  onStoreChange();
+  const raf = window.requestAnimationFrame(() => onStoreChange());
+  return () => {
+    window.cancelAnimationFrame(raf);
+    mq.removeEventListener("change", onStoreChange);
+    window.removeEventListener("resize", onStoreChange);
+  };
 }
 
 function getMaxLgSnapshot() {
@@ -209,6 +220,9 @@ function MaximizeFabPortal({
  */
 export function SmartBoardHost({ active, popSignal = false, className, children }: Props) {
   const maxLg = useMaxLg();
+  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
+  const suppressSmartBoardPop = useShellChromeStore((s) => s.suppressSmartBoardPop);
+  const tuckBoard = railComposeSheet || suppressSmartBoardPop;
   const [expanded, setExpanded] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const [spacerPx, setSpacerPx] = useState(0);
@@ -223,6 +237,14 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
   useEffect(() => {
     setPortalReady(true);
   }, []);
+
+  // Compose sheet / FAB play-rail sheet own the viewport - tuck the popped board
+  // so character fields are not trapped under the z-60 board overlay.
+  useEffect(() => {
+    if (!tuckBoard) return;
+    setExpanded(false);
+    lastTapRef.current = null;
+  }, [tuckBoard]);
 
   // Board gestures / wheel must not rubber-band or scroll the shell / sticky header.
   // Always armed on phone/tablet (maxLg) - including idle shimmer / inactive hosts.
@@ -260,8 +282,11 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
 
   useEffect(() => {
     if (active && !prevActiveRef.current) {
-      setExpanded(true);
-      toggleLockUntilRef.current = Date.now() + TOGGLE_LOCK_MS;
+      // Do not pop over an open compose / FAB play-rail sheet.
+      if (!tuckBoard) {
+        setExpanded(true);
+        toggleLockUntilRef.current = Date.now() + TOGGLE_LOCK_MS;
+      }
     }
     if (!active) {
       setExpanded(false);
@@ -271,7 +296,7 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       prevPopRef.current = false;
     }
     prevActiveRef.current = active;
-  }, [active]);
+  }, [active, tuckBoard]);
 
   // Match/spectate start: pop maximized even if the idle board was already active+minimized.
   useEffect(() => {
@@ -280,14 +305,19 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       return;
     }
     if (popSignal && !prevPopRef.current) {
-      setExpanded(true);
-      toggleLockUntilRef.current = Date.now() + TOGGLE_LOCK_MS;
+      if (!tuckBoard) {
+        setExpanded(true);
+        toggleLockUntilRef.current = Date.now() + TOGGLE_LOCK_MS;
+      }
     }
     prevPopRef.current = popSignal;
-  }, [active, popSignal]);
+  }, [active, popSignal, tuckBoard]);
 
   const live = Boolean(maxLg && active);
-  const topped = Boolean(live && expanded);
+  // Tuck on the same render as compose/FAB open (do not wait for useEffect
+  // setExpanded) so the z-60 portal drops before the sheet paints - avoids a
+  // layout thrash that stole first-tap focus from the text field.
+  const topped = Boolean(live && expanded && !tuckBoard);
   // Live min + expanded: ALWAYS width-square hug. Never budget-measure host height
   // into side (that feedback is the infinite zoom / postage-stamp collapse).
   const layoutMode: BoardStackLayoutMode = live ? "hug" : "budget";
@@ -315,9 +345,17 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       // Document spacer = stack bottom − wrap top (not raw stackH). Fixed pop
       // starts above the wrap (covers header); stackH alone leaves a gap under
       // the seat that shows as a green/empty band before the rail.
+      // Cap spacer so the sibling play rail keeps PLAY_RAIL_MIN_PX - otherwise a
+      // full-height pop clips the rail and character fields cannot open compose.
       const stackBottom = Math.round(stack.getBoundingClientRect().bottom);
       const wrapTop = Math.max(0, Math.round(wrap.getBoundingClientRect().top));
-      const next = Math.max(0, stackBottom - wrapTop);
+      let next = Math.max(0, stackBottom - wrapTop);
+      const col = wrap.parentElement;
+      if (col) {
+        const colH = Math.round(col.getBoundingClientRect().height);
+        const maxSpacer = Math.max(0, colH - PLAY_RAIL_MIN_PX);
+        next = Math.min(next, maxSpacer);
+      }
       if (next < 1) return;
       setSpacerPx((prev) => (Math.abs(prev - next) <= 2 ? prev : next));
     };
@@ -342,8 +380,13 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
   const toggle = useCallback(() => {
     if (!live) return;
     if (Date.now() < toggleLockUntilRef.current) return;
+    // Compose / FAB sheet owns the viewport - keep board tucked.
+    if (tuckBoard) {
+      setExpanded(false);
+      return;
+    }
     setExpanded((v) => !v);
-  }, [live]);
+  }, [live, tuckBoard]);
 
   const onDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -405,8 +448,9 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
           // Inline/hug: full section width. Pop only: regular side inset (not edge-to-edge).
           !topped && "max-lg:px-0",
           topped
-            ? // Pop covers sticky header (z-50). Hug height; regular px inset for width.
-              "pointer-events-none fixed inset-x-0 top-0 z-[60] w-full max-w-none overflow-hidden bg-transparent pb-0 h-auto max-h-[calc(100svh-var(--dama-bottom-nav-height,0px)-2.75rem)] pt-[env(safe-area-inset-top,0px)] max-lg:px-3"
+            ? // Pop covers sticky header (z-50). Leave room for the play rail so
+              // character fields stay tappable (compose) under the popped board.
+              "pointer-events-none fixed inset-x-0 top-0 z-[60] w-full max-w-none overflow-hidden bg-transparent pb-0 h-auto max-h-[calc(100svh-var(--dama-bottom-nav-height,0px)-var(--dama-play-rail-min,13.75rem))] pt-[env(safe-area-inset-top,0px)] max-lg:px-3"
             : live
               ? "h-auto overflow-hidden"
               : "h-full overflow-hidden",

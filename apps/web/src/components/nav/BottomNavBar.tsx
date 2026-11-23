@@ -152,8 +152,9 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
   const [expanded, setExpanded] = useState(false);
   const mounted = useClientMounted();
   const immersiveChat = useShellChromeStore((s) => s.immersiveChat);
-  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
-  const hideBottomNav = immersiveChat || railComposeSheet;
+  // Compose sheet (z-70) covers the nav - do not unmount/zero --dama-bottom-nav-height
+  // on open (that post-paint layout jump dropped first-tap keyboard focus).
+  const hideBottomNav = immersiveChat;
   usePublishHeightCssVar(navRef, DAMA_BOTTOM_NAV_HEIGHT_VAR, !hideBottomNav);
 
   useLayoutEffect(() => {

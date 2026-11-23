@@ -24,26 +24,10 @@ Future<void> showPlayRailSheet(BuildContext context) {
     barrierDismissible: true,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: Colors.black54,
-    transitionDuration: const Duration(milliseconds: 220),
+    transitionDuration: const Duration(milliseconds: 280),
     pageBuilder: (ctx, anim, secondary) {
-      // pageBuilder does not rebuild on keyboard - PlayRailPanel handles
-      // viewInsets via playRailScrollPadding + ensureTextFieldAboveKeyboard.
-      final width = MediaQuery.sizeOf(ctx).width;
-      final sheetW = width < 440 ? width : 440.0;
-      return SafeArea(
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: Material(
-            elevation: 8,
-            color: Theme.of(ctx).colorScheme.surface,
-            child: SizedBox(
-              width: sheetW,
-              height: MediaQuery.sizeOf(ctx).height,
-              child: const _PlayRailSheetBody(),
-            ),
-          ),
-        ),
-      );
+      // Host owns width/compose so character focus can expand smoothly.
+      return const _PlayRailSheetHost();
     },
     transitionBuilder: (ctx, anim, secondary, child) {
       final offset = Tween<Offset>(
@@ -55,8 +39,159 @@ Future<void> showPlayRailSheet(BuildContext context) {
   );
 }
 
+/// Side sheet that expands to a full-bleed compose panel on character text focus.
+class _PlayRailSheetHost extends StatefulWidget {
+  const _PlayRailSheetHost();
+
+  @override
+  State<_PlayRailSheetHost> createState() => _PlayRailSheetHostState();
+}
+
+class _PlayRailSheetHostState extends State<_PlayRailSheetHost> {
+  bool _compose = false;
+  double _composeDrag = 0;
+
+  /// Keep rail body State (and text focus) across compose chrome insert.
+  final GlobalKey _railBodyKey = GlobalKey();
+
+  void _setCompose(bool open) {
+    if (_compose == open) return;
+    final prior = FocusManager.instance.primaryFocus;
+    setState(() {
+      _compose = open;
+      _composeDrag = 0;
+    });
+    if (!open) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_compose) return;
+      prior?.requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _compose) prior?.requestFocus();
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final sheetW = size.width < 440 ? size.width : 440.0;
+    final tokens = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Always mount backdrop so the rail keeps a stable Stack slot (focus).
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !_compose,
+              child: AnimatedOpacity(
+                opacity: _compose ? 1 : 0,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOut,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _setCompose(false),
+                  // Do not compete with the text field for focus on pointer down.
+                  onTapDown: (_) {},
+                  child: const ColoredBox(color: Color(0x73000000)),
+                ),
+              ),
+            ),
+          ),
+          AnimatedPositioned(
+            key: const ValueKey<String>('dama-fab-play-rail-compose'),
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            top: _compose ? _composeDrag : 0,
+            bottom: _compose ? -_composeDrag : 0,
+            right: 0,
+            width: _compose ? size.width : sheetW,
+            child: Material(
+              elevation: _compose ? 12 : 8,
+              color: tokens.surface,
+              borderRadius: _compose
+                  ? const BorderRadius.vertical(top: Radius.circular(16))
+                  : BorderRadius.zero,
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Always keep chrome layout size (opacity only) so open does not
+                  // push the focused field and drop the keyboard.
+                  IgnorePointer(
+                    ignoring: !_compose,
+                    child: Opacity(
+                      opacity: _compose ? 1 : 0,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 6, 4, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onVerticalDragUpdate: (d) {
+                                  setState(() {
+                                    _composeDrag = (_composeDrag + d.delta.dy)
+                                        .clamp(0.0, 240.0);
+                                  });
+                                },
+                                onVerticalDragEnd: (_) {
+                                  if (_composeDrag >= 88) {
+                                    _setCompose(false);
+                                  } else {
+                                    setState(() => _composeDrag = 0);
+                                  }
+                                },
+                                child: Column(
+                                  children: [
+                                    Container(
+                                      width: 40,
+                                      height: 4,
+                                      decoration: BoxDecoration(
+                                        color: tokens.outlineVariant,
+                                        borderRadius: BorderRadius.circular(99),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: MaterialLocalizations.of(context)
+                                  .closeButtonTooltip,
+                              onPressed: () => _setCompose(false),
+                              icon: const Icon(Icons.close, size: 20),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _PlayRailSheetBody(
+                      key: _railBodyKey,
+                      onComposeSheetChanged: _setCompose,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlayRailSheetBody extends StatefulWidget {
-  const _PlayRailSheetBody();
+  const _PlayRailSheetBody({super.key, this.onComposeSheetChanged});
+
+  final ValueChanged<bool>? onComposeSheetChanged;
 
   @override
   State<_PlayRailSheetBody> createState() => _PlayRailSheetBodyState();
@@ -323,6 +458,7 @@ class _PlayRailSheetBodyState extends State<_PlayRailSheetBody> {
               setState(() => _piecePaletteId = id);
               await writePiecePaletteId(id);
             },
+            onComposeSheetChanged: widget.onComposeSheetChanged,
           );
         },
       ),

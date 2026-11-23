@@ -17,6 +17,12 @@ type ShellChromeState = {
    */
   railComposeSheet: boolean;
   setRailComposeSheet: (value: boolean) => void;
+  /**
+   * Tuck SmartBoardHost pop (e.g. tournaments FAB play-rail Sheet open)
+   * so the rail is not trapped under the maximized board (z-60).
+   */
+  suppressSmartBoardPop: boolean;
+  setSuppressSmartBoardPop: (value: boolean) => void;
 };
 
 export const useShellChromeStore = create<ShellChromeState>((set, get) => ({
@@ -29,5 +35,10 @@ export const useShellChromeStore = create<ShellChromeState>((set, get) => ({
   setRailComposeSheet: (railComposeSheet) => {
     if (get().railComposeSheet === railComposeSheet) return;
     set({ railComposeSheet });
+  },
+  suppressSmartBoardPop: false,
+  setSuppressSmartBoardPop: (suppressSmartBoardPop) => {
+    if (get().suppressSmartBoardPop === suppressSmartBoardPop) return;
+    set({ suppressSmartBoardPop });
   },
 }));

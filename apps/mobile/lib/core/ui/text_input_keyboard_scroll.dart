@@ -125,7 +125,29 @@ class _KeyboardAwareTextFieldState extends State<KeyboardAwareTextField> {
   void _onFocusChange() {
     if (!_node.hasFocus || !mounted) return;
     widget.onComposeFocus?.call();
+    _keepFocusAfterCompose();
     ensureTextFieldAboveKeyboard(context);
+  }
+
+  /// Compose-sheet layout can remount ancestors; re-claim focus so the first
+  /// tap stays typeable without a second tap.
+  void _keepFocusAfterCompose() {
+    void reclaim() {
+      if (!mounted) return;
+      if (!_node.hasFocus) {
+        _node.requestFocus();
+      }
+      ensureTextFieldAboveKeyboard(context);
+    }
+
+    // Immediate reclaim inside the tap gesture, then after layout/animation.
+    reclaim();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      reclaim();
+      WidgetsBinding.instance.addPostFrameCallback((_) => reclaim());
+    });
+    Future<void>.delayed(const Duration(milliseconds: 48), reclaim);
+    Future<void>.delayed(const Duration(milliseconds: 340), reclaim);
   }
 
   @override
@@ -142,7 +164,11 @@ class _KeyboardAwareTextFieldState extends State<KeyboardAwareTextField> {
       onSubmitted: widget.onSubmitted,
       onTapOutside: widget.onTapOutside,
       onTap: () {
+        // Expand compose first, then focus in the same gesture (web flushSync parity)
+        // so the field stays typeable without a second tap.
         widget.onComposeFocus?.call();
+        if (!_node.hasFocus) _node.requestFocus();
+        _keepFocusAfterCompose();
         ensureTextFieldAboveKeyboard(context);
       },
     );

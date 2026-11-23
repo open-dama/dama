@@ -1424,15 +1424,38 @@ class _HomePlayHubState extends State<_HomePlayHub> {
   bool _composeSheet = false;
   double _composeDrag = 0;
 
+  /// Stable identity so compose chrome insert does not remount the rail (focus stay).
+  final GlobalKey _playRailPanelKey = GlobalKey();
+
   void _setComposeSheet(bool open) {
     if (_composeSheet == open) return;
+    final prior = FocusManager.instance.primaryFocus;
     setState(() {
       _composeSheet = open;
       _composeDrag = 0;
     });
+    // Tuck SmartBoardShell pop so compose sits above the board (web parity).
+    SmartBoardShell.suppressExpand.value = open;
     if (!open) {
       FocusManager.instance.primaryFocus?.unfocus();
+      return;
     }
+    // Re-claim the field that opened compose after the sheet layout settles.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_composeSheet) return;
+      prior?.requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _composeSheet) prior?.requestFocus();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    if (SmartBoardShell.suppressExpand.value) {
+      SmartBoardShell.suppressExpand.value = false;
+    }
+    super.dispose();
   }
 
   @override
@@ -1457,6 +1480,7 @@ class _HomePlayHubState extends State<_HomePlayHub> {
           final board = boardPaletteById(w.boardPaletteId);
           final piece = piecePaletteById(w.piecePaletteId);
           final panel = PlayRailPanel(
+            key: _playRailPanelKey,
             railChrome: w.railChrome,
             playChrome: w.chrome,
             clockLabel: w.clockLabel,
@@ -1560,51 +1584,59 @@ class _HomePlayHubState extends State<_HomePlayHub> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_composeSheet)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 6, 4, 4),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onVerticalDragUpdate: (d) {
-                                  setState(() {
-                                    _composeDrag = (_composeDrag + d.delta.dy)
-                                        .clamp(0.0, 240.0);
-                                  });
-                                },
-                                onVerticalDragEnd: (_) {
-                                  if (_composeDrag >= 88) {
-                                    _setComposeSheet(false);
-                                  } else {
-                                    setState(() => _composeDrag = 0);
-                                  }
-                                },
-                                child: Column(
-                                  children: [
-                                    Container(
-                                      width: 40,
-                                      height: 4,
-                                      decoration: BoxDecoration(
-                                        color: tokens.outlineVariant,
-                                        borderRadius: BorderRadius.circular(99),
+                    // Always keep chrome layout size (opacity only) so open does not
+                    // push the focused field and drop the keyboard.
+                    IgnorePointer(
+                      ignoring: !_composeSheet,
+                      child: Opacity(
+                        opacity: _composeSheet ? 1 : 0,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 6, 4, 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onVerticalDragUpdate: (d) {
+                                    setState(() {
+                                      _composeDrag = (_composeDrag + d.delta.dy)
+                                          .clamp(0.0, 240.0);
+                                    });
+                                  },
+                                  onVerticalDragEnd: (_) {
+                                    if (_composeDrag >= 88) {
+                                      _setComposeSheet(false);
+                                    } else {
+                                      setState(() => _composeDrag = 0);
+                                    }
+                                  },
+                                  child: Column(
+                                    children: [
+                                      Container(
+                                        width: 40,
+                                        height: 4,
+                                        decoration: BoxDecoration(
+                                          color: tokens.outlineVariant,
+                                          borderRadius:
+                                              BorderRadius.circular(99),
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                  ],
+                                      const SizedBox(height: 4),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                            IconButton(
-                              tooltip: MaterialLocalizations.of(context)
-                                  .closeButtonTooltip,
-                              onPressed: () => _setComposeSheet(false),
-                              icon: const Icon(Icons.close, size: 20),
-                            ),
-                          ],
+                              IconButton(
+                                tooltip: MaterialLocalizations.of(context)
+                                    .closeButtonTooltip,
+                                onPressed: () => _setComposeSheet(false),
+                                icon: const Icon(Icons.close, size: 20),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
+                    ),
                     Expanded(child: panel),
                   ],
                 ),
@@ -1620,18 +1652,28 @@ class _HomePlayHubState extends State<_HomePlayHub> {
                       SizedBox(height: _composeSheet ? 0 : railH),
                     ],
                   ),
-                  if (_composeSheet)
-                    Positioned.fill(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _setComposeSheet(false),
-                        child: ColoredBox(
-                          color: Colors.black.withValues(alpha: 0.45),
+                  // Always mount backdrop so AnimatedPositioned keeps a stable
+                  // Stack slot (conditional insert remounted the rail / killed focus).
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      ignoring: !_composeSheet,
+                      child: AnimatedOpacity(
+                        opacity: _composeSheet ? 1 : 0,
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOut,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _setComposeSheet(false),
+                          child: ColoredBox(
+                            color: Colors.black.withValues(alpha: 0.45),
+                          ),
                         ),
                       ),
                     ),
+                  ),
                   AnimatedPositioned(
-                    duration: const Duration(milliseconds: 280),
+                    key: const ValueKey<String>('dama-play-rail-compose'),
+                    duration: const Duration(milliseconds: 320),
                     curve: Curves.easeOutCubic,
                     left: 0,
                     right: 0,

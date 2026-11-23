@@ -50,19 +50,29 @@ export const playHubFillHeightClass = "min-h-0 h-full max-h-full flex-1 overflow
  * lg+: aside is a fixed column; PlayRailScrollPort scrolls under frozen tabs.
  */
 export const playRailAsideClass =
-  "order-2 flex min-h-0 min-w-0 flex-1 flex-col isolate overscroll-contain bg-[var(--dama-panel)] max-lg:relative max-lg:overflow-y-auto max-lg:[-webkit-overflow-scrolling:touch] max-md:pb-[calc(var(--dama-bottom-nav-height,5.5rem)+var(--dama-bottom-pad-extra,0.75rem)+env(safe-area-inset-bottom,0px))] lg:h-full lg:max-h-full lg:overflow-hidden lg:pb-0";
+  "order-2 flex min-h-0 min-w-0 flex-1 flex-col isolate overscroll-contain bg-[var(--dama-panel)] max-lg:relative max-lg:min-h-[var(--dama-play-rail-min,13.75rem)] max-lg:overflow-y-auto max-lg:[-webkit-overflow-scrolling:touch] max-md:pb-[calc(var(--dama-bottom-nav-height,5.5rem)+var(--dama-bottom-pad-extra,0.75rem)+env(safe-area-inset-bottom,0px))] lg:h-full lg:max-h-full lg:overflow-hidden lg:pb-0";
 
 /**
  * max-lg compose sheet: expand the same rail over the board (Colors-style front layer).
+ * z-[70] sits above SmartBoardHost pop (z-60) and below the maximize FAB (z-80).
  * Keeps `data-dama-rail-scroll` / keyboard pad behavior on the same node.
  */
 export const playRailComposeSheetClass =
-  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[var(--dama-mobile-header-height,3.5rem)] max-lg:z-[55] max-lg:max-h-none max-lg:flex-none max-lg:rounded-t-2xl max-lg:border-t max-lg:border-[var(--dama-border)] max-lg:pb-[env(safe-area-inset-bottom,0px)] max-lg:shadow-[var(--dama-float-shadow)] max-lg:transition-transform max-lg:duration-300 max-lg:ease-out";
+  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[var(--dama-mobile-header-height,3.5rem)] max-lg:z-[70] max-lg:max-h-none max-lg:flex-none max-lg:rounded-t-2xl max-lg:border-t max-lg:border-[var(--dama-border)] max-lg:pb-[env(safe-area-inset-bottom,0px)] max-lg:shadow-[var(--dama-float-shadow)]";
 
-/** Dimmed board layer under the compose sheet (max-lg only). */
+/**
+ * Compact tournaments FAB Sheet: fill the Radix dialog (fixed is trapped by its transform).
+ */
+export const playRailComposeInDialogClass =
+  "max-lg:absolute max-lg:inset-0 max-lg:z-20 max-lg:max-h-none max-lg:flex-none max-lg:rounded-none max-lg:border-0 max-lg:pb-[env(safe-area-inset-bottom,0px)] max-lg:shadow-none";
+
+/** Dimmed board layer under the compose sheet (max-lg only). Above board pop, below sheet. */
 export const playRailComposeBackdropClass =
-  "fixed inset-0 z-[54] bg-[var(--dama-overlay)] max-lg:block lg:hidden";
+  "fixed inset-0 z-[69] bg-[var(--dama-overlay)] max-lg:block lg:hidden animate-in fade-in duration-300 ease-out";
 
+/** In-dialog dimmer (relative to SheetContent). */
+export const playRailComposeInDialogBackdropClass =
+  "absolute inset-0 z-10 bg-[var(--dama-overlay)] max-lg:block lg:hidden animate-in fade-in duration-300 ease-out";
 /**
  * Panel body scroll region.
  * max-lg: not a nested scroller (aside scrolls tabs + body together).

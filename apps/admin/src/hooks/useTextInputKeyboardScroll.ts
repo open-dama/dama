@@ -11,7 +11,15 @@ function subscribeMaxLg(onStoreChange: () => void) {
   }
   const mq = window.matchMedia(MAX_LG_MQ);
   mq.addEventListener("change", onStoreChange);
-  return () => mq.removeEventListener("change", onStoreChange);
+  window.addEventListener("resize", onStoreChange);
+  // SSR snapshot is false; notify so phone keyboard scroll arms.
+  onStoreChange();
+  const raf = window.requestAnimationFrame(() => onStoreChange());
+  return () => {
+    window.cancelAnimationFrame(raf);
+    mq.removeEventListener("change", onStoreChange);
+    window.removeEventListener("resize", onStoreChange);
+  };
 }
 
 function getMaxLgSnapshot() {

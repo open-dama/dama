@@ -604,10 +604,17 @@ export function HomePlayHub({
   const maxLg = useMaxLg();
   const compactPlayRail = centerBrowse && maxLg;
   const [playRailSheetOpen, setPlayRailSheetOpen] = useState(false);
+  const setSuppressSmartBoardPop = useShellChromeStore((s) => s.setSuppressSmartBoardPop);
 
   useEffect(() => {
     if (!compactPlayRail) setPlayRailSheetOpen(false);
   }, [compactPlayRail]);
+
+  // FAB play-rail Sheet must not sit under SmartBoardHost pop (z-60).
+  useEffect(() => {
+    setSuppressSmartBoardPop(Boolean(compactPlayRail && playRailSheetOpen));
+    return () => setSuppressSmartBoardPop(false);
+  }, [compactPlayRail, playRailSheetOpen, setSuppressSmartBoardPop]);
 
   useEffect(() => {
     if (publicView !== "events") return;
@@ -1436,7 +1443,7 @@ export function HomePlayHub({
             <Sheet open={playRailSheetOpen} onOpenChange={setPlayRailSheetOpen}>
               <SheetContent
                 side="right"
-                className="w-[min(100%,440px)] max-w-[100vw] p-0 sm:max-w-[440px]"
+                className="z-[75] w-[min(100%,440px)] max-w-[100vw] p-0 sm:max-w-[440px]"
                 closeLabel={panelTitle || undefined}
               >
                 <SheetTitle className="sr-only">{panelTitle || play.page_title}</SheetTitle>
