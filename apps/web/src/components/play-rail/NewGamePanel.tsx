@@ -22,12 +22,23 @@ import {
   playRailStickySubClass,
 } from "@/lib/player-shell-ui";
 import { cn } from "@/lib/utils";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import type { MatchClockPreset } from "@/types/platform";
 import type { PlayRailChromeReady } from "@/types/play-rail-chrome";
 import { Bot, Swords, Timer } from "lucide-react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
+/** Ignore Matchmaking activation right after compose open (layout ghost click). */
+const COMPOSE_GHOST_CLICK_MS = 700;
+
+function shouldBlockMatchmakingNav(): boolean {
+  const { railComposeSheet, railComposeOpenedAt } = useShellChromeStore.getState();
+  if (railComposeSheet) return true;
+  if (railComposeOpenedAt <= 0) return false;
+  return performance.now() - railComposeOpenedAt < COMPOSE_GHOST_CLICK_MS;
+}
 
 type NewSub = "ai" | "challenge";
 
@@ -114,6 +125,7 @@ export function NewGamePanel({
   onClearChallengeOpponent,
   loginHref,
 }: Props) {
+  const router = useRouter();
   const presets = useMemo(
     () =>
       (timeControlPresets || []).filter(
@@ -345,8 +357,22 @@ export function NewGamePanel({
                 onClearOpponent={onClearChallengeOpponent}
               />
               <div className="border-t border-[var(--dama-border)] pt-3">
-                <Button asChild variant="outline" className="h-11 w-full">
-                  <Link href="/?view=match">{matchLabel || chrome.find_matchmaking_action}</Link>
+                {/* Button (not <Link href>) so a compose-open ghost click cannot
+                    fall through to a default <a> navigation to /?view=match. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full"
+                  onClick={(e) => {
+                    if (shouldBlockMatchmakingNav()) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      return;
+                    }
+                    router.push("/?view=match");
+                  }}
+                >
+                  {matchLabel || chrome.find_matchmaking_action}
                 </Button>
               </div>
               {colorsBlock}

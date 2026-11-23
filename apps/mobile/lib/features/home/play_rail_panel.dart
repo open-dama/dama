@@ -301,6 +301,10 @@ class _PlayRailPanelState extends State<PlayRailPanel>
   MatchmakingRealtimeController? _avatarRt;
   int _seenAvatarSeq = 0;
 
+  /// Blocks Matchmaking / other rail actions that can receive a ghost tap when
+  /// the compose sheet reflows under the finger (web Challenge → /?view=match).
+  DateTime? _composeOpenedAt;
+
   @override
   void initState() {
     super.initState();
@@ -324,7 +328,14 @@ class _PlayRailPanelState extends State<PlayRailPanel>
   void _requestComposeSheet() {
     if (!mounted) return;
     if (!isDamaMobileTabletWidth(context)) return;
+    _composeOpenedAt = DateTime.now();
     widget.onComposeSheetChanged?.call(true);
+  }
+
+  bool _isComposeGhostTap() {
+    final t = _composeOpenedAt;
+    if (t == null) return false;
+    return DateTime.now().difference(t) < const Duration(milliseconds: 700);
   }
 
   @override
@@ -2499,7 +2510,10 @@ class _PlayRailPanelState extends State<PlayRailPanel>
           _colorsExpansion(tokens, c),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: () => widget.onPlayMatch(),
+            onPressed: () {
+              if (_isComposeGhostTap()) return;
+              widget.onPlayMatch();
+            },
             icon: const Icon(Icons.sports_esports_outlined, size: 18),
             label: Text(c.findMatchmakingAction),
           ),

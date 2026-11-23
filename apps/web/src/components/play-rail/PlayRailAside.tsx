@@ -135,6 +135,24 @@ export function PlayRailAside({ children, className, "aria-label": ariaLabel }: 
       if (!field) return;
       pendingFocusRef.current = field;
       const alreadyOpen = sheetOpenRef.current || useShellChromeStore.getState().railComposeSheet;
+      // Always arm before layout: trailing click can hit Challenge Matchmaking
+      // (or other controls that moved under the finger) and route to /?view=match.
+      const swallowClick = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        cleanup();
+      };
+      const cleanup = () => {
+        document.removeEventListener("click", swallowClick, true);
+        root.style.removeProperty("pointer-events");
+        field.style.removeProperty("pointer-events");
+        window.clearTimeout(tid);
+      };
+      document.addEventListener("click", swallowClick, true);
+      root.style.pointerEvents = "none";
+      field.style.pointerEvents = "auto";
+      const tid = window.setTimeout(cleanup, 700);
       if (!alreadyOpen) {
         flushSync(() => {
           setSheetOpen(true);

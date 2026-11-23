@@ -340,6 +340,15 @@ async function main() {
   assert(asideSrc.includes("onPointerDown") && asideSrc.includes("tryOpenCompose"), "web compose must open on pointerdown backup");
   assert(asideSrc.includes("flushSync"), "web must commit compose layout before focus in the same tap");
   assert(asideSrc.includes("setSheetOpen") || asideSrc.includes("sheetOpen"), "web must use local React sheet state so flushSync commits layout");
+  assert(
+    asideSrc.includes("stopImmediatePropagation") && asideSrc.includes('addEventListener("click"'),
+    "web must swallow the post-reflow click so Challenge Matchmaking Link does not navigate to /?view=match",
+  );
+  const newGameSrc = read("apps/web/src/components/play-rail/NewGamePanel.tsx");
+  assert(newGameSrc.includes("shouldBlockMatchmakingNav") && newGameSrc.includes('router.push("/?view=match")'), "Challenge Matchmaking must be a guarded button push, not bare Link href");
+  assert(!newGameSrc.includes('href="/?view=match"'), "Challenge Matchmaking must not use <a href=/؟view=match> (ghost click navigates)");
+  const flutterPanel = read("apps/mobile/lib/features/home/play_rail_panel.dart");
+  assert(flutterPanel.includes("_isComposeGhostTap") && flutterPanel.includes("onPlayMatch"), "Flutter Matchmaking must ignore compose ghost taps");
   assert(!/if\s*\(\s*!storeCompose\s*\)\s*setSheetOpen\(false\)/.test(asideSrc), "must not auto-close local sheet from stale storeCompose=false");
   assert(asideSrc.includes("onPointerDownCapture") || asideSrc.includes("tryOpenCompose"), "compose must open via React capture and/or document capture");
   assert(asideSrc.includes('document.addEventListener("pointerdown"'), "compose must use document capture backup (native + ref-safe)");

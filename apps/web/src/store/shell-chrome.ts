@@ -17,6 +17,8 @@ type ShellChromeState = {
    */
   railComposeSheet: boolean;
   setRailComposeSheet: (value: boolean) => void;
+  /** performance.now() when compose last opened - ghost-click guards for in-rail links. */
+  railComposeOpenedAt: number;
   /**
    * Tuck SmartBoardHost pop (e.g. tournaments FAB play-rail Sheet open)
    * so the rail is not trapped under the maximized board (z-60).
@@ -32,9 +34,17 @@ export const useShellChromeStore = create<ShellChromeState>((set, get) => ({
     set({ immersiveChat });
   },
   railComposeSheet: false,
+  railComposeOpenedAt: 0,
   setRailComposeSheet: (railComposeSheet) => {
     if (get().railComposeSheet === railComposeSheet) return;
-    set({ railComposeSheet });
+    set({
+      railComposeSheet,
+      railComposeOpenedAt: railComposeSheet
+        ? typeof performance !== "undefined"
+          ? performance.now()
+          : Date.now()
+        : 0,
+    });
   },
   suppressSmartBoardPop: false,
   setSuppressSmartBoardPop: (suppressSmartBoardPop) => {
