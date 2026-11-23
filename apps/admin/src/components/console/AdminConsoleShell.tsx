@@ -251,6 +251,8 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
   const mobileChips = useMemo(() => flattenConsoleNavChips(sections, modules), [sections, modules]);
   const [shellRoot, setShellRoot] = useState<HTMLElement | null>(null);
   // Phone/tablet: character text fields scroll above the soft keyboard (web play-rail parity).
+  // Character text keyboard scroll (shared with web). Play-rail compose sheet is
+  // N/A here - admin has no board+rail play surface; console main is the scrollport.
   useTextInputKeyboardScroll(shellRoot);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: collapse tray on route change

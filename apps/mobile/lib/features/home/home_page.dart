@@ -1350,7 +1350,7 @@ class _HomePageState extends State<HomePage> {
 }
 
 /// Chess.com Play pattern: board + New Game | Games | Players rail.
-class _HomePlayHub extends StatelessWidget {
+class _HomePlayHub extends StatefulWidget {
   const _HomePlayHub({
     required this.chrome,
     required this.railChrome,
@@ -1416,7 +1416,28 @@ class _HomePlayHub extends StatelessWidget {
   final Future<void> Function(RestTournament) onEnroll;
 
   @override
+  State<_HomePlayHub> createState() => _HomePlayHubState();
+}
+
+class _HomePlayHubState extends State<_HomePlayHub> {
+  /// Phone/tablet: rail expands over the board while typing in character fields.
+  bool _composeSheet = false;
+  double _composeDrag = 0;
+
+  void _setComposeSheet(bool open) {
+    if (_composeSheet == open) return;
+    setState(() {
+      _composeSheet = open;
+      _composeDrag = 0;
+    });
+    if (!open) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final w = widget;
     return BlocProvider(
       create: (ctx) {
         final token = ctx.read<AuthCubit>().state.token;
@@ -1425,39 +1446,40 @@ class _HomePlayHub extends StatelessWidget {
       child: BlocConsumer<FeatureFlagsCubit, FeatureFlagsState>(
         listener: (context, state) {
           if (state.aiDepths.isEmpty) {
-            onDepth(null);
+            w.onDepth(null);
             return;
           }
-          if (aiDepth == null || !state.aiDepths.contains(aiDepth)) {
-            onDepth(state.aiDepths.first);
+          if (w.aiDepth == null || !state.aiDepths.contains(w.aiDepth)) {
+            w.onDepth(state.aiDepths.first);
           }
         },
         builder: (context, state) {
-          final board = boardPaletteById(boardPaletteId);
-          final piece = piecePaletteById(piecePaletteId);
+          final board = boardPaletteById(w.boardPaletteId);
+          final piece = piecePaletteById(w.piecePaletteId);
           final panel = PlayRailPanel(
-            railChrome: railChrome,
-            playChrome: chrome,
-            clockLabel: clockLabel,
-            clockSeconds: clockSeconds,
-            timeControlPresets: timeControlPresets,
-            timeControlsLoading: timeControlsLoading,
-            tab: tab,
-            initialPlayersSub: initialPlayersSub,
-            initialDmRequestId: initialDmRequestId,
-            initialDmThreadId: initialDmThreadId,
-            aiDepth: aiDepth,
+            railChrome: w.railChrome,
+            playChrome: w.chrome,
+            clockLabel: w.clockLabel,
+            clockSeconds: w.clockSeconds,
+            timeControlPresets: w.timeControlPresets,
+            timeControlsLoading: w.timeControlsLoading,
+            tab: w.tab,
+            initialPlayersSub: w.initialPlayersSub,
+            initialDmRequestId: w.initialDmRequestId,
+            initialDmThreadId: w.initialDmThreadId,
+            aiDepth: w.aiDepth,
             flags: state,
-            onTab: onTab,
-            onDepth: onDepth,
-            onPlayAi: onPlayAi,
-            onPlayMatch: onPlayMatch,
-            boardPaletteId: boardPaletteId,
-            onBoardPalette: onBoardPalette,
-            piecePaletteId: piecePaletteId,
-            onPiecePalette: onPiecePalette,
-            initialChallengeOpponent: initialChallengeOpponent,
-            onChallengeOpponentConsumed: onChallengeOpponentConsumed,
+            onTab: w.onTab,
+            onDepth: w.onDepth,
+            onPlayAi: w.onPlayAi,
+            onPlayMatch: w.onPlayMatch,
+            boardPaletteId: w.boardPaletteId,
+            onBoardPalette: w.onBoardPalette,
+            piecePaletteId: w.piecePaletteId,
+            onPiecePalette: w.onPiecePalette,
+            initialChallengeOpponent: w.initialChallengeOpponent,
+            onChallengeOpponentConsumed: w.onChallengeOpponentConsumed,
+            onComposeSheetChanged: _setComposeSheet,
           );
           // Rail tabs are New Game | Games | Players; live tournament strip
           // below matches web HomePlayHub pot cards (DB chrome only).
@@ -1469,29 +1491,29 @@ class _HomePlayHub extends StatelessWidget {
                 final authed = context.watch<AuthCubit>().state.isAuthenticated;
                 // Guests: palette color seat names (same Neo shapes both seats).
                 final court = pieceSeatNames(piece);
-                final oppLabel = authed ? chrome.labelBlack : court.dark;
-                final youLabel = authed ? chrome.labelWhite : court.light;
+                final oppLabel = authed ? w.chrome.labelBlack : court.dark;
+                final youLabel = authed ? w.chrome.labelWhite : court.light;
                 final toggle = CompactBoardViewToggle(
-                  selected: boardView,
-                  onChanged: onBoardView,
-                  label2d: railChrome.boardView2d,
-                  label3d: railChrome.boardView3d,
+                  selected: w.boardView,
+                  onChanged: w.onBoardView,
+                  label2d: w.railChrome.boardView2d,
+                  label3d: w.railChrome.boardView3d,
                 );
-                if (boardView == BoardViewMode.flat2d) {
+                if (w.boardView == BoardViewMode.flat2d) {
                   return _HomePreviewBoard(
                     opponentLabel: oppLabel,
                     playerLabel: youLabel,
-                    clockLabel: clockLabel,
+                    clockLabel: w.clockLabel,
                     boardViewToggle: toggle,
-                    vsLabel: railChrome.vsSeparator,
+                    vsLabel: w.railChrome.vsSeparator,
                   );
                 }
                 return _HomePreviewBoard3D(
                   opponentLabel: oppLabel,
                   playerLabel: youLabel,
-                  clockLabel: clockLabel,
+                  clockLabel: w.clockLabel,
                   boardViewToggle: toggle,
-                  vsLabel: railChrome.vsSeparator,
+                  vsLabel: w.railChrome.vsSeparator,
                 );
               },
             ),
@@ -1500,6 +1522,11 @@ class _HomePlayHub extends StatelessWidget {
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 720;
               if (wide) {
+                if (_composeSheet) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted && _composeSheet) _setComposeSheet(false);
+                  });
+                }
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1522,17 +1549,102 @@ class _HomePlayHub extends StatelessWidget {
                       : viewportH;
               // Keep rail compact so the board can use full width on phone/tablet.
               final railH = (basis * 0.30).clamp(200.0, 340.0);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              final tokens = Theme.of(context).colorScheme;
+              final railShell = Material(
+                color: tokens.surface,
+                elevation: _composeSheet ? 10 : 0,
+                clipBehavior: Clip.antiAlias,
+                borderRadius: _composeSheet
+                    ? const BorderRadius.vertical(top: Radius.circular(16))
+                    : BorderRadius.zero,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_composeSheet)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 6, 4, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onVerticalDragUpdate: (d) {
+                                  setState(() {
+                                    _composeDrag = (_composeDrag + d.delta.dy)
+                                        .clamp(0.0, 240.0);
+                                  });
+                                },
+                                onVerticalDragEnd: (_) {
+                                  if (_composeDrag >= 88) {
+                                    _setComposeSheet(false);
+                                  } else {
+                                    setState(() => _composeDrag = 0);
+                                  }
+                                },
+                                child: Column(
+                                  children: [
+                                    Container(
+                                      width: 40,
+                                      height: 4,
+                                      decoration: BoxDecoration(
+                                        color: tokens.outlineVariant,
+                                        borderRadius: BorderRadius.circular(99),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: MaterialLocalizations.of(context)
+                                  .closeButtonTooltip,
+                              onPressed: () => _setComposeSheet(false),
+                              icon: const Icon(Icons.close, size: 20),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Expanded(child: panel),
+                  ],
+                ),
+              );
+              return Stack(
+                fit: StackFit.expand,
                 children: [
-                  Expanded(child: center),
-                  const SizedBox(height: 8),
-                  SizedBox(height: railH, child: panel),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: center),
+                      const SizedBox(height: 8),
+                      SizedBox(height: _composeSheet ? 0 : railH),
+                    ],
+                  ),
+                  if (_composeSheet)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _setComposeSheet(false),
+                        child: ColoredBox(
+                          color: Colors.black.withValues(alpha: 0.45),
+                        ),
+                      ),
+                    ),
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOutCubic,
+                    left: 0,
+                    right: 0,
+                    bottom: _composeSheet ? -_composeDrag : 0,
+                    top: _composeSheet ? _composeDrag : null,
+                    height: _composeSheet ? null : railH,
+                    child: railShell,
+                  ),
                 ],
               );
             },
           );
-          final home = homeChrome;
+          final home = w.homeChrome;
           Widget? liveStrip;
           if (home != null) {
             final poolLabels = PrizePoolCardLabels.fromHome(home);
@@ -1555,12 +1667,12 @@ class _HomePlayHub extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (tournamentsLoading)
+                if (w.tournamentsLoading)
                   const SizedBox(
                     height: 220,
                     child: Center(child: CircularProgressIndicator()),
                   )
-                else if (tournaments.isEmpty)
+                else if (w.tournaments.isEmpty)
                   Text(
                     home.emptyLive,
                     style: TextStyle(
@@ -1573,11 +1685,11 @@ class _HomePlayHub extends StatelessWidget {
                     height: 280,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
-                      itemCount: tournaments.length,
+                      itemCount: w.tournaments.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 12),
                       itemBuilder: (context, i) {
-                        final t = tournaments[i];
-                        final tChrome = tournamentsPlayerChrome;
+                        final t = w.tournaments[i];
+                        final tChrome = w.tournamentsPlayerChrome;
                         final cta = resolveCupCardCta(
                           CupLifecycleFields(
                             startedAt: t.startedAt,
@@ -1642,10 +1754,10 @@ class _HomePlayHub extends StatelessWidget {
                             ),
                             prizePoolLabels: poolLabels,
                             sourceBadge:
-                                tournamentsOfficialBadge.trim().isNotEmpty
-                                    ? tournamentsOfficialBadge.trim()
+                                w.tournamentsOfficialBadge.trim().isNotEmpty
+                                    ? w.tournamentsOfficialBadge.trim()
                                     : null,
-                            onEnroll: () => onEnroll(t),
+                            onEnroll: () => w.onEnroll(t),
                           ),
                         );
                       },
@@ -1653,11 +1765,11 @@ class _HomePlayHub extends StatelessWidget {
                   ),
               ],
             );
-          } else if (tournamentsUnavailable.trim().isNotEmpty) {
+          } else if (w.tournamentsUnavailable.trim().isNotEmpty) {
             liveStrip = Padding(
               padding: const EdgeInsets.only(top: 12),
               child: Text(
-                softCommunityChromeUnavailable(tournamentsUnavailable),
+                softCommunityChromeUnavailable(w.tournamentsUnavailable),
                 style: TextStyle(color: damaColorsOf(context).danger),
               ),
             );

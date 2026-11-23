@@ -154,11 +154,15 @@ class PlayRailPanel extends StatefulWidget {
     this.initialDmThreadId,
     this.initialChallengeOpponent,
     this.onChallengeOpponentConsumed,
+    this.onComposeSheetChanged,
   });
 
   final PlayRailChrome railChrome;
   final PlayChrome playChrome;
   final int tab;
+
+  /// Phone/tablet: character text focus requests full-height compose sheet over the board.
+  final ValueChanged<bool>? onComposeSheetChanged;
 
   /// 0 friends, 1 requests, 2 all, 3 dms (notification deep-link).
   final int initialPlayersSub;
@@ -315,6 +319,12 @@ class _PlayRailPanelState extends State<PlayRailPanel>
       _bindAvatarRt();
       _resumeComposeOutbox();
     });
+  }
+
+  void _requestComposeSheet() {
+    if (!mounted) return;
+    if (!isDamaMobileTabletWidth(context)) return;
+    widget.onComposeSheetChanged?.call(true);
   }
 
   @override
@@ -2940,6 +2950,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
                 ? c.toastEnterUsername
                 : null,
           ),
+          onComposeFocus: _requestComposeSheet,
           onTapOutside: (_) {},
           onChanged: (v) {
             _onOpponentQueryChanged(v);
@@ -3163,6 +3174,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
                   prefixIcon: const Icon(Icons.search, size: 18),
                   border: const OutlineInputBorder(),
                 ),
+                onComposeFocus: _requestComposeSheet,
                 onTapOutside: (_) {},
                 onChanged: _onGamesSearchChanged,
               ),
@@ -3523,6 +3535,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
               prefixIcon: const Icon(Icons.search, size: 18),
               border: const OutlineInputBorder(),
             ),
+            onComposeFocus: _requestComposeSheet,
             // Keep first tap on filtered viewer rows from only dismissing keyboard.
             onTapOutside: (_) {},
             onChanged: _onLiveViewerSearchChanged,
@@ -3913,6 +3926,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
                         prefixIcon: const Icon(Icons.search, size: 18),
                         border: const OutlineInputBorder(),
                       ),
+                      onComposeFocus: _requestComposeSheet,
                       // Keep focus so the first suggestion tap activates (default
                       // onTapOutside would only dismiss the keyboard).
                       onTapOutside: (_) {},

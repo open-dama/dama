@@ -53,6 +53,17 @@ export const playRailAsideClass =
   "order-2 flex min-h-0 min-w-0 flex-1 flex-col isolate overscroll-contain bg-[var(--dama-panel)] max-lg:relative max-lg:overflow-y-auto max-lg:[-webkit-overflow-scrolling:touch] max-md:pb-[calc(var(--dama-bottom-nav-height,5.5rem)+var(--dama-bottom-pad-extra,0.75rem)+env(safe-area-inset-bottom,0px))] lg:h-full lg:max-h-full lg:overflow-hidden lg:pb-0";
 
 /**
+ * max-lg compose sheet: expand the same rail over the board (Colors-style front layer).
+ * Keeps `data-dama-rail-scroll` / keyboard pad behavior on the same node.
+ */
+export const playRailComposeSheetClass =
+  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[var(--dama-mobile-header-height,3.5rem)] max-lg:z-[55] max-lg:max-h-none max-lg:flex-none max-lg:rounded-t-2xl max-lg:border-t max-lg:border-[var(--dama-border)] max-lg:pb-[env(safe-area-inset-bottom,0px)] max-lg:shadow-[var(--dama-float-shadow)] max-lg:transition-transform max-lg:duration-300 max-lg:ease-out";
+
+/** Dimmed board layer under the compose sheet (max-lg only). */
+export const playRailComposeBackdropClass =
+  "fixed inset-0 z-[54] bg-[var(--dama-overlay)] max-lg:block lg:hidden";
+
+/**
  * Panel body scroll region.
  * max-lg: not a nested scroller (aside scrolls tabs + body together).
  * lg+: the only overflow-y scrollport under frozen rail chrome.

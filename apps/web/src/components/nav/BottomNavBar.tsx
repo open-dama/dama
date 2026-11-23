@@ -152,11 +152,13 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
   const [expanded, setExpanded] = useState(false);
   const mounted = useClientMounted();
   const immersiveChat = useShellChromeStore((s) => s.immersiveChat);
-  usePublishHeightCssVar(navRef, DAMA_BOTTOM_NAV_HEIGHT_VAR, !immersiveChat);
+  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
+  const hideBottomNav = immersiveChat || railComposeSheet;
+  usePublishHeightCssVar(navRef, DAMA_BOTTOM_NAV_HEIGHT_VAR, !hideBottomNav);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
-    if (immersiveChat) {
+    if (hideBottomNav) {
       root.style.setProperty(DAMA_BOTTOM_NAV_HEIGHT_VAR, "0px");
       root.style.setProperty(DAMA_BOTTOM_PAD_EXTRA_VAR, "0px");
       return () => {
@@ -165,7 +167,7 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
       };
     }
     return undefined;
-  }, [immersiveChat]);
+  }, [hideBottomNav]);
 
   useEffect(() => {
     void pathname;
@@ -216,7 +218,7 @@ export function BottomNavBar({ surface }: BottomNavBarProps) {
         ? ("continue" as const)
         : ("play" as const);
 
-  if (immersiveChat) {
+  if (hideBottomNav) {
     return null;
   }
 

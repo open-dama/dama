@@ -65,6 +65,7 @@ class KeyboardAwareTextField extends StatefulWidget {
     this.keyboardType,
     this.textInputAction,
     this.autofillHints,
+    this.onComposeFocus,
   });
 
   final TextEditingController controller;
@@ -77,6 +78,9 @@ class KeyboardAwareTextField extends StatefulWidget {
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final Iterable<String>? autofillHints;
+
+  /// Fired when focus is gained (mobile compose-sheet open). Not fired on blur.
+  final VoidCallback? onComposeFocus;
 
   @override
   State<KeyboardAwareTextField> createState() => _KeyboardAwareTextFieldState();
@@ -120,6 +124,7 @@ class _KeyboardAwareTextFieldState extends State<KeyboardAwareTextField> {
 
   void _onFocusChange() {
     if (!_node.hasFocus || !mounted) return;
+    widget.onComposeFocus?.call();
     ensureTextFieldAboveKeyboard(context);
   }
 
@@ -136,7 +141,10 @@ class _KeyboardAwareTextFieldState extends State<KeyboardAwareTextField> {
       onChanged: widget.onChanged,
       onSubmitted: widget.onSubmitted,
       onTapOutside: widget.onTapOutside,
-      onTap: () => ensureTextFieldAboveKeyboard(context),
+      onTap: () {
+        widget.onComposeFocus?.call();
+        ensureTextFieldAboveKeyboard(context);
+      },
     );
   }
 }

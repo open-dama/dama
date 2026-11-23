@@ -331,6 +331,13 @@ async function main() {
   assert(!webHelper.includes("data-dama-kb-debug"), "web helper must not leave debug attrs");
   const asideSrc = read("apps/web/src/components/play-rail/PlayRailAside.tsx");
   assert(asideSrc.includes("useTextInputKeyboardScroll"), "web PlayRailAside must bind helper");
+  assert(asideSrc.includes("setRailComposeSheet") || asideSrc.includes("railComposeSheet"), "web PlayRailAside must support compose sheet");
+  assert(asideSrc.includes("data-dama-rail-compose"), "web PlayRailAside must mark compose mode");
+  assert(asideSrc.includes("onPointerDown") && asideSrc.includes("tryOpenCompose"), "web compose must open on pointerdown backup");
+  const shellChrome = read("apps/web/src/store/shell-chrome.ts");
+  assert(shellChrome.includes("railComposeSheet"), "shell chrome must expose railComposeSheet");
+  const homeFlutter = read("apps/mobile/lib/features/home/home_page.dart");
+  assert(homeFlutter.includes("_composeSheet") || homeFlutter.includes("onComposeSheetChanged"), "flutter home must host compose sheet");
   for (const f of [
     "apps/web/src/components/play-rail/CreateChallengeForm.tsx",
     "apps/web/src/components/play-rail/GamesPanel.tsx",
@@ -343,12 +350,13 @@ async function main() {
   const kaw = (flutter.match(/KeyboardAwareTextField\(/g) || []).length;
   assert(kaw === 4, `flutter must have 4 KeyboardAwareTextField, got ${kaw}`);
   assert(flutter.includes("playRailScrollPadding"), "flutter must pad for viewInsets");
+  assert(flutter.includes("onComposeSheetChanged") || flutter.includes("onComposeFocus"), "flutter rail must request compose sheet");
   assert(!/\bTextField\(/.test(flutter.replace(/KeyboardAwareTextField\(/g, "KAW(")), "no raw TextField left in play rail");
   const adminShell = read("apps/admin/src/components/console/AdminConsoleShell.tsx");
   assert(adminShell.includes("useTextInputKeyboardScroll"), "admin shell must bind helper");
 
   console.log("E2E_TEXT_INPUT_KEYBOARD_SCROLL_OK");
-  console.log("WEB_FIELDS=4 FLUTTER_FIELDS=4 ADMIN_SHELL=1");
+  console.log("WEB_FIELDS=4 FLUTTER_FIELDS=4 ADMIN_SHELL=1 COMPOSE_SHEET=1");
 }
 
 main().catch((err) => {
