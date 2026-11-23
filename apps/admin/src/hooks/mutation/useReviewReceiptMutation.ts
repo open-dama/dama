@@ -12,10 +12,22 @@ import { toast } from "sonner";
 export function useReviewReceiptMutation(token: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, approve }: { id: string; approve: boolean }) => {
+    mutationFn: async ({
+      id,
+      approve,
+      note,
+    }: {
+      id: string;
+      approve: boolean;
+      /** Player-facing rejection reason (stored as review_note; used in player.receipt_rejected). */
+      note?: string;
+    }) => {
+      const payload: { approve: boolean; note?: string } = { approve };
+      const trimmed = (note || "").trim();
+      if (trimmed) payload.note = trimmed;
       const { data } = await restClient.post<AdminReceipt>(
         `/payments/receipts/${id}/review`,
-        { approve },
+        payload,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       return data;

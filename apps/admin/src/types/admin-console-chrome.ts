@@ -292,6 +292,8 @@ const SECTION_KEYS: Record<
     "receipt_view_detail",
     "receipt_email_label",
     "receipt_reviewed_at_label",
+    "receipt_review_note_label",
+    "receipt_reject_reason_required",
     "receipt_intent_id_label",
     "receipt_pdf_label",
     "receipt_open_document_action",

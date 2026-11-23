@@ -1174,6 +1174,7 @@ func (a *PaymentsAPI) AdminConsoleChrome(w http.ResponseWriter, r *http.Request)
 			"receipt_col_when", "receipt_col_actions", "receipt_detail_title", "receipt_detail_close",
 			"receipt_proof_label", "receipt_provider_label",
 			"receipt_view_detail", "receipt_email_label", "receipt_reviewed_at_label",
+			"receipt_review_note_label", "receipt_reject_reason_required",
 			"receipt_intent_id_label", "receipt_pdf_label", "receipt_open_document_action",
 			"search_label", "search_placeholder", "search_debounce_ms", "actions_label",
 			"doc_kyc_col_user", "doc_kyc_col_type", "doc_kyc_col_name", "doc_kyc_col_status",

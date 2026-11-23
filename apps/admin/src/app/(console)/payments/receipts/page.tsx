@@ -11,6 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   type OpsColumn,
   OpsDataTable,
@@ -93,6 +95,7 @@ function AdminPaymentsReceiptsPageInner() {
 
   const review = useReviewReceiptMutation(token);
   const detailDialog = useDeferredDialogValue<AdminReceipt>();
+  const [reviewNote, setReviewNote] = useState("");
   const statusParam = isFilterAll(statusFilter) ? "" : statusFilter.trim();
 
   const detailId = (detailDialog.value?.id || "").trim();
@@ -241,7 +244,10 @@ function AdminPaymentsReceiptsPageInner() {
                       {
                         id: "detail",
                         label: viewDetail,
-                        onSelect: () => detailDialog.openWith(r),
+                        onSelect: () => {
+                          setReviewNote("");
+                          detailDialog.openWith(r);
+                        },
                       },
                     ]
                   : []),
@@ -278,15 +284,14 @@ function AdminPaymentsReceiptsPageInner() {
                         onSelect: () => review.mutate({ id: r.id, approve: true }),
                       },
                       {
+                        // Reject requires a player-facing reason → open detail (note field).
                         id: "reject",
                         label: (chrome.reject_action || "").trim(),
-                        pendingLabel: (chrome.receipt_reject_pending || "").trim(),
                         destructive: true,
-                        isLoading:
-                          review.isPending &&
-                          review.variables?.id === r.id &&
-                          !review.variables.approve,
-                        onSelect: () => review.mutate({ id: r.id, approve: false }),
+                        onSelect: () => {
+                          setReviewNote("");
+                          detailDialog.openWith(r);
+                        },
                       },
                     ]
                   : []),
@@ -406,14 +411,18 @@ function AdminPaymentsReceiptsPageInner() {
                       {(chrome.approve_action || "").trim()}
                     </Button>
                   ) : null}
-                  {selectedPending.length > 0 && (chrome.reject_action || "").trim() ? (
+                  {selectedPending.length === 1 && (chrome.reject_action || "").trim() ? (
                     <Button
                       size="sm"
                       variant="destructive"
                       disabled={bulkPending}
-                      isLoading={bulkPending}
-                      pendingLabel={(chrome.receipt_reject_pending || "").trim()}
-                      onClick={() => void bulkReceipts(false)}
+                      onClick={() => {
+                        const row = selectedPending[0];
+                        if (!row) return;
+                        setReviewNote("");
+                        setRowSelection({});
+                        detailDialog.openWith(row);
+                      }}
                     >
                       {(chrome.reject_action || "").trim()}
                     </Button>
@@ -535,11 +544,38 @@ function AdminPaymentsReceiptsPageInner() {
                     <p>{empty}</p>
                   )}
                 </DetailField>
+                {!canReview && (detail.review_note || "").trim() ? (
+                  <DetailField label={chromeOpt(c, "receipt_review_note_label")} wide>
+                    <p>{(detail.review_note || "").trim()}</p>
+                  </DetailField>
+                ) : null}
+                {canReview && chromeOpt(c, "receipt_review_note_label") ? (
+                  <div className="sm:col-span-2">
+                    <Field
+                      id="admin-receipt-detail-note"
+                      label={chromeOpt(c, "receipt_review_note_label")}
+                    >
+                      <Input
+                        id="admin-receipt-detail-note"
+                        value={reviewNote}
+                        onChange={(e) => setReviewNote(e.target.value)}
+                        disabled={review.isPending}
+                      />
+                    </Field>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <DialogFooter damaDialogFooter>
               {closeLabel ? (
-                <Button type="button" variant="outline" onClick={() => detailDialog.close()}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setReviewNote("");
+                    detailDialog.close();
+                  }}
+                >
                   {closeLabel}
                 </Button>
               ) : null}
@@ -549,6 +585,7 @@ function AdminPaymentsReceiptsPageInner() {
                   variant="outline"
                   onClick={() => {
                     const id = (detail.id || "").trim();
+                    setReviewNote("");
                     detailDialog.close();
                     if (id) router.push(`/payments/receipts/${encodeURIComponent(id)}`);
                   }}
@@ -570,8 +607,13 @@ function AdminPaymentsReceiptsPageInner() {
                     disabled={review.isPending}
                     onClick={() => {
                       review.mutate(
-                        { id: detail.id, approve: true },
-                        { onSuccess: () => detailDialog.close() },
+                        { id: detail.id, approve: true, note: reviewNote },
+                        {
+                          onSuccess: () => {
+                            setReviewNote("");
+                            detailDialog.close();
+                          },
+                        },
                       );
                     }}
                   >
@@ -586,11 +628,18 @@ function AdminPaymentsReceiptsPageInner() {
                       !review.variables.approve
                     }
                     pendingLabel={(chrome.receipt_reject_pending || "").trim()}
-                    disabled={review.isPending}
+                    disabled={review.isPending || !reviewNote.trim()}
                     onClick={() => {
+                      const note = reviewNote.trim();
+                      if (!note) return;
                       review.mutate(
-                        { id: detail.id, approve: false },
-                        { onSuccess: () => detailDialog.close() },
+                        { id: detail.id, approve: false, note },
+                        {
+                          onSuccess: () => {
+                            setReviewNote("");
+                            detailDialog.close();
+                          },
+                        },
                       );
                     }}
                   >

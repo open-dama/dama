@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// PlayerFacingReasonMaxRunes caps reject-reason body args (SMS/push-safe length).
+const PlayerFacingReasonMaxRunes = 280
 
 // EmitPlayer inserts a player-audience notification (errors ignored by callers via _).
 func EmitPlayer(ctx context.Context, db *pgxpool.Pool, recipientID, kindCode, dedupeKey, hrefEntityID string, bodyArgs ...string) {
@@ -110,4 +115,68 @@ func NotifyTournamentLifecycle(
 // MoneyArgs formats amount + currency for body templates.
 func MoneyArgs(amount float64, currency string) []string {
 	return []string{fmt.Sprintf("%.2f", amount), strings.TrimSpace(currency)}
+}
+
+// SanitizePlayerFacingReason trims, drops control characters, collapses
+// whitespace, and caps length for notification body args. Empty input yields
+// empty (caller fails closed).
+func SanitizePlayerFacingReason(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	n := 0
+	spacePending := false
+	for _, r := range s {
+		if r == '\n' || r == '\r' || r == '\t' || r == ' ' {
+			if n > 0 {
+				spacePending = true
+			}
+			continue
+		}
+		if unicode.IsControl(r) {
+			continue
+		}
+		if n >= PlayerFacingReasonMaxRunes {
+			break
+		}
+		if spacePending {
+			b.WriteByte(' ')
+			spacePending = false
+		}
+		b.WriteRune(r)
+		n++
+	}
+	out := strings.TrimSpace(b.String())
+	if utf8.RuneCountInString(out) > PlayerFacingReasonMaxRunes {
+		runes := []rune(out)
+		out = string(runes[:PlayerFacingReasonMaxRunes])
+		out = strings.TrimSpace(out)
+	}
+	return out
+}
+
+// EmitReceiptReview notifies the player after a manual receipt review.
+// Approve → player.receipt_reviewed with display status label.
+// Reject → player.receipt_rejected with sanitized reason only (callers must
+// fail closed before review when reason is empty; no status-only fallback).
+func EmitReceiptReview(ctx context.Context, db *pgxpool.Pool, recipientID, receiptID, statusLabel string, approve bool, playerFacingReason string) {
+	if db == nil || strings.TrimSpace(recipientID) == "" || strings.TrimSpace(receiptID) == "" {
+		return
+	}
+	if approve {
+		if label := strings.TrimSpace(statusLabel); label != "" {
+			EmitPlayer(ctx, db, recipientID, KindPlayerReceiptReviewed,
+				"receipt_reviewed:"+receiptID, receiptID, label)
+		}
+		return
+	}
+	reason := SanitizePlayerFacingReason(playerFacingReason)
+	if reason == "" {
+		return
+	}
+	EmitPlayer(ctx, db, recipientID, KindPlayerReceiptRejected,
+		"receipt_rejected:"+receiptID, receiptID, reason)
 }

@@ -213,8 +213,9 @@ assert(
   "Go bot reads reject reason + admin_telegram_id from query",
 );
 assert(
-  /ErrRejectReasonRequired/.test(botHandlers) && /Get\("reason"\)\) == ""/.test(botHandlers),
-  "Go reject fails closed when reason empty",
+  /ErrRejectReasonRequired/.test(botHandlers) &&
+    /SanitizePlayerFacingReason\(r\.URL\.Query\(\)\.Get\("reason"\)\)/.test(botHandlers),
+  "Go reject fails closed when reason empty/unsanitary",
 );
 assert(
   /ReviewNoteReasonTemplate/.test(botHandlers),
@@ -222,8 +223,83 @@ assert(
 );
 assert(/ReviewNoteApprovedPrefix/.test(botHandlers), "Go review notes use DB prefixes");
 assert(
-  /KindPlayerReceiptReviewed/.test(botHandlers) && /KindPlayerPayoutUpdated/.test(botHandlers),
+  /EmitReceiptReview/.test(botHandlers) && /KindPlayerPayoutUpdated/.test(botHandlers),
   "Go bot reject/approve still emits in-app player notifs",
+);
+assert(
+  /KindPlayerReceiptRejected/.test(read("apps/api/internal/notifications/store.go")),
+  "Go defines player.receipt_rejected kind constant",
+);
+assert(
+  /player\.receipt_rejected/.test(
+    read("apps/api/migrations/543_player_receipt_rejected_notif.sql"),
+  ),
+  "Migration 543 seeds player.receipt_rejected notif kind",
+);
+assert(
+  /Approved via Telegram Bot by \{telegram_id\}/.test(
+    read("apps/api/migrations/545_telegram_ops_vsim_detail_ux.sql"),
+  ) && /Admin Notes:/.test(read("apps/api/migrations/545_telegram_ops_vsim_detail_ux.sql")),
+  "Migration 545 VSIM detail UX + human admin notes",
+);
+assert(
+  /_format_review_note_for_display/.test(read("telegram_bot/dama_ops.py")) &&
+    /receipt_link_html_template/.test(read("telegram_bot/dama_ops.py")),
+  "dama_ops formats notes + friendly receipt link",
+);
+assert(
+  /review_note_joiner/.test(read("apps/api/migrations/546_telegram_ops_joiner_nav_heal.sql")) &&
+    /Back to List/.test(read("apps/api/migrations/546_telegram_ops_joiner_nav_heal.sql")),
+  "Migration 546 heals joiner space + Back to List / Close",
+);
+assert(
+  /EmitReceiptReview/.test(read("apps/api/internal/rest/payments_handlers.go")),
+  "Console ReviewReceipt emits via EmitReceiptReview",
+);
+assert(
+  /receipt_reject_reason_required/.test(read("apps/api/internal/rest/payments_handlers.go")) &&
+    /SanitizePlayerFacingReason\(body\.Note\)/.test(
+      read("apps/api/internal/rest/payments_handlers.go"),
+    ),
+  "Console reject fails closed when note empty/unsanitary",
+);
+assert(
+  /receipt_reject_reason_required/.test(
+    read("apps/api/migrations/544_receipt_reject_reason_required_chrome.sql"),
+  ),
+  "Migration 544 seeds receipt_reject_reason_required chrome",
+);
+assert(
+  /Query\(\)\.Get\("reason"\)/.test(botHandlers) && /EmitReceiptReview/.test(botHandlers),
+  "Bot reject passes clean reason query into EmitReceiptReview",
+);
+assert(
+  /Your payment proof was rejected\. Reason: %s\./.test(
+    read("apps/api/migrations/543_player_receipt_rejected_notif.sql"),
+  ),
+  "Mig 543 body template includes Reason: %s",
+);
+assert(
+  /receipt_review_note_label/.test(read("apps/admin/src/types/admin-console-chrome.ts")),
+  "Admin chrome types require receipt_review_note_label",
+);
+assert(
+  /!reviewNote\.trim\(\)/.test(read("apps/admin/src/app/(console)/payments/receipts/page.tsx")),
+  "Admin receipt detail reject requires note",
+);
+assert(
+  /!receiptReviewNote\.trim\(\)/.test(
+    read("apps/admin/src/app/(console)/payments/transactions/page.tsx"),
+  ),
+  "Admin transactions receipt reject requires note",
+);
+assert(
+  /\/receipts/.test(read("apps/mobile/lib/features/notifications/notification_href_nav.dart")),
+  "Flutter notification href navigates /receipts",
+);
+assert(
+  /item\.body/.test(read("apps/web/src/components/notifications/NotificationBell.tsx")),
+  "Web notification bell renders API body (includes reject reason)",
 );
 assert(
   /RejectPayoutAndRefund/.test(botHandlers) && /wallet_credited:payout_reject:/.test(botHandlers),

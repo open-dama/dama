@@ -685,6 +685,12 @@ func (a *PaymentsAPI) ReviewReceipt(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var body reviewBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// Reject without a player-facing reason fails closed (Telegram bot parity → player.receipt_rejected).
+	// Sanitize before the gate so control-only / whitespace-only notes cannot bypass.
+	if !body.Approve && notifications.SanitizePlayerFacingReason(body.Note) == "" {
+		writeAdminPaymentsChromeError(w, a.Settings, r.Context(), http.StatusBadRequest, "receipt_reject_reason_required")
+		return
+	}
 	rec, err := a.Payments.ReviewReceipt(r.Context(), id, adminID, body.Approve, body.Note)
 	if err != nil {
 		if errors.Is(err, payments.ErrReceiptAlreadyReviewed) {
@@ -701,11 +707,9 @@ func (a *PaymentsAPI) ReviewReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	displayStatus := payments.ReceiptDisplayStatus(rec.Status)
 	if a.DB != nil && a.DB.Ready() {
-		// Notif body uses display status (approved → paid) so players see Paid, not Approved.
-		if statusLabel := walletListStatusLabel(r.Context(), a.Settings, displayStatus); statusLabel != "" {
-			notifications.EmitPlayer(r.Context(), a.DB.Pool, rec.UserID, notifications.KindPlayerReceiptReviewed,
-				"receipt_reviewed:"+rec.ID, rec.ID, statusLabel)
-		}
+		// Approve → status label (Paid). Reject → dedicated kind with player-facing note when present.
+		statusLabel := walletListStatusLabel(r.Context(), a.Settings, displayStatus)
+		notifications.EmitReceiptReview(r.Context(), a.DB.Pool, rec.UserID, rec.ID, statusLabel, body.Approve, body.Note)
 		if body.Approve {
 			args := notifications.MoneyArgs(rec.Amount, rec.Currency)
 			notifications.EmitPlayer(r.Context(), a.DB.Pool, rec.UserID, notifications.KindPlayerWalletCredited,
@@ -726,6 +730,9 @@ func (a *PaymentsAPI) ReviewReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	if rec.ReviewedAt != nil {
 		reviewed["reviewed_at"] = *rec.ReviewedAt
+	}
+	if n := strings.TrimSpace(rec.ReviewNote); n != "" {
+		reviewed["review_note"] = n
 	}
 	writeJSON(w, http.StatusOK, reviewed)
 }

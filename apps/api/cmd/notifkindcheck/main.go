@@ -65,6 +65,7 @@ var expected = []string{
 	"player.match_found",
 	"player.payout_updated",
 	"player.receipt_reviewed",
+	"player.receipt_rejected",
 	"player.tournament_created",
 	"player.tournament_status",
 	"player.tournament_match_ready",

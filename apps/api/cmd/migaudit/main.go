@@ -152,7 +152,7 @@ func main() {
 		"player.friend_added", "player.friend_removed", "player.game_finished",
 		"player.invite_accepted", "player.invite_cancelled", "player.invite_declined",
 		"player.invite_expired", "player.invite_received", "player.kyc_reviewed",
-		"player.match_found", "player.payout_updated", "player.receipt_reviewed",
+		"player.match_found", "player.payout_updated", "player.receipt_reviewed", "player.receipt_rejected",
 		"player.tournament_created", "player.tournament_status", "player.wallet_credited",
 	}
 	missingKinds := []string{}

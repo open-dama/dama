@@ -99,25 +99,76 @@ func botTelegramAdminNote(r *http.Request, cfg store.TelegramOpsBotConfig, prefi
 	tid := strings.TrimSpace(r.URL.Query().Get("admin_telegram_id"))
 	notes := strings.TrimSpace(r.URL.Query().Get("notes"))
 	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
-	joiner := strings.TrimSpace(cfg.ReviewNoteJoiner)
-	parts := []string{strings.TrimSpace(prefix)}
-	if tid != "" {
-		parts = append(parts, strings.ReplaceAll(cfg.ReviewNoteTelegramIDTpl, "{telegram_id}", tid))
+	// Do not TrimSpace joiner - trailing space in ". " is intentional (VSIM readability).
+	joiner := cfg.ReviewNoteJoiner
+	if strings.TrimSpace(joiner) == "" {
+		joiner = ". "
 	}
-	if notes != "" {
-		parts = append(parts, notes)
+	expand := func(s string) string {
+		s = strings.TrimSpace(s)
+		if tid != "" {
+			s = strings.ReplaceAll(s, "{telegram_id}", tid)
+		} else {
+			s = strings.ReplaceAll(s, "{telegram_id}", "")
+		}
+		if reason != "" {
+			s = strings.ReplaceAll(s, "{reason}", reason)
+		} else {
+			s = strings.ReplaceAll(s, "{reason}", "")
+		}
+		return strings.TrimSpace(s)
 	}
-	if reason != "" {
-		parts = append(parts, strings.ReplaceAll(cfg.ReviewNoteReasonTemplate, "{reason}", reason))
+	containsTID := func(s string) bool {
+		return tid != "" && strings.Contains(s, tid)
 	}
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
+	parts := make([]string, 0, 4)
+	if primary := expand(prefix); primary != "" {
+		parts = append(parts, primary)
+	}
+	// Append telegram-id fragment only when the primary line did not already include it
+	// (VSIM: one sentence "Approved via Telegram Bot by {id}").
+	if tidPart := expand(cfg.ReviewNoteTelegramIDTpl); tidPart != "" {
+		already := false
+		for _, p := range parts {
+			if containsTID(p) {
+				already = true
+				break
+			}
+		}
+		if !already {
+			parts = append(parts, tidPart)
 		}
 	}
-	return strings.Join(out, joiner)
+	if notes != "" {
+		n := expand(notes)
+		if n != "" {
+			dup := false
+			for _, p := range parts {
+				if p == n || (containsTID(p) && containsTID(n)) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				parts = append(parts, n)
+			}
+		}
+	}
+	if reason != "" {
+		if rpart := expand(cfg.ReviewNoteReasonTemplate); rpart != "" && !strings.Contains(rpart, "{reason}") {
+			hasReason := false
+			for _, p := range parts {
+				if strings.Contains(p, reason) {
+					hasReason = true
+					break
+				}
+			}
+			if !hasReason {
+				parts = append(parts, rpart)
+			}
+		}
+	}
+	return strings.Join(parts, joiner)
 }
 
 func (a *TelegramBotAPI) userDisplay(r *http.Request, userID string) (name, phone, email string) {
@@ -277,7 +328,8 @@ func (a *TelegramBotAPI) RejectReceipt(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(r.URL.Query().Get("reason")) == "" {
+	// Sanitize gate matches console: control-only reasons must not reach review.
+	if notifications.SanitizePlayerFacingReason(r.URL.Query().Get("reason")) == "" {
 		a.writeBotErr(w, http.StatusBadRequest, cfg.ErrRejectReasonRequired)
 		return
 	}
@@ -310,11 +362,14 @@ func (a *TelegramBotAPI) reviewReceipt(w http.ResponseWriter, r *http.Request, c
 	}
 	displayStatus := payments.ReceiptDisplayStatus(rec.Status)
 	if a.DB != nil && a.DB.Ready() {
-		// Notif body uses display status (approved → paid) so players see Paid, not Approved.
-		if statusLabel := walletListStatusLabel(r.Context(), a.Settings, displayStatus); statusLabel != "" {
-			notifications.EmitPlayer(r.Context(), a.DB.Pool, rec.UserID, notifications.KindPlayerReceiptReviewed,
-				"receipt_reviewed:"+rec.ID, rec.ID, statusLabel)
+		// Approve → status label (Paid). Reject → player.receipt_rejected with clean reason
+		// (query param), never the ops-prefixed review_note.
+		statusLabel := walletListStatusLabel(r.Context(), a.Settings, displayStatus)
+		playerReason := ""
+		if !approve {
+			playerReason = strings.TrimSpace(r.URL.Query().Get("reason"))
 		}
+		notifications.EmitReceiptReview(r.Context(), a.DB.Pool, rec.UserID, rec.ID, statusLabel, approve, playerReason)
 		if approve {
 			args := notifications.MoneyArgs(rec.Amount, rec.Currency)
 			notifications.EmitPlayer(r.Context(), a.DB.Pool, rec.UserID, notifications.KindPlayerWalletCredited,

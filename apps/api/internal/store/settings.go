@@ -40,81 +40,92 @@ type GeoPaymentConfig struct {
 // TelegramOpsBotConfig is loaded from platform_settings.key = 'telegram_ops_bot'.
 // Bridges manual receipt + payout review to the shared telegram_bot worker.
 type TelegramOpsBotConfig struct {
-	Enabled                      bool   `json:"enabled"`
-	BotServiceURL                string `json:"bot_service_url"`
-	BotAPIKey                    string `json:"bot_api_key"`
-	ReviewerUserID               string `json:"reviewer_user_id"`
-	NotifyTimeoutMS              int    `json:"notify_timeout_ms"`
-	NotifyReceiptType            string `json:"notify_receipt_type"`
-	NotifyPayoutType             string `json:"notify_payout_type"`
-	ProductLabel                 string `json:"product_label"`
-	ReceiptHubTitle              string `json:"receipt_hub_title"`
-	ReceiptHubEmpty              string `json:"receipt_hub_empty"`
-	ReceiptDetailTitle           string `json:"receipt_detail_title"`
-	ReceiptNotifyTitle           string `json:"receipt_notify_title"`
-	PayoutHubTitle               string `json:"payout_hub_title"`
-	PayoutHubEmpty               string `json:"payout_hub_empty"`
-	PayoutDetailTitle            string `json:"payout_detail_title"`
-	PayoutNotifyTitle            string `json:"payout_notify_title"`
-	BtnViewDetails               string `json:"btn_view_details"`
-	BtnViewHub                   string `json:"btn_view_hub"`
-	BtnApprove                   string `json:"btn_approve"`
-	BtnReject                    string `json:"btn_reject"`
-	BtnMarkPaid                  string `json:"btn_mark_paid"`
-	BtnBackHub                   string `json:"btn_back_hub"`
-	BtnClose                     string `json:"btn_close"`
-	ErrBotNotConfigured          string `json:"err_bot_not_configured"`
-	ErrUnauthorizedBot           string `json:"err_unauthorized_bot"`
-	ErrReviewerMissing           string `json:"err_reviewer_missing"`
-	MenuReceiptsLabel            string `json:"menu_receipts_label"`
-	MenuPayoutsLabel             string `json:"menu_payouts_label"`
-	MenuReceiptsLabelAm          string `json:"menu_receipts_label_am"`
-	MenuPayoutsLabelAm           string `json:"menu_payouts_label_am"`
-	UnknownUserLabel             string `json:"unknown_user_label"`
-	NALabel                      string `json:"na_label"`
-	RejectReasonPromptReceipt    string `json:"reject_reason_prompt_receipt"`
-	RejectReasonPromptPayout     string `json:"reject_reason_prompt_payout"`
-	RejectCancelled              string `json:"reject_cancelled"`
-	ApprovedToast                string `json:"approved_toast"`
-	RejectedToast                string `json:"rejected_toast"`
-	PaidToast                    string `json:"paid_toast"`
-	ErrFetchFailed               string `json:"err_fetch_failed"`
-	ErrNotConfiguredEnv          string `json:"err_not_configured_env"`
-	HubFoundTemplate             string `json:"hub_found_template"`
-	AdminBackLabel               string `json:"admin_back_label"`
-	ErrNotAllowed                string `json:"err_not_allowed"`
-	ErrBadCallback               string `json:"err_bad_callback"`
-	UserFallbackTemplate         string `json:"user_fallback_template"`
-	NoteApprovedByTemplate       string `json:"note_approved_by_template"`
-	NotePaidByTemplate           string `json:"note_paid_by_template"`
-	ReviewNoteApprovedPrefix     string `json:"review_note_approved_prefix"`
-	ReviewNoteRejectedPrefix     string `json:"review_note_rejected_prefix"`
-	ReviewNotePaidPrefix         string `json:"review_note_paid_prefix"`
-	ReviewNoteTelegramIDTpl      string `json:"review_note_telegram_id_template"`
-	ReviewNoteReasonTemplate     string `json:"review_note_reason_template"`
-	ReviewNoteJoiner             string `json:"review_note_joiner"`
-	ReceiptPendingStatus         string `json:"receipt_pending_status"`
-	HTTPClientTimeoutSeconds     int    `json:"http_client_timeout_seconds"`
-	ErrBotNotInitialized         string `json:"err_bot_not_initialized"`
-	ErrUnavailable               string `json:"err_unavailable"`
-	ErrBotRequestFailed          string `json:"err_bot_request_failed"`
-	ErrPaymentsUnavailable       string `json:"err_payments_unavailable"`
-	ErrPayoutsUnavailable        string `json:"err_payouts_unavailable"`
-	ErrReceiptNotFound           string `json:"err_receipt_not_found"`
-	ErrPayoutNotFound            string `json:"err_payout_not_found"`
-	ErrInvalidPayoutTransition   string `json:"err_invalid_payout_transition"`
-	ErrInvalidPayoutStatus       string `json:"err_invalid_payout_status"`
-	ErrRefundFailedPrefix        string `json:"err_refund_failed_prefix"`
-	HubListLimit                 int    `json:"hub_list_limit"`
-	ErrReceiptReviewFailed       string `json:"err_receipt_review_failed"`
-	ErrPayoutReviewFailed        string `json:"err_payout_review_failed"`
-	ErrRejectReasonRequired      string `json:"err_reject_reason_required"`
-	ErrNoTelegramAdmins          string `json:"err_no_telegram_admins"`
-	RejectKeyboardLang           string `json:"reject_keyboard_lang"`
-	HubHeaderMDTemplate          string `json:"hub_header_md_template"`
-	HubEmptyMDTemplate           string `json:"hub_empty_md_template"`
-	HubReceiptButtonTemplate     string `json:"hub_receipt_button_template"`
-	HubPayoutButtonTemplate      string `json:"hub_payout_button_template"`
+	Enabled                        bool   `json:"enabled"`
+	BotServiceURL                  string `json:"bot_service_url"`
+	BotAPIKey                      string `json:"bot_api_key"`
+	ReviewerUserID                 string `json:"reviewer_user_id"`
+	NotifyTimeoutMS                int    `json:"notify_timeout_ms"`
+	NotifyReceiptType              string `json:"notify_receipt_type"`
+	NotifyPayoutType               string `json:"notify_payout_type"`
+	ProductLabel                   string `json:"product_label"`
+	ReceiptHubTitle                string `json:"receipt_hub_title"`
+	ReceiptHubEmpty                string `json:"receipt_hub_empty"`
+	ReceiptDetailTitle             string `json:"receipt_detail_title"`
+	ReceiptNotifyTitle             string `json:"receipt_notify_title"`
+	PayoutHubTitle                 string `json:"payout_hub_title"`
+	PayoutHubEmpty                 string `json:"payout_hub_empty"`
+	PayoutDetailTitle              string `json:"payout_detail_title"`
+	PayoutNotifyTitle              string `json:"payout_notify_title"`
+	BtnViewDetails                 string `json:"btn_view_details"`
+	BtnViewReceipt                 string `json:"btn_view_receipt"`
+	BtnViewHub                     string `json:"btn_view_hub"`
+	BtnApprove                     string `json:"btn_approve"`
+	BtnReject                      string `json:"btn_reject"`
+	BtnMarkPaid                    string `json:"btn_mark_paid"`
+	BtnBackHub                     string `json:"btn_back_hub"`
+	BtnClose                       string `json:"btn_close"`
+	ReceiptLinkHTMLTemplate        string `json:"receipt_link_html_template"`
+	DetailChooseAction             string `json:"detail_choose_action"`
+	StatusChipPending              string `json:"status_chip_pending"`
+	StatusChipApproved             string `json:"status_chip_approved"`
+	StatusChipRejected             string `json:"status_chip_rejected"`
+	StatusChipPaid                 string `json:"status_chip_paid"`
+	StatusIconPending              string `json:"status_icon_pending"`
+	StatusIconApproved             string `json:"status_icon_approved"`
+	StatusIconRejected             string `json:"status_icon_rejected"`
+	StatusIconPaid                 string `json:"status_icon_paid"`
+	ErrBotNotConfigured            string `json:"err_bot_not_configured"`
+	ErrUnauthorizedBot             string `json:"err_unauthorized_bot"`
+	ErrReviewerMissing             string `json:"err_reviewer_missing"`
+	MenuReceiptsLabel              string `json:"menu_receipts_label"`
+	MenuPayoutsLabel               string `json:"menu_payouts_label"`
+	MenuReceiptsLabelAm            string `json:"menu_receipts_label_am"`
+	MenuPayoutsLabelAm             string `json:"menu_payouts_label_am"`
+	UnknownUserLabel               string `json:"unknown_user_label"`
+	NALabel                        string `json:"na_label"`
+	RejectReasonPromptReceipt      string `json:"reject_reason_prompt_receipt"`
+	RejectReasonPromptPayout       string `json:"reject_reason_prompt_payout"`
+	RejectCancelled                string `json:"reject_cancelled"`
+	ApprovedToast                  string `json:"approved_toast"`
+	RejectedToast                  string `json:"rejected_toast"`
+	PaidToast                      string `json:"paid_toast"`
+	ErrFetchFailed                 string `json:"err_fetch_failed"`
+	ErrNotConfiguredEnv            string `json:"err_not_configured_env"`
+	HubFoundTemplate               string `json:"hub_found_template"`
+	AdminBackLabel                 string `json:"admin_back_label"`
+	ErrNotAllowed                  string `json:"err_not_allowed"`
+	ErrBadCallback                 string `json:"err_bad_callback"`
+	UserFallbackTemplate           string `json:"user_fallback_template"`
+	NoteApprovedByTemplate         string `json:"note_approved_by_template"`
+	NotePaidByTemplate             string `json:"note_paid_by_template"`
+	ReviewNoteApprovedPrefix       string `json:"review_note_approved_prefix"`
+	ReviewNoteRejectedPrefix       string `json:"review_note_rejected_prefix"`
+	ReviewNotePaidPrefix           string `json:"review_note_paid_prefix"`
+	ReviewNoteTelegramIDTpl        string `json:"review_note_telegram_id_template"`
+	ReviewNoteReasonTemplate       string `json:"review_note_reason_template"`
+	ReviewNoteJoiner               string `json:"review_note_joiner"`
+	ReceiptPendingStatus           string `json:"receipt_pending_status"`
+	HTTPClientTimeoutSeconds       int    `json:"http_client_timeout_seconds"`
+	ErrBotNotInitialized           string `json:"err_bot_not_initialized"`
+	ErrUnavailable                 string `json:"err_unavailable"`
+	ErrBotRequestFailed            string `json:"err_bot_request_failed"`
+	ErrPaymentsUnavailable         string `json:"err_payments_unavailable"`
+	ErrPayoutsUnavailable          string `json:"err_payouts_unavailable"`
+	ErrReceiptNotFound             string `json:"err_receipt_not_found"`
+	ErrPayoutNotFound              string `json:"err_payout_not_found"`
+	ErrInvalidPayoutTransition     string `json:"err_invalid_payout_transition"`
+	ErrInvalidPayoutStatus         string `json:"err_invalid_payout_status"`
+	ErrRefundFailedPrefix          string `json:"err_refund_failed_prefix"`
+	HubListLimit                   int    `json:"hub_list_limit"`
+	ErrReceiptReviewFailed         string `json:"err_receipt_review_failed"`
+	ErrPayoutReviewFailed          string `json:"err_payout_review_failed"`
+	ErrRejectReasonRequired        string `json:"err_reject_reason_required"`
+	ErrNoTelegramAdmins            string `json:"err_no_telegram_admins"`
+	RejectKeyboardLang             string `json:"reject_keyboard_lang"`
+	HubHeaderMDTemplate            string `json:"hub_header_md_template"`
+	HubEmptyMDTemplate             string `json:"hub_empty_md_template"`
+	HubReceiptButtonTemplate       string `json:"hub_receipt_button_template"`
+	HubPayoutButtonTemplate        string `json:"hub_payout_button_template"`
 	ReceiptDetailHTMLTemplate      string `json:"receipt_detail_html_template"`
 	PayoutDetailHTMLTemplate       string `json:"payout_detail_html_template"`
 	ReceiptDetailNotesHTMLTemplate string `json:"receipt_detail_notes_html_template"`
@@ -988,6 +999,39 @@ func (s *SettingsStore) ReloadTelegramOpsBot(ctx context.Context) error {
 	if _, err := telegramOpsRequiredString(cfg.BtnViewDetails, "btn_view_details"); err != nil {
 		return err
 	}
+	if _, err := telegramOpsRequiredString(cfg.BtnViewReceipt, "btn_view_receipt"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.ReceiptLinkHTMLTemplate, "receipt_link_html_template"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.DetailChooseAction, "detail_choose_action"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusChipPending, "status_chip_pending"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusChipApproved, "status_chip_approved"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusChipRejected, "status_chip_rejected"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusChipPaid, "status_chip_paid"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusIconPending, "status_icon_pending"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusIconApproved, "status_icon_approved"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusIconRejected, "status_icon_rejected"); err != nil {
+		return err
+	}
+	if _, err := telegramOpsRequiredString(cfg.StatusIconPaid, "status_icon_paid"); err != nil {
+		return err
+	}
 	if _, err := telegramOpsRequiredString(cfg.BtnViewHub, "btn_view_hub"); err != nil {
 		return err
 	}
@@ -1308,81 +1352,92 @@ func (s *SettingsStore) SetTelegramOpsBot(ctx context.Context, cfg TelegramOpsBo
 		}
 	}
 	raw, err := json.Marshal(map[string]any{
-		"enabled":                          cfg.Enabled,
-		"bot_service_url":                  cfg.BotServiceURL,
-		"bot_api_key":                      cfg.BotAPIKey,
-		"reviewer_user_id":                 cfg.ReviewerUserID,
-		"notify_timeout_ms":                cfg.NotifyTimeoutMS,
-		"notify_receipt_type":              cfg.NotifyReceiptType,
-		"notify_payout_type":               cfg.NotifyPayoutType,
-		"product_label":                    cfg.ProductLabel,
-		"receipt_hub_title":                cfg.ReceiptHubTitle,
-		"receipt_hub_empty":                cfg.ReceiptHubEmpty,
-		"receipt_detail_title":             cfg.ReceiptDetailTitle,
-		"receipt_notify_title":             cfg.ReceiptNotifyTitle,
-		"payout_hub_title":                 cfg.PayoutHubTitle,
-		"payout_hub_empty":                 cfg.PayoutHubEmpty,
-		"payout_detail_title":              cfg.PayoutDetailTitle,
-		"payout_notify_title":              cfg.PayoutNotifyTitle,
-		"btn_view_details":                 cfg.BtnViewDetails,
-		"btn_view_hub":                     cfg.BtnViewHub,
-		"btn_approve":                      cfg.BtnApprove,
-		"btn_reject":                       cfg.BtnReject,
-		"btn_mark_paid":                    cfg.BtnMarkPaid,
-		"btn_back_hub":                     cfg.BtnBackHub,
-		"btn_close":                        cfg.BtnClose,
-		"err_bot_not_configured":           cfg.ErrBotNotConfigured,
-		"err_unauthorized_bot":             cfg.ErrUnauthorizedBot,
-		"err_reviewer_missing":             cfg.ErrReviewerMissing,
-		"menu_receipts_label":              cfg.MenuReceiptsLabel,
-		"menu_payouts_label":               cfg.MenuPayoutsLabel,
-		"menu_receipts_label_am":           cfg.MenuReceiptsLabelAm,
-		"menu_payouts_label_am":            cfg.MenuPayoutsLabelAm,
-		"unknown_user_label":               cfg.UnknownUserLabel,
-		"na_label":                         cfg.NALabel,
-		"reject_reason_prompt_receipt":     cfg.RejectReasonPromptReceipt,
-		"reject_reason_prompt_payout":      cfg.RejectReasonPromptPayout,
-		"reject_cancelled":                 cfg.RejectCancelled,
-		"approved_toast":                   cfg.ApprovedToast,
-		"rejected_toast":                   cfg.RejectedToast,
-		"paid_toast":                       cfg.PaidToast,
-		"err_fetch_failed":                 cfg.ErrFetchFailed,
-		"err_not_configured_env":           cfg.ErrNotConfiguredEnv,
-		"hub_found_template":               cfg.HubFoundTemplate,
-		"admin_back_label":                 cfg.AdminBackLabel,
-		"err_not_allowed":                  cfg.ErrNotAllowed,
-		"err_bad_callback":                 cfg.ErrBadCallback,
-		"user_fallback_template":           cfg.UserFallbackTemplate,
-		"note_approved_by_template":        cfg.NoteApprovedByTemplate,
-		"note_paid_by_template":            cfg.NotePaidByTemplate,
-		"review_note_approved_prefix":      cfg.ReviewNoteApprovedPrefix,
-		"review_note_rejected_prefix":      cfg.ReviewNoteRejectedPrefix,
-		"review_note_paid_prefix":          cfg.ReviewNotePaidPrefix,
-		"review_note_telegram_id_template": cfg.ReviewNoteTelegramIDTpl,
-		"review_note_reason_template":      cfg.ReviewNoteReasonTemplate,
-		"review_note_joiner":               cfg.ReviewNoteJoiner,
-		"receipt_pending_status":           cfg.ReceiptPendingStatus,
-		"http_client_timeout_seconds":      cfg.HTTPClientTimeoutSeconds,
-		"err_bot_not_initialized":          cfg.ErrBotNotInitialized,
-		"err_unavailable":                  cfg.ErrUnavailable,
-		"err_bot_request_failed":           cfg.ErrBotRequestFailed,
-		"err_payments_unavailable":         cfg.ErrPaymentsUnavailable,
-		"err_payouts_unavailable":          cfg.ErrPayoutsUnavailable,
-		"err_receipt_not_found":            cfg.ErrReceiptNotFound,
-		"err_payout_not_found":             cfg.ErrPayoutNotFound,
-		"err_invalid_payout_transition":    cfg.ErrInvalidPayoutTransition,
-		"err_invalid_payout_status":        cfg.ErrInvalidPayoutStatus,
-		"err_refund_failed_prefix":         cfg.ErrRefundFailedPrefix,
-		"hub_list_limit":                   cfg.HubListLimit,
-		"err_receipt_review_failed":        cfg.ErrReceiptReviewFailed,
-		"err_payout_review_failed":         cfg.ErrPayoutReviewFailed,
-		"err_reject_reason_required":       cfg.ErrRejectReasonRequired,
-		"err_no_telegram_admins":           cfg.ErrNoTelegramAdmins,
-		"reject_keyboard_lang":             cfg.RejectKeyboardLang,
-		"hub_header_md_template":           cfg.HubHeaderMDTemplate,
-		"hub_empty_md_template":            cfg.HubEmptyMDTemplate,
-		"hub_receipt_button_template":      cfg.HubReceiptButtonTemplate,
-		"hub_payout_button_template":       cfg.HubPayoutButtonTemplate,
+		"enabled":                            cfg.Enabled,
+		"bot_service_url":                    cfg.BotServiceURL,
+		"bot_api_key":                        cfg.BotAPIKey,
+		"reviewer_user_id":                   cfg.ReviewerUserID,
+		"notify_timeout_ms":                  cfg.NotifyTimeoutMS,
+		"notify_receipt_type":                cfg.NotifyReceiptType,
+		"notify_payout_type":                 cfg.NotifyPayoutType,
+		"product_label":                      cfg.ProductLabel,
+		"receipt_hub_title":                  cfg.ReceiptHubTitle,
+		"receipt_hub_empty":                  cfg.ReceiptHubEmpty,
+		"receipt_detail_title":               cfg.ReceiptDetailTitle,
+		"receipt_notify_title":               cfg.ReceiptNotifyTitle,
+		"payout_hub_title":                   cfg.PayoutHubTitle,
+		"payout_hub_empty":                   cfg.PayoutHubEmpty,
+		"payout_detail_title":                cfg.PayoutDetailTitle,
+		"payout_notify_title":                cfg.PayoutNotifyTitle,
+		"btn_view_details":                   cfg.BtnViewDetails,
+		"btn_view_receipt":                   cfg.BtnViewReceipt,
+		"btn_view_hub":                       cfg.BtnViewHub,
+		"btn_approve":                        cfg.BtnApprove,
+		"btn_reject":                         cfg.BtnReject,
+		"btn_mark_paid":                      cfg.BtnMarkPaid,
+		"btn_back_hub":                       cfg.BtnBackHub,
+		"btn_close":                          cfg.BtnClose,
+		"receipt_link_html_template":         cfg.ReceiptLinkHTMLTemplate,
+		"detail_choose_action":               cfg.DetailChooseAction,
+		"status_chip_pending":                cfg.StatusChipPending,
+		"status_chip_approved":               cfg.StatusChipApproved,
+		"status_chip_rejected":               cfg.StatusChipRejected,
+		"status_chip_paid":                   cfg.StatusChipPaid,
+		"status_icon_pending":                cfg.StatusIconPending,
+		"status_icon_approved":               cfg.StatusIconApproved,
+		"status_icon_rejected":               cfg.StatusIconRejected,
+		"status_icon_paid":                   cfg.StatusIconPaid,
+		"err_bot_not_configured":             cfg.ErrBotNotConfigured,
+		"err_unauthorized_bot":               cfg.ErrUnauthorizedBot,
+		"err_reviewer_missing":               cfg.ErrReviewerMissing,
+		"menu_receipts_label":                cfg.MenuReceiptsLabel,
+		"menu_payouts_label":                 cfg.MenuPayoutsLabel,
+		"menu_receipts_label_am":             cfg.MenuReceiptsLabelAm,
+		"menu_payouts_label_am":              cfg.MenuPayoutsLabelAm,
+		"unknown_user_label":                 cfg.UnknownUserLabel,
+		"na_label":                           cfg.NALabel,
+		"reject_reason_prompt_receipt":       cfg.RejectReasonPromptReceipt,
+		"reject_reason_prompt_payout":        cfg.RejectReasonPromptPayout,
+		"reject_cancelled":                   cfg.RejectCancelled,
+		"approved_toast":                     cfg.ApprovedToast,
+		"rejected_toast":                     cfg.RejectedToast,
+		"paid_toast":                         cfg.PaidToast,
+		"err_fetch_failed":                   cfg.ErrFetchFailed,
+		"err_not_configured_env":             cfg.ErrNotConfiguredEnv,
+		"hub_found_template":                 cfg.HubFoundTemplate,
+		"admin_back_label":                   cfg.AdminBackLabel,
+		"err_not_allowed":                    cfg.ErrNotAllowed,
+		"err_bad_callback":                   cfg.ErrBadCallback,
+		"user_fallback_template":             cfg.UserFallbackTemplate,
+		"note_approved_by_template":          cfg.NoteApprovedByTemplate,
+		"note_paid_by_template":              cfg.NotePaidByTemplate,
+		"review_note_approved_prefix":        cfg.ReviewNoteApprovedPrefix,
+		"review_note_rejected_prefix":        cfg.ReviewNoteRejectedPrefix,
+		"review_note_paid_prefix":            cfg.ReviewNotePaidPrefix,
+		"review_note_telegram_id_template":   cfg.ReviewNoteTelegramIDTpl,
+		"review_note_reason_template":        cfg.ReviewNoteReasonTemplate,
+		"review_note_joiner":                 cfg.ReviewNoteJoiner,
+		"receipt_pending_status":             cfg.ReceiptPendingStatus,
+		"http_client_timeout_seconds":        cfg.HTTPClientTimeoutSeconds,
+		"err_bot_not_initialized":            cfg.ErrBotNotInitialized,
+		"err_unavailable":                    cfg.ErrUnavailable,
+		"err_bot_request_failed":             cfg.ErrBotRequestFailed,
+		"err_payments_unavailable":           cfg.ErrPaymentsUnavailable,
+		"err_payouts_unavailable":            cfg.ErrPayoutsUnavailable,
+		"err_receipt_not_found":              cfg.ErrReceiptNotFound,
+		"err_payout_not_found":               cfg.ErrPayoutNotFound,
+		"err_invalid_payout_transition":      cfg.ErrInvalidPayoutTransition,
+		"err_invalid_payout_status":          cfg.ErrInvalidPayoutStatus,
+		"err_refund_failed_prefix":           cfg.ErrRefundFailedPrefix,
+		"hub_list_limit":                     cfg.HubListLimit,
+		"err_receipt_review_failed":          cfg.ErrReceiptReviewFailed,
+		"err_payout_review_failed":           cfg.ErrPayoutReviewFailed,
+		"err_reject_reason_required":         cfg.ErrRejectReasonRequired,
+		"err_no_telegram_admins":             cfg.ErrNoTelegramAdmins,
+		"reject_keyboard_lang":               cfg.RejectKeyboardLang,
+		"hub_header_md_template":             cfg.HubHeaderMDTemplate,
+		"hub_empty_md_template":              cfg.HubEmptyMDTemplate,
+		"hub_receipt_button_template":        cfg.HubReceiptButtonTemplate,
+		"hub_payout_button_template":         cfg.HubPayoutButtonTemplate,
 		"receipt_detail_html_template":       cfg.ReceiptDetailHTMLTemplate,
 		"payout_detail_html_template":        cfg.PayoutDetailHTMLTemplate,
 		"receipt_detail_notes_html_template": cfg.ReceiptDetailNotesHTMLTemplate,
@@ -1678,6 +1733,39 @@ func mergeTelegramOpsChrome(dst *TelegramOpsBotConfig, src TelegramOpsBotConfig)
 	if strings.TrimSpace(dst.ActionRejectResultMDTemplate) == "" {
 		dst.ActionRejectResultMDTemplate = src.ActionRejectResultMDTemplate
 	}
+	if strings.TrimSpace(dst.BtnViewReceipt) == "" {
+		dst.BtnViewReceipt = src.BtnViewReceipt
+	}
+	if strings.TrimSpace(dst.ReceiptLinkHTMLTemplate) == "" {
+		dst.ReceiptLinkHTMLTemplate = src.ReceiptLinkHTMLTemplate
+	}
+	if strings.TrimSpace(dst.DetailChooseAction) == "" {
+		dst.DetailChooseAction = src.DetailChooseAction
+	}
+	if strings.TrimSpace(dst.StatusChipPending) == "" {
+		dst.StatusChipPending = src.StatusChipPending
+	}
+	if strings.TrimSpace(dst.StatusChipApproved) == "" {
+		dst.StatusChipApproved = src.StatusChipApproved
+	}
+	if strings.TrimSpace(dst.StatusChipRejected) == "" {
+		dst.StatusChipRejected = src.StatusChipRejected
+	}
+	if strings.TrimSpace(dst.StatusChipPaid) == "" {
+		dst.StatusChipPaid = src.StatusChipPaid
+	}
+	if strings.TrimSpace(dst.StatusIconPending) == "" {
+		dst.StatusIconPending = src.StatusIconPending
+	}
+	if strings.TrimSpace(dst.StatusIconApproved) == "" {
+		dst.StatusIconApproved = src.StatusIconApproved
+	}
+	if strings.TrimSpace(dst.StatusIconRejected) == "" {
+		dst.StatusIconRejected = src.StatusIconRejected
+	}
+	if strings.TrimSpace(dst.StatusIconPaid) == "" {
+		dst.StatusIconPaid = src.StatusIconPaid
+	}
 }
 
 // TelegramOpsBotChromePublic returns bot-facing chrome (never includes bot_api_key).
@@ -1687,75 +1775,86 @@ func (s *SettingsStore) TelegramOpsBotChromePublic() map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"product_label":                    cfg.ProductLabel,
-		"notify_receipt_type":              cfg.NotifyReceiptType,
-		"notify_payout_type":               cfg.NotifyPayoutType,
-		"receipt_hub_title":                cfg.ReceiptHubTitle,
-		"receipt_hub_empty":                cfg.ReceiptHubEmpty,
-		"receipt_detail_title":             cfg.ReceiptDetailTitle,
-		"receipt_notify_title":             cfg.ReceiptNotifyTitle,
-		"payout_hub_title":                 cfg.PayoutHubTitle,
-		"payout_hub_empty":                 cfg.PayoutHubEmpty,
-		"payout_detail_title":              cfg.PayoutDetailTitle,
-		"payout_notify_title":              cfg.PayoutNotifyTitle,
-		"btn_view_details":                 cfg.BtnViewDetails,
-		"btn_view_hub":                     cfg.BtnViewHub,
-		"btn_approve":                      cfg.BtnApprove,
-		"btn_reject":                       cfg.BtnReject,
-		"btn_mark_paid":                    cfg.BtnMarkPaid,
-		"btn_back_hub":                     cfg.BtnBackHub,
-		"btn_close":                        cfg.BtnClose,
-		"menu_receipts_label":              cfg.MenuReceiptsLabel,
-		"menu_payouts_label":               cfg.MenuPayoutsLabel,
-		"menu_receipts_label_am":           cfg.MenuReceiptsLabelAm,
-		"menu_payouts_label_am":            cfg.MenuPayoutsLabelAm,
-		"unknown_user_label":               cfg.UnknownUserLabel,
-		"na_label":                         cfg.NALabel,
-		"reject_reason_prompt_receipt":     cfg.RejectReasonPromptReceipt,
-		"reject_reason_prompt_payout":      cfg.RejectReasonPromptPayout,
-		"reject_cancelled":                 cfg.RejectCancelled,
-		"approved_toast":                   cfg.ApprovedToast,
-		"rejected_toast":                   cfg.RejectedToast,
-		"paid_toast":                       cfg.PaidToast,
-		"err_fetch_failed":                 cfg.ErrFetchFailed,
-		"err_not_configured_env":           cfg.ErrNotConfiguredEnv,
-		"hub_found_template":               cfg.HubFoundTemplate,
-		"admin_back_label":                 cfg.AdminBackLabel,
-		"err_bot_not_configured":           cfg.ErrBotNotConfigured,
-		"err_unauthorized_bot":             cfg.ErrUnauthorizedBot,
-		"err_not_allowed":                  cfg.ErrNotAllowed,
-		"err_bad_callback":                 cfg.ErrBadCallback,
-		"user_fallback_template":           cfg.UserFallbackTemplate,
-		"note_approved_by_template":        cfg.NoteApprovedByTemplate,
-		"note_paid_by_template":            cfg.NotePaidByTemplate,
-		"review_note_approved_prefix":      cfg.ReviewNoteApprovedPrefix,
-		"review_note_rejected_prefix":      cfg.ReviewNoteRejectedPrefix,
-		"review_note_paid_prefix":          cfg.ReviewNotePaidPrefix,
-		"review_note_telegram_id_template": cfg.ReviewNoteTelegramIDTpl,
-		"review_note_reason_template":      cfg.ReviewNoteReasonTemplate,
-		"review_note_joiner":               cfg.ReviewNoteJoiner,
-		"receipt_pending_status":           cfg.ReceiptPendingStatus,
-		"http_client_timeout_seconds":      cfg.HTTPClientTimeoutSeconds,
-		"err_bot_not_initialized":          cfg.ErrBotNotInitialized,
-		"err_unavailable":                  cfg.ErrUnavailable,
-		"err_bot_request_failed":           cfg.ErrBotRequestFailed,
-		"err_payments_unavailable":         cfg.ErrPaymentsUnavailable,
-		"err_payouts_unavailable":          cfg.ErrPayoutsUnavailable,
-		"err_receipt_not_found":            cfg.ErrReceiptNotFound,
-		"err_payout_not_found":             cfg.ErrPayoutNotFound,
-		"err_invalid_payout_transition":    cfg.ErrInvalidPayoutTransition,
-		"err_invalid_payout_status":        cfg.ErrInvalidPayoutStatus,
-		"err_refund_failed_prefix":         cfg.ErrRefundFailedPrefix,
-		"hub_list_limit":                   cfg.HubListLimit,
-		"err_receipt_review_failed":        cfg.ErrReceiptReviewFailed,
-		"err_payout_review_failed":         cfg.ErrPayoutReviewFailed,
-		"err_reject_reason_required":       cfg.ErrRejectReasonRequired,
-		"err_no_telegram_admins":           cfg.ErrNoTelegramAdmins,
-		"reject_keyboard_lang":             cfg.RejectKeyboardLang,
-		"hub_header_md_template":           cfg.HubHeaderMDTemplate,
-		"hub_empty_md_template":            cfg.HubEmptyMDTemplate,
-		"hub_receipt_button_template":      cfg.HubReceiptButtonTemplate,
-		"hub_payout_button_template":       cfg.HubPayoutButtonTemplate,
+		"product_label":                      cfg.ProductLabel,
+		"notify_receipt_type":                cfg.NotifyReceiptType,
+		"notify_payout_type":                 cfg.NotifyPayoutType,
+		"receipt_hub_title":                  cfg.ReceiptHubTitle,
+		"receipt_hub_empty":                  cfg.ReceiptHubEmpty,
+		"receipt_detail_title":               cfg.ReceiptDetailTitle,
+		"receipt_notify_title":               cfg.ReceiptNotifyTitle,
+		"payout_hub_title":                   cfg.PayoutHubTitle,
+		"payout_hub_empty":                   cfg.PayoutHubEmpty,
+		"payout_detail_title":                cfg.PayoutDetailTitle,
+		"payout_notify_title":                cfg.PayoutNotifyTitle,
+		"btn_view_details":                   cfg.BtnViewDetails,
+		"btn_view_receipt":                   cfg.BtnViewReceipt,
+		"btn_view_hub":                       cfg.BtnViewHub,
+		"btn_approve":                        cfg.BtnApprove,
+		"btn_reject":                         cfg.BtnReject,
+		"btn_mark_paid":                      cfg.BtnMarkPaid,
+		"btn_back_hub":                       cfg.BtnBackHub,
+		"btn_close":                          cfg.BtnClose,
+		"receipt_link_html_template":         cfg.ReceiptLinkHTMLTemplate,
+		"detail_choose_action":               cfg.DetailChooseAction,
+		"status_chip_pending":                cfg.StatusChipPending,
+		"status_chip_approved":               cfg.StatusChipApproved,
+		"status_chip_rejected":               cfg.StatusChipRejected,
+		"status_chip_paid":                   cfg.StatusChipPaid,
+		"status_icon_pending":                cfg.StatusIconPending,
+		"status_icon_approved":               cfg.StatusIconApproved,
+		"status_icon_rejected":               cfg.StatusIconRejected,
+		"status_icon_paid":                   cfg.StatusIconPaid,
+		"menu_receipts_label":                cfg.MenuReceiptsLabel,
+		"menu_payouts_label":                 cfg.MenuPayoutsLabel,
+		"menu_receipts_label_am":             cfg.MenuReceiptsLabelAm,
+		"menu_payouts_label_am":              cfg.MenuPayoutsLabelAm,
+		"unknown_user_label":                 cfg.UnknownUserLabel,
+		"na_label":                           cfg.NALabel,
+		"reject_reason_prompt_receipt":       cfg.RejectReasonPromptReceipt,
+		"reject_reason_prompt_payout":        cfg.RejectReasonPromptPayout,
+		"reject_cancelled":                   cfg.RejectCancelled,
+		"approved_toast":                     cfg.ApprovedToast,
+		"rejected_toast":                     cfg.RejectedToast,
+		"paid_toast":                         cfg.PaidToast,
+		"err_fetch_failed":                   cfg.ErrFetchFailed,
+		"err_not_configured_env":             cfg.ErrNotConfiguredEnv,
+		"hub_found_template":                 cfg.HubFoundTemplate,
+		"admin_back_label":                   cfg.AdminBackLabel,
+		"err_bot_not_configured":             cfg.ErrBotNotConfigured,
+		"err_unauthorized_bot":               cfg.ErrUnauthorizedBot,
+		"err_not_allowed":                    cfg.ErrNotAllowed,
+		"err_bad_callback":                   cfg.ErrBadCallback,
+		"user_fallback_template":             cfg.UserFallbackTemplate,
+		"note_approved_by_template":          cfg.NoteApprovedByTemplate,
+		"note_paid_by_template":              cfg.NotePaidByTemplate,
+		"review_note_approved_prefix":        cfg.ReviewNoteApprovedPrefix,
+		"review_note_rejected_prefix":        cfg.ReviewNoteRejectedPrefix,
+		"review_note_paid_prefix":            cfg.ReviewNotePaidPrefix,
+		"review_note_telegram_id_template":   cfg.ReviewNoteTelegramIDTpl,
+		"review_note_reason_template":        cfg.ReviewNoteReasonTemplate,
+		"review_note_joiner":                 cfg.ReviewNoteJoiner,
+		"receipt_pending_status":             cfg.ReceiptPendingStatus,
+		"http_client_timeout_seconds":        cfg.HTTPClientTimeoutSeconds,
+		"err_bot_not_initialized":            cfg.ErrBotNotInitialized,
+		"err_unavailable":                    cfg.ErrUnavailable,
+		"err_bot_request_failed":             cfg.ErrBotRequestFailed,
+		"err_payments_unavailable":           cfg.ErrPaymentsUnavailable,
+		"err_payouts_unavailable":            cfg.ErrPayoutsUnavailable,
+		"err_receipt_not_found":              cfg.ErrReceiptNotFound,
+		"err_payout_not_found":               cfg.ErrPayoutNotFound,
+		"err_invalid_payout_transition":      cfg.ErrInvalidPayoutTransition,
+		"err_invalid_payout_status":          cfg.ErrInvalidPayoutStatus,
+		"err_refund_failed_prefix":           cfg.ErrRefundFailedPrefix,
+		"hub_list_limit":                     cfg.HubListLimit,
+		"err_receipt_review_failed":          cfg.ErrReceiptReviewFailed,
+		"err_payout_review_failed":           cfg.ErrPayoutReviewFailed,
+		"err_reject_reason_required":         cfg.ErrRejectReasonRequired,
+		"err_no_telegram_admins":             cfg.ErrNoTelegramAdmins,
+		"reject_keyboard_lang":               cfg.RejectKeyboardLang,
+		"hub_header_md_template":             cfg.HubHeaderMDTemplate,
+		"hub_empty_md_template":              cfg.HubEmptyMDTemplate,
+		"hub_receipt_button_template":        cfg.HubReceiptButtonTemplate,
+		"hub_payout_button_template":         cfg.HubPayoutButtonTemplate,
 		"receipt_detail_html_template":       cfg.ReceiptDetailHTMLTemplate,
 		"payout_detail_html_template":        cfg.PayoutDetailHTMLTemplate,
 		"receipt_detail_notes_html_template": cfg.ReceiptDetailNotesHTMLTemplate,

@@ -72,6 +72,8 @@ export type AdminReceipt = {
   intent_id?: string;
   created_at?: string;
   reviewed_at?: string;
+  /** Ops + player-facing review note (reject reason when present). */
+  review_note?: string;
   first_party_pdf_href?: string;
 };
 

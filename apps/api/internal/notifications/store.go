@@ -26,6 +26,7 @@ const (
 	KindPlayerMatchFound               = "player.match_found"
 	KindPlayerWalletCredited           = "player.wallet_credited"
 	KindPlayerReceiptReviewed          = "player.receipt_reviewed"
+	KindPlayerReceiptRejected          = "player.receipt_rejected"
 	KindPlayerPayoutUpdated            = "player.payout_updated"
 	KindPlayerKycReviewed              = "player.kyc_reviewed"
 	KindPlayerFriendAdded              = "player.friend_added"
