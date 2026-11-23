@@ -544,6 +544,56 @@ assert(
 );
 assert(/payout_approved_status/.test(damaCopy), "dama/telegram_bot copy has status gates");
 assert(damaOps === damaCopy, "sibling telegram_bot/dama_ops.py identical to dama copy");
+assert(/_build_receipt_detail/.test(damaOps), "dama_ops builds full receipt detail");
+assert(
+  /_refresh_receipt_detail_message/.test(damaOps) && /_iso_date_only/.test(damaOps),
+  "dama_ops refreshes receipt detail in place with date-only created",
+);
+assert(
+  /force_new/.test(damaOps) && /_refresh_payout_detail_message/.test(damaOps),
+  "dama_ops post-approve sends new hub list after detail refresh",
+);
+assert(
+  /url=receipt_url_http/.test(damaOps) && /callback_data="noop"/.test(damaOps),
+  "dama_ops receipt detail has View Receipt URL + status chip",
+);
+assert(
+  /receipt_detail_notes_html_template/.test(damaOps) &&
+    /payout_detail_notes_html_template/.test(damaOps),
+  "dama_ops appends optional review notes on detail",
+);
+const mig542 = read("apps/api/migrations/542_telegram_ops_receipt_detail_notes.sql");
+assert(
+  /receipt_detail_notes_html_template/.test(mig542) &&
+    /payout_detail_notes_html_template/.test(mig542),
+  "mig 542 seeds receipt/payout detail notes templates",
+);
+assert(
+  /ReceiptDetailNotesHTMLTemplate/.test(settings) && /PayoutDetailNotesHTMLTemplate/.test(settings),
+  "Go telegram ops chrome exposes detail notes templates",
+);
+const enrollModal = read("apps/web/src/components/tournaments/PaymentEnrollModal.tsx");
+assert(
+  /closeDialogThen/.test(enrollModal) && /withWalletFocusParam\(href, "topup"\)/.test(enrollModal),
+  "PaymentEnrollModal closes then opens wallet with focus=topup",
+);
+assert(
+  /data-\[state=closed\]:animate-out/.test(enrollModal),
+  "PaymentEnrollModal has Radix exit animation for handoff",
+);
+const walletWs = read("apps/web/src/components/wallet/WalletWorkspace.tsx");
+assert(
+  /DIALOG_CLEAR_MS/.test(walletWs) &&
+    /focusTopUpForm/.test(walletWs) &&
+    /setTimeout/.test(walletWs),
+  "WalletWorkspace defers focus=topup dialog open after handoff",
+);
+assert(
+  /focusOpened\.current = true;\s*setTopupStep\("amount"\);\s*releaseBodyPointerEvents\(\);\s*openForm\("topup"\)/.test(
+    walletWs.replace(/\r\n/g, "\n"),
+  ),
+  "WalletWorkspace latches focusOpened only when topup dialog opens",
+);
 
 const adminPage = read("apps/admin/src/app/(console)/payments/telegram-ops/page.tsx");
 assert(/useConsoleTelegramOpsQuery/.test(adminPage), "admin telegram-ops page");

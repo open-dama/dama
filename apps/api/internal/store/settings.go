@@ -115,15 +115,17 @@ type TelegramOpsBotConfig struct {
 	HubEmptyMDTemplate           string `json:"hub_empty_md_template"`
 	HubReceiptButtonTemplate     string `json:"hub_receipt_button_template"`
 	HubPayoutButtonTemplate      string `json:"hub_payout_button_template"`
-	ReceiptDetailHTMLTemplate    string `json:"receipt_detail_html_template"`
-	PayoutDetailHTMLTemplate     string `json:"payout_detail_html_template"`
-	ReceiptNotifyHTMLTemplate    string `json:"receipt_notify_html_template"`
-	PayoutNotifyHTMLTemplate     string `json:"payout_notify_html_template"`
-	ScreenshotLineTemplate       string `json:"screenshot_line_template"`
-	ButtonTruncateSuffix         string `json:"button_truncate_suffix"`
-	ActionResultMDTemplate       string `json:"action_result_md_template"`
-	ActionRejectResultMDTemplate string `json:"action_reject_result_md_template"`
-	Source                       string `json:"-"`
+	ReceiptDetailHTMLTemplate      string `json:"receipt_detail_html_template"`
+	PayoutDetailHTMLTemplate       string `json:"payout_detail_html_template"`
+	ReceiptDetailNotesHTMLTemplate string `json:"receipt_detail_notes_html_template"`
+	PayoutDetailNotesHTMLTemplate  string `json:"payout_detail_notes_html_template"`
+	ReceiptNotifyHTMLTemplate      string `json:"receipt_notify_html_template"`
+	PayoutNotifyHTMLTemplate       string `json:"payout_notify_html_template"`
+	ScreenshotLineTemplate         string `json:"screenshot_line_template"`
+	ButtonTruncateSuffix           string `json:"button_truncate_suffix"`
+	ActionResultMDTemplate         string `json:"action_result_md_template"`
+	ActionRejectResultMDTemplate   string `json:"action_reject_result_md_template"`
+	Source                         string `json:"-"`
 }
 
 // ModerationConfig is loaded from platform_settings.key = 'avatar_moderation'.
@@ -1381,14 +1383,16 @@ func (s *SettingsStore) SetTelegramOpsBot(ctx context.Context, cfg TelegramOpsBo
 		"hub_empty_md_template":            cfg.HubEmptyMDTemplate,
 		"hub_receipt_button_template":      cfg.HubReceiptButtonTemplate,
 		"hub_payout_button_template":       cfg.HubPayoutButtonTemplate,
-		"receipt_detail_html_template":     cfg.ReceiptDetailHTMLTemplate,
-		"payout_detail_html_template":      cfg.PayoutDetailHTMLTemplate,
-		"receipt_notify_html_template":     cfg.ReceiptNotifyHTMLTemplate,
-		"payout_notify_html_template":      cfg.PayoutNotifyHTMLTemplate,
-		"screenshot_line_template":         cfg.ScreenshotLineTemplate,
-		"button_truncate_suffix":           cfg.ButtonTruncateSuffix,
-		"action_result_md_template":        cfg.ActionResultMDTemplate,
-		"action_reject_result_md_template": cfg.ActionRejectResultMDTemplate,
+		"receipt_detail_html_template":       cfg.ReceiptDetailHTMLTemplate,
+		"payout_detail_html_template":        cfg.PayoutDetailHTMLTemplate,
+		"receipt_detail_notes_html_template": cfg.ReceiptDetailNotesHTMLTemplate,
+		"payout_detail_notes_html_template":  cfg.PayoutDetailNotesHTMLTemplate,
+		"receipt_notify_html_template":       cfg.ReceiptNotifyHTMLTemplate,
+		"payout_notify_html_template":        cfg.PayoutNotifyHTMLTemplate,
+		"screenshot_line_template":           cfg.ScreenshotLineTemplate,
+		"button_truncate_suffix":             cfg.ButtonTruncateSuffix,
+		"action_result_md_template":          cfg.ActionResultMDTemplate,
+		"action_reject_result_md_template":   cfg.ActionRejectResultMDTemplate,
 	})
 	if err != nil {
 		return err
@@ -1650,6 +1654,12 @@ func mergeTelegramOpsChrome(dst *TelegramOpsBotConfig, src TelegramOpsBotConfig)
 	if strings.TrimSpace(dst.PayoutDetailHTMLTemplate) == "" {
 		dst.PayoutDetailHTMLTemplate = src.PayoutDetailHTMLTemplate
 	}
+	if strings.TrimSpace(dst.ReceiptDetailNotesHTMLTemplate) == "" {
+		dst.ReceiptDetailNotesHTMLTemplate = src.ReceiptDetailNotesHTMLTemplate
+	}
+	if strings.TrimSpace(dst.PayoutDetailNotesHTMLTemplate) == "" {
+		dst.PayoutDetailNotesHTMLTemplate = src.PayoutDetailNotesHTMLTemplate
+	}
 	if strings.TrimSpace(dst.ReceiptNotifyHTMLTemplate) == "" {
 		dst.ReceiptNotifyHTMLTemplate = src.ReceiptNotifyHTMLTemplate
 	}
@@ -1746,14 +1756,16 @@ func (s *SettingsStore) TelegramOpsBotChromePublic() map[string]any {
 		"hub_empty_md_template":            cfg.HubEmptyMDTemplate,
 		"hub_receipt_button_template":      cfg.HubReceiptButtonTemplate,
 		"hub_payout_button_template":       cfg.HubPayoutButtonTemplate,
-		"receipt_detail_html_template":     cfg.ReceiptDetailHTMLTemplate,
-		"payout_detail_html_template":      cfg.PayoutDetailHTMLTemplate,
-		"receipt_notify_html_template":     cfg.ReceiptNotifyHTMLTemplate,
-		"payout_notify_html_template":      cfg.PayoutNotifyHTMLTemplate,
-		"screenshot_line_template":         cfg.ScreenshotLineTemplate,
-		"button_truncate_suffix":           cfg.ButtonTruncateSuffix,
-		"action_result_md_template":        cfg.ActionResultMDTemplate,
-		"action_reject_result_md_template": cfg.ActionRejectResultMDTemplate,
+		"receipt_detail_html_template":       cfg.ReceiptDetailHTMLTemplate,
+		"payout_detail_html_template":        cfg.PayoutDetailHTMLTemplate,
+		"receipt_detail_notes_html_template": cfg.ReceiptDetailNotesHTMLTemplate,
+		"payout_detail_notes_html_template":  cfg.PayoutDetailNotesHTMLTemplate,
+		"receipt_notify_html_template":       cfg.ReceiptNotifyHTMLTemplate,
+		"payout_notify_html_template":        cfg.PayoutNotifyHTMLTemplate,
+		"screenshot_line_template":           cfg.ScreenshotLineTemplate,
+		"button_truncate_suffix":             cfg.ButtonTruncateSuffix,
+		"action_result_md_template":          cfg.ActionResultMDTemplate,
+		"action_reject_result_md_template":   cfg.ActionRejectResultMDTemplate,
 	}
 }
 

@@ -111,6 +111,24 @@ export function releaseBodyPointerEvents() {
 }
 
 /**
+ * Close the current dialog, wait for the Radix exit animation, then run
+ * `next` (navigate / open another overlay). Prevents stacked-modal glitches
+ * when one dialog hands off to another (enroll → wallet top-up).
+ */
+export function closeDialogThen(
+  close: () => void,
+  next: () => void,
+  clearMs = DIALOG_CLEAR_MS,
+): void {
+  releaseBodyPointerEvents();
+  close();
+  window.setTimeout(() => {
+    releaseBodyPointerEvents();
+    next();
+  }, clearMs);
+}
+
+/**
  * Portaled Radix floating layers (Select / Popover / Menu) rendered outside
  * Dialog/Sheet content. Clicks on these must not dismiss the parent overlay.
  */

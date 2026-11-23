@@ -25,8 +25,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
 
+/// Dialog exit animation budget — match web `DIALOG_CLEAR_MS` (200ms).
+const Duration _kDialogHandoffMs = Duration(milliseconds: 200);
+
 void _openTopUpHref(
-  BuildContext context, {
+  NavigatorState navigator, {
   required String token,
   required String href,
 }) {
@@ -35,7 +38,7 @@ void _openTopUpHref(
   if (isWalletHrefPath(raw)) {
     final focus = portalWalletFocusFromHref(raw);
     final base = moneyBasePathFromHref(raw);
-    Navigator.of(context).push(
+    navigator.push(
       MaterialPageRoute(
         builder: (_) => WalletPage(
           token: token,
@@ -49,7 +52,22 @@ void _openTopUpHref(
     );
     return;
   }
-  navigateNotificationHref(context, href: raw, accessToken: token);
+  if (!navigator.mounted) return;
+  navigateNotificationHref(navigator.context, href: raw, accessToken: token);
+}
+
+/// Pop enroll dialog, wait for exit animation, then open wallet top-up.
+void _closeThenOpenTopUp(
+  BuildContext context, {
+  required String token,
+  required String href,
+}) {
+  final navigator = Navigator.of(context);
+  navigator.pop();
+  Future<void>.delayed(_kDialogHandoffMs, () {
+    if (!navigator.mounted) return;
+    _openTopUpHref(navigator, token: token, href: href);
+  });
 }
 
 /// Opens payment/enroll dialog for a tournament (chrome from GET /public/payment-modal-chrome).
@@ -660,12 +678,11 @@ class _PaymentEnrollDialogState extends State<PaymentEnrollDialog> {
                           style: TextStyle(color: tokens.danger),
                         ),
                         const SizedBox(height: 8),
-                        FilledButton(
+                          FilledButton(
                           onPressed: chrome.topUpHref.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context).pop();
-                                  _openTopUpHref(
+                                  _closeThenOpenTopUp(
                                     context,
                                     token: auth.token!,
                                     href: chrome.topUpHref,
@@ -697,8 +714,7 @@ class _PaymentEnrollDialogState extends State<PaymentEnrollDialog> {
                             onPressed: chrome.topUpHref.isEmpty
                                 ? null
                                 : () {
-                                    Navigator.of(context).pop();
-                                    _openTopUpHref(
+                                    _closeThenOpenTopUp(
                                       context,
                                       token: auth.token!,
                                       href: chrome.topUpHref,
@@ -763,8 +779,7 @@ class _PaymentEnrollDialogState extends State<PaymentEnrollDialog> {
                                 onPressed: chrome.topUpHref.isEmpty
                                     ? null
                                     : () {
-                                        Navigator.of(context).pop();
-                                        _openTopUpHref(
+                                        _closeThenOpenTopUp(
                                           context,
                                           token: auth.token!,
                                           href: chrome.topUpHref,

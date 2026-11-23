@@ -17,6 +17,7 @@ import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQ
 import { usePaymentRouteQuery } from "@/hooks/query/usePaymentRouteQuery";
 import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery";
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
+import { closeDialogThen } from "@/hooks/use-deferred-dialog-selection";
 import { chromeOnlyToastError } from "@/lib/api-toast-message";
 import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { cashJurisdictionLockMessage, isCashJurisdictionLocked } from "@/lib/cash-jurisdiction";
@@ -40,7 +41,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type PaymentEnrollModalProps = {
@@ -118,6 +119,19 @@ export function PaymentEnrollModal({
   const [forceAgeGate, setForceAgeGate] = useState(false);
   const [forcePhoneGate, setForcePhoneGate] = useState(false);
   const suggestedTopUpRef = useRef(false);
+
+  /** Close enroll first, then open wallet top-up — avoids stacked-dialog glitch. */
+  const openWalletTopUp = useCallback(
+    (href: string) => {
+      const target = withWalletFocusParam(href, "topup");
+      if (!target) return;
+      closeDialogThen(
+        () => onOpenChange(false),
+        () => router.push(target),
+      );
+    },
+    [onOpenChange, router],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -296,8 +310,8 @@ export function PaymentEnrollModal({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--dama-overlay)]" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[var(--dama-border)] bg-[var(--dama-card)] p-6 shadow-xl focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--dama-overlay)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[var(--dama-border)] bg-[var(--dama-card)] p-6 shadow-xl focus:outline-none duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]">
           <Dialog.Title className="font-display text-xl font-bold">
             {softPaymentModalTitle(chrome.title)}
           </Dialog.Title>
@@ -422,8 +436,12 @@ export function PaymentEnrollModal({
           ) : countryMissing ? (
             <div className="mt-6 space-y-3">
               <p className="text-sm text-[var(--dama-danger)]">{chrome.country_required_hint}</p>
-              <Button asChild variant="gold">
-                <Link href={chrome.top_up_href}>{chrome.top_up_action}</Link>
+              <Button
+                type="button"
+                variant="gold"
+                onClick={() => openWalletTopUp(chrome.top_up_href)}
+              >
+                {chrome.top_up_action}
               </Button>
               <Dialog.Close asChild>
                 <Button type="button" variant="outline">
@@ -456,10 +474,12 @@ export function PaymentEnrollModal({
                 <div className="space-y-2">
                   <p className="text-sm text-[var(--dama-muted)]">{chrome.methods_blurb}</p>
                   {(chrome.top_up_href || "").trim() ? (
-                    <Button asChild variant="gold">
-                      <Link href={withWalletFocusParam(chrome.top_up_href, "topup")}>
-                        {chrome.top_up_action}
-                      </Link>
+                    <Button
+                      type="button"
+                      variant="gold"
+                      onClick={() => openWalletTopUp(chrome.top_up_href)}
+                    >
+                      {chrome.top_up_action}
                     </Button>
                   ) : null}
                 </div>
@@ -486,8 +506,12 @@ export function PaymentEnrollModal({
                     >
                       {chrome.checkout_action}
                     </Button>
-                    <Button asChild variant="outline">
-                      <Link href={chrome.top_up_href}>{chrome.top_up_action}</Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => openWalletTopUp(chrome.top_up_href)}
+                    >
+                      {chrome.top_up_action}
                     </Button>
                   </div>
                 </div>

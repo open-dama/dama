@@ -787,8 +787,14 @@ class _WalletViewState extends State<_WalletView> with WidgetsBindingObserver {
           _openedFocusPayoutSheet = true;
           final c = state.chrome!;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _openPayoutRequestSheet(context, state, c);
+            Future<void>.delayed(const Duration(milliseconds: 300), () {
+              if (!mounted) {
+                // Allow a later mount to retry focus open.
+                _openedFocusPayoutSheet = false;
+                return;
+              }
+              _openPayoutRequestSheet(context, state, c);
+            });
           });
         }
         if (widget.focusTopUp &&
@@ -798,9 +804,16 @@ class _WalletViewState extends State<_WalletView> with WidgetsBindingObserver {
             state.country.trim().isNotEmpty) {
           _openedFocusTopUpSheet = true;
           final c = state.chrome!;
+          // Wait for route push transition (~300ms) so enroll/join exit + push
+          // does not stack a sheet mid-animation (web DIALOG_CLEAR_MS parity).
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _openTopUpSheet(context, state, c);
+            Future<void>.delayed(const Duration(milliseconds: 300), () {
+              if (!mounted) {
+                _openedFocusTopUpSheet = false;
+                return;
+              }
+              _openTopUpSheet(context, state, c);
+            });
           });
         }
       },

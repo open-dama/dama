@@ -49,7 +49,11 @@ import { usePayoutMethodsQuery } from "@/hooks/query/usePayoutMethodsQuery";
 import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery";
 import { useWalletChromeQuery } from "@/hooks/query/useWalletChromeQuery";
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
-import { useDeferredDialogSelection } from "@/hooks/use-deferred-dialog-selection";
+import {
+  DIALOG_CLEAR_MS,
+  releaseBodyPointerEvents,
+  useDeferredDialogSelection,
+} from "@/hooks/use-deferred-dialog-selection";
 import { useUrlSkip } from "@/hooks/useUrlSkip";
 import { apiToastMessage } from "@/lib/api-toast-message";
 import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
@@ -269,9 +273,14 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
   useEffect(() => {
     if (!chrome || focusOpened.current || ageBlocked || phoneBlocked) return;
     if (focusPayoutForm) {
-      focusOpened.current = true;
-      openForm("payout_request");
-      return;
+      // Latch only after open fires — latching early + effect cleanup cancelled the open.
+      const t = window.setTimeout(() => {
+        if (focusOpened.current) return;
+        focusOpened.current = true;
+        releaseBodyPointerEvents();
+        openForm("payout_request");
+      }, DIALOG_CLEAR_MS);
+      return () => window.clearTimeout(t);
     }
     // Standalone receipt/transfer lives on Manual Transfer page (ET geo only).
     if (focusReceiptForm && isManual) {
@@ -285,9 +294,16 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
       return;
     }
     if (focusTopUpForm) {
-      focusOpened.current = true;
-      setTopupStep("amount");
-      openForm("topup");
+      // Defer so enroll/join exit finishes; latch + step only when dialog actually opens
+      // (setState before timeout re-entered the effect cleanup path in Strict Mode).
+      const t = window.setTimeout(() => {
+        if (focusOpened.current) return;
+        focusOpened.current = true;
+        setTopupStep("amount");
+        releaseBodyPointerEvents();
+        openForm("topup");
+      }, DIALOG_CLEAR_MS);
+      return () => window.clearTimeout(t);
     }
   }, [
     focusPayoutForm,

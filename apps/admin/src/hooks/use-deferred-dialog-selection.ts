@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const DIALOG_CLEAR_MS = 200;
+export const DIALOG_CLEAR_MS = 200;
 
 export function useDeferredDialogSelection(clearMs = DIALOG_CLEAR_MS) {
   const [open, setOpen] = useState(false);
@@ -105,6 +105,23 @@ export function useDeferredDialogValue<T>(clearMs = DIALOG_CLEAR_MS) {
 export function releaseBodyPointerEvents() {
   if (typeof document === "undefined") return;
   document.body.style.pointerEvents = "";
+}
+
+/**
+ * Close the current dialog, wait for the exit animation, then run `next`.
+ * Prevents stacked-modal glitches on dialog → dialog / navigate handoffs.
+ */
+export function closeDialogThen(
+  close: () => void,
+  next: () => void,
+  clearMs = DIALOG_CLEAR_MS,
+): void {
+  releaseBodyPointerEvents();
+  close();
+  window.setTimeout(() => {
+    releaseBodyPointerEvents();
+    next();
+  }, clearMs);
 }
 
 /**
