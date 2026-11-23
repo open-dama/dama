@@ -321,6 +321,13 @@ export function EventCupLobby({
   const checkInState = eventCheckInWindowState(ev);
   const checkedIn = Boolean((myEntry?.checked_in_at || "").trim());
 
+  // Must stay above the !open return. Lobby stays mounted while closed; a hook
+  // after that return changes hook order when join opens it and crashes the page.
+  useEffect(() => {
+    if (open) return;
+    releaseBodyPointerEvents();
+  }, [open]);
+
   if (!open) return null;
 
   const loading = Boolean(id) && detailQuery.isLoading && !ev;
@@ -450,11 +457,6 @@ export function EventCupLobby({
         : false);
 
   const gameId = (nextMatch?.game_id || "").trim();
-
-  useEffect(() => {
-    if (open) return;
-    releaseBodyPointerEvents();
-  }, [open]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>

@@ -324,6 +324,14 @@ export function TournamentCupLobby({
   const checkInState = checkInWindowState(t);
   const checkedIn = Boolean((myEntry?.checked_in_at || "").trim());
 
+  // Must stay above the !open return. Lobby stays mounted while closed; a hook
+  // after that return changes hook order when enroll opens it and crashes the page.
+  useEffect(() => {
+    if (open) return;
+    // Shared DialogContent parity: clear stuck body pointer-events after dismiss.
+    releaseBodyPointerEvents();
+  }, [open]);
+
   if (!open) return null;
 
   const loading = Boolean(id) && detailQuery.isLoading && !t;
@@ -453,12 +461,6 @@ export function TournamentCupLobby({
         : false);
 
   const gameId = (nextMatch?.game_id || "").trim();
-
-  useEffect(() => {
-    if (open) return;
-    // Shared DialogContent parity: clear stuck body pointer-events after dismiss.
-    releaseBodyPointerEvents();
-  }, [open]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>

@@ -32,9 +32,11 @@ class _WalletCheckoutResumeRefresherState
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // Fail closed if provider was disposed mid-resume (never crash enroll/join hosts).
+    try {
       unawaited(context.read<WalletCubit>().refresh(force: true));
-    }
+    } catch (_) {}
   }
 
   @override
