@@ -122,6 +122,12 @@ export type EventsAdminChrome = {
   detail_players_col_rating?: string;
   detail_players_empty?: string;
   detail_players_open_user?: string;
+  /** Soft-fill mig 547 - optional filter chrome. */
+  detail_players_filter_all?: string;
+  detail_players_filter_status_label?: string;
+  detail_players_filter_checked_in_label?: string;
+  detail_players_filter_checked_in?: string;
+  detail_players_filter_not_checked_in?: string;
   detail_yes?: string;
   detail_no?: string;
   amount_currency_separator?: string;

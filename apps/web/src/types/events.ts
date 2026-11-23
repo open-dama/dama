@@ -147,6 +147,10 @@ export type HostedEvent = {
   organizer_cancelled_paid_cups?: number;
   organizer_open_reports?: number;
   viewer_arena_queued?: boolean;
+  viewer_entry_status?: string;
+  viewer_checked_in?: boolean;
+  viewer_checked_in_at?: string | null;
+  viewer_placement?: number | null;
 };
 
 export type HostedEventEntry = {

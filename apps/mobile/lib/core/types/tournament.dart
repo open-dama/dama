@@ -28,6 +28,8 @@ class RestTournament {
     this.formatId = '',
     this.formatLabel = '',
     this.viewerEnrolled = false,
+    this.viewerCheckedIn = false,
+    this.viewerCheckedInAt,
     this.viewerArenaQueued = false,
     this.viewerPlacement,
     this.viewerArenaPoints,
@@ -81,6 +83,8 @@ class RestTournament {
 
   /// True when API attaches viewer_enrolled for the authenticated player.
   final bool viewerEnrolled;
+  final bool viewerCheckedIn;
+  final String? viewerCheckedInAt;
   final bool viewerArenaQueued;
   final int? viewerPlacement;
   final num? viewerArenaPoints;
@@ -202,6 +206,11 @@ class RestTournament {
               '',
       viewerEnrolled:
           json['viewer_enrolled'] == true || json['viewerEnrolled'] == true,
+      viewerCheckedIn:
+          json['viewer_checked_in'] == true || json['viewerCheckedIn'] == true,
+      viewerCheckedInAt:
+          (json['viewer_checked_in_at'] ?? json['viewerCheckedInAt'])
+              ?.toString(),
       viewerArenaQueued: json['viewer_arena_queued'] == true,
       viewerPlacement:
           asInt(json['viewer_placement'] ?? json['viewerPlacement']),

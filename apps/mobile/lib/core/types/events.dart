@@ -353,6 +353,10 @@ class HostedEvent {
     this.organizerCancelledPaidCups,
     this.organizerOpenReports,
     this.viewerArenaQueued = false,
+    this.viewerEntryStatus = '',
+    this.viewerCheckedIn = false,
+    this.viewerCheckedInAt,
+    this.viewerPlacement,
   });
 
   final String id;
@@ -433,6 +437,10 @@ class HostedEvent {
   final int? organizerCancelledPaidCups;
   final int? organizerOpenReports;
   final bool viewerArenaQueued;
+  final String viewerEntryStatus;
+  final bool viewerCheckedIn;
+  final String? viewerCheckedInAt;
+  final int? viewerPlacement;
 
   /// prize_image_url, gallery (deduped), then logo/sponsor when prize media empty.
   List<String> get carouselImages {
@@ -536,6 +544,10 @@ class HostedEvent {
           ? (json['organizer_open_reports'] as num).toInt()
           : null,
       viewerArenaQueued: json['viewer_arena_queued'] == true,
+      viewerEntryStatus: (json['viewer_entry_status'] as String?)?.trim() ?? '',
+      viewerCheckedIn: json['viewer_checked_in'] == true,
+      viewerCheckedInAt: json['viewer_checked_in_at']?.toString(),
+      viewerPlacement: asInt(json['viewer_placement']),
     );
   }
 }

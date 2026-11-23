@@ -25,13 +25,27 @@ export type AdminEventEntriesResponse = {
   meta: SkipPaginationMeta;
 };
 
+export type AdminEventEntriesFilters = {
+  status?: string;
+  checkedIn?: string;
+};
+
 export function adminEventEntriesQueryKey(
   token: string | null | undefined,
   eventId: string,
   skip: number,
   limit: number,
+  filters: AdminEventEntriesFilters = {},
 ) {
-  return ["admin-event-entries", token, eventId, skip, limit] as const;
+  return [
+    "admin-event-entries",
+    token,
+    eventId,
+    skip,
+    limit,
+    filters.status ?? "",
+    filters.checkedIn ?? "",
+  ] as const;
 }
 
 export function useAdminEventEntriesQuery(
@@ -40,21 +54,27 @@ export function useAdminEventEntriesQuery(
   skip: number,
   limit: number,
   enabled: boolean,
+  filters: AdminEventEntriesFilters = {},
 ) {
   const hydrated = useAuthHydrated();
   const id = (eventId || "").trim();
+  const status = (filters.status || "").trim();
+  const checkedIn = (filters.checkedIn || "").trim();
   return useQuery({
     staleTime: QueryStale.session,
-    queryKey: adminEventEntriesQueryKey(token, id, skip, limit),
+    queryKey: adminEventEntriesQueryKey(token, id, skip, limit, { status, checkedIn }),
     enabled: hydrated && Boolean(token) && enabled && Boolean(id) && limit > 0 && skip >= 0,
     placeholderData: (prev) => prev,
     queryFn: async (): Promise<AdminEventEntriesResponse> => {
       if (!token || !id) throw new Error("");
+      const params: Record<string, string | number> = { skip, limit };
+      if (status) params.status = status;
+      if (checkedIn === "1" || checkedIn === "0") params.checked_in = checkedIn;
       const { data } = await restClient.get<AdminEventEntriesResponse>(
         `/console/events/${encodeURIComponent(id)}/entries`,
         {
           headers: authHeaders(token),
-          params: { skip, limit },
+          params,
         },
       );
       requireApiSkipMeta(data?.meta, "admin event entries meta");

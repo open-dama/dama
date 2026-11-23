@@ -79,6 +79,12 @@ export type EventsOrganizerChrome = {
   overview_tab?: string;
   join_tab?: string;
   players_tab?: string;
+  /** Soft-fill roster filters (mig 547); optional - never required for chrome ready. */
+  players_filter_all?: string;
+  players_filter_status_label?: string;
+  players_filter_checked_in_label?: string;
+  players_filter_checked_in?: string;
+  players_filter_not_checked_in?: string;
   bracket_tab?: string;
   branding_tab?: string;
   results_tab?: string;

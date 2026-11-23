@@ -1298,7 +1298,13 @@ export default function AdminTournamentsPage() {
   const openDetailTournament = detailDialog.openWith;
   const [detailEntriesSkip, setDetailEntriesSkip] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<AdminTournament | null>(null);
-  useResetSkipOnChange(setDetailEntriesSkip, [detailTournament?.id || ""]);
+  const [detailEntriesStatus, setDetailEntriesStatus] = useState("");
+  const [detailEntriesCheckedIn, setDetailEntriesCheckedIn] = useState("");
+  useResetSkipOnChange(setDetailEntriesSkip, [
+    detailTournament?.id || "",
+    detailEntriesStatus,
+    detailEntriesCheckedIn,
+  ]);
 
   const currencyQuery = usePaymentCurrencyQuery();
   const enumsQuery = useClientEnumsQuery(isAdmin);
@@ -1327,6 +1333,7 @@ export default function AdminTournamentsPage() {
     detailEntriesSkip,
     pageSize,
     Boolean(detailTournament?.id) && canWriteTournaments && pageSize > 0,
+    { status: detailEntriesStatus, checkedIn: detailEntriesCheckedIn },
   );
   const detailEntries = detailEntriesQuery.data?.entries ?? [];
   const detailEntriesMeta = detailEntriesQuery.data?.meta;
@@ -2853,6 +2860,78 @@ export default function AdminTournamentsPage() {
                       </p>
                     ) : null}
                   </div>
+                  {(chrome.detail_players_filter_status_label || "").trim() ||
+                  (chrome.detail_players_filter_checked_in_label || "").trim() ? (
+                    <div className="flex flex-wrap gap-3">
+                      {(chrome.detail_players_filter_status_label || "").trim() ? (
+                        <div className="space-y-1">
+                          <label
+                            htmlFor="admin-tournament-roster-status"
+                            className="text-xs text-[var(--dama-muted)]"
+                          >
+                            {(chrome.detail_players_filter_status_label || "").trim()}
+                          </label>
+                          <Select
+                            value={detailEntriesStatus || "__all__"}
+                            onValueChange={(v) => setDetailEntriesStatus(v === "__all__" ? "" : v)}
+                          >
+                            <SelectTrigger
+                              id="admin-tournament-roster-status"
+                              className="w-[180px]"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__all__">
+                                {(chrome.detail_players_filter_all || "").trim() || empty}
+                              </SelectItem>
+                              {(enumsQuery.data?.tournament_entry_statuses ?? []).map((st) => (
+                                <SelectItem key={st} value={st}>
+                                  {(
+                                    enumsQuery.data?.tournament_entry_status_labels?.[st] || st
+                                  ).trim()}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
+                      {(chrome.detail_players_filter_checked_in_label || "").trim() ? (
+                        <div className="space-y-1">
+                          <label
+                            htmlFor="admin-tournament-roster-checked-in"
+                            className="text-xs text-[var(--dama-muted)]"
+                          >
+                            {(chrome.detail_players_filter_checked_in_label || "").trim()}
+                          </label>
+                          <Select
+                            value={detailEntriesCheckedIn || "__all__"}
+                            onValueChange={(v) =>
+                              setDetailEntriesCheckedIn(v === "__all__" ? "" : v)
+                            }
+                          >
+                            <SelectTrigger
+                              id="admin-tournament-roster-checked-in"
+                              className="w-[180px]"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__all__">
+                                {(chrome.detail_players_filter_all || "").trim() || empty}
+                              </SelectItem>
+                              <SelectItem value="1">
+                                {(chrome.detail_players_filter_checked_in || "").trim() || "1"}
+                              </SelectItem>
+                              <SelectItem value="0">
+                                {(chrome.detail_players_filter_not_checked_in || "").trim() || "0"}
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {detailEntriesQuery.isLoading ? (
                     <OpsDataTableSkeleton columns={5} rows={4} />
                   ) : detailEntries.length === 0 ? (

@@ -10,6 +10,9 @@ import 'package:dama_mobile/core/types/arena_standing.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/ui/gallery_carousel.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
+import 'package:dama_mobile/core/ui/skip_pagination_bar.dart';
+import 'package:dama_mobile/features/leaderboard/leaderboard_cubit.dart'
+    show SkipMeta;
 import 'package:dama_mobile/core/types/events.dart';
 import 'package:dama_mobile/core/types/events_player_chrome.dart';
 import 'package:dama_mobile/features/auth/auth_cubit.dart';
@@ -44,6 +47,20 @@ _CheckInWindowState _checkInWindow(HostedEvent? ev) {
 }
 
 bool _cupStarted(HostedEvent? ev) => (ev?.startedAt ?? '').trim().isNotEmpty;
+
+bool _apiSkipMetaReady(Map<String, dynamic> meta) {
+  if (meta['skip'] is! num || (meta['skip'] as num).toInt() < 0) return false;
+  if (meta['limit'] is! num || (meta['limit'] as num).toInt() < 1) return false;
+  if (meta['total'] is! num || (meta['total'] as num).toInt() < 0) return false;
+  if (meta['page'] is! num || (meta['page'] as num).toInt() < 1) return false;
+  if (meta['total_pages'] is! num || (meta['total_pages'] as num).toInt() < 0) {
+    return false;
+  }
+  if (meta['has_more'] is! bool) return false;
+  final summary = (meta['page_summary'] as String?)?.trim() ?? '';
+  final next = (meta['next_action_label'] as String?)?.trim() ?? '';
+  return summary.isNotEmpty && next.isNotEmpty;
+}
 
 /// Prefer server chrome `error` body (writeEventsPlayerErr); else fallback.
 /// Scrubs Event-sport API text (web cupLobbyPlayerErrMsg / join-error parity).
@@ -129,6 +146,13 @@ class _EventCupLobbySheet extends StatefulWidget {
 class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
   HostedEvent? _event;
   List<HostedEventEntry> _entries = const [];
+  List<HostedEventEntry> _placedEntries = const [];
+  SkipMeta? _rosterMeta;
+  SkipMeta? _placedMeta;
+  int _rosterSkip = 0;
+  int _placedSkip = 0;
+  bool _rosterSoftFetching = false;
+  bool _placedSoftFetching = false;
   List<HostedBracketMatch> _bracket = const [];
   List<HostedStandingRow> _standings = const [];
   List<ArenaStandingRow> _arenaStandings = const [];
@@ -197,7 +221,6 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
       final results = await Future.wait([
         http.get(Uri.parse('$base/events/$id'), headers: _headers),
         http.get(Uri.parse('$base/events/$id/bracket'), headers: _headers),
-        http.get(Uri.parse('$base/events/$id/entries'), headers: _headers),
       ]);
       if (!mounted || _closing) return;
       if (results[0].statusCode >= 300) {
@@ -221,15 +244,6 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
         bracket = (bBody['bracket'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
             .map(HostedBracketMatch.fromJson)
-            .toList();
-      }
-      List<HostedEventEntry> entries = const [];
-      if (results[2].statusCode < 300) {
-        final eBody =
-            jsonDecode(results[2].body) as Map<String, dynamic>? ?? {};
-        entries = (eBody['entries'] as List<dynamic>? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(HostedEventEntry.fromJson)
             .toList();
       }
       var standings = const <HostedStandingRow>[];
@@ -308,7 +322,6 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
       setState(() {
         _event = ev;
         _bracket = bracket;
-        _entries = entries;
         _standings = standings;
         _arenaStandings = arenaStandings;
         _catalog = catalog;
@@ -319,6 +332,10 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
         _loading = false;
       });
       _maybeAutoOpenBoard(bracket);
+      unawaited(_loadRosterPage(silent: silent));
+      if (_showPlacedFallback(ev)) {
+        unawaited(_loadPlacedPage(silent: silent));
+      }
     } catch (_) {
       if (!mounted) return;
       if (silent) return;
@@ -326,6 +343,110 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
         _loading = false;
         _loadError = softCommunityLoadFailed(widget.chrome.loadFailed);
       });
+    }
+  }
+
+  bool _showPlacedFallback(HostedEvent? ev) {
+    if (ev == null || !_cupStarted(ev)) return false;
+    if (_isArena || _usesStandingsTable) return false;
+    return (ev.finishedAt ?? '').trim().isNotEmpty;
+  }
+
+  Future<void> _loadRosterPage({int? skip, bool silent = false}) async {
+    final limit = widget.chrome.listPageSizeInt;
+    if (limit < 1) return;
+    final nextSkip = skip ?? _rosterSkip;
+    if (skip != null) _rosterSkip = nextSkip;
+    if (!silent && mounted) setState(() => _rosterSoftFetching = true);
+    try {
+      final res = await http.get(
+        Uri.parse(
+          '${widget.config.restUrl}/events/${widget.eventId}/entries',
+        ).replace(
+          queryParameters: {'skip': '$nextSkip', 'limit': '$limit'},
+        ),
+        headers: _headers,
+      );
+      if (!mounted || _closing) return;
+      if (res.statusCode >= 300) {
+        if (mounted) setState(() => _rosterSoftFetching = false);
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final metaRaw = body['meta'];
+      if (metaRaw is! Map<String, dynamic> || !_apiSkipMetaReady(metaRaw)) {
+        if (mounted) setState(() => _rosterSoftFetching = false);
+        return;
+      }
+      if (body['entries'] is! List) {
+        if (mounted) setState(() => _rosterSoftFetching = false);
+        return;
+      }
+      final list = (body['entries'] as List<dynamic>)
+          .whereType<Map<String, dynamic>>()
+          .map(HostedEventEntry.fromJson)
+          .toList();
+      final meta = SkipMeta.fromJson(metaRaw);
+      setState(() {
+        _entries = list;
+        _rosterMeta = meta;
+        _rosterSkip = nextSkip;
+        _rosterSoftFetching = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _rosterSoftFetching = false);
+    }
+  }
+
+  Future<void> _loadPlacedPage({int? skip, bool silent = false}) async {
+    final limit = widget.chrome.listPageSizeInt;
+    if (limit < 1) return;
+    final nextSkip = skip ?? _placedSkip;
+    if (skip != null) _placedSkip = nextSkip;
+    if (!silent && mounted) setState(() => _placedSoftFetching = true);
+    try {
+      final res = await http.get(
+        Uri.parse(
+          '${widget.config.restUrl}/events/${widget.eventId}/entries',
+        ).replace(
+          queryParameters: {
+            'skip': '$nextSkip',
+            'limit': '$limit',
+            'placed': '1',
+          },
+        ),
+        headers: _headers,
+      );
+      if (!mounted || _closing) return;
+      if (res.statusCode >= 300) {
+        if (mounted) setState(() => _placedSoftFetching = false);
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final metaRaw = body['meta'];
+      if (metaRaw is! Map<String, dynamic> || !_apiSkipMetaReady(metaRaw)) {
+        if (mounted) setState(() => _placedSoftFetching = false);
+        return;
+      }
+      if (body['entries'] is! List) {
+        if (mounted) setState(() => _placedSoftFetching = false);
+        return;
+      }
+      final list = (body['entries'] as List<dynamic>)
+          .whereType<Map<String, dynamic>>()
+          .map(HostedEventEntry.fromJson)
+          .toList();
+      final meta = SkipMeta.fromJson(metaRaw);
+      setState(() {
+        _placedEntries = list;
+        _placedMeta = meta;
+        _placedSkip = nextSkip;
+        _placedSoftFetching = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _placedSoftFetching = false);
     }
   }
 
@@ -662,13 +783,7 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
         if (r.userId.trim() == myUserId) myPoints = pts;
       }
     }
-    int? placement;
-    for (final e in _entries) {
-      if (e.userId.trim() == myUserId && e.placement != null) {
-        placement = e.placement;
-        break;
-      }
-    }
+    int? placement = ev.viewerPlacement;
     if (placement == null && _isArena) {
       final arenaIdx =
           _arenaStandings.indexWhere((r) => r.userId.trim() == myUserId);
@@ -737,14 +852,13 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
     final arenaFinished =
         isArena && started && (ev?.finishedAt ?? '').trim().isNotEmpty;
     final checkInState = _checkInWindow(ev);
-    HostedEventEntry? myEntry;
-    for (final e in _entries) {
-      if (e.userId.trim() == myUserId) {
-        myEntry = e;
-        break;
-      }
-    }
-    final checkedIn = (myEntry?.checkedInAt ?? '').trim().isNotEmpty;
+    final joined = ev?.viewerEntryStatus.trim().isNotEmpty == true ||
+        ev?.viewerCheckedIn == true ||
+        (ev?.viewerCheckedInAt ?? '').trim().isNotEmpty;
+    final checkedIn = ev?.viewerCheckedIn == true ||
+        (ev?.viewerCheckedInAt ?? '').trim().isNotEmpty;
+    final pageSize = chrome.listPageSizeInt;
+    final showPlacedFallback = _showPlacedFallback(ev);
     final next = _pickNextMatch(_bracket, myUserId);
     final gameId = (next?.gameId ?? '').trim();
     final estShareLine = _estPrizeShareLine(ev, myUserId);
@@ -971,7 +1085,7 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                 ),
                               ),
                             ],
-                            if (myEntry != null &&
+                            if (joined &&
                                 started &&
                                 chrome.isReportReady &&
                                 (_catalog?.reportReasonCodes.isNotEmpty ??
@@ -984,7 +1098,7 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                 ),
                               ),
                             ],
-                            if (!started && myEntry != null) ...[
+                            if (!started && joined) ...[
                               const SizedBox(height: 12),
                               if (softCommunityJoinStatusMessage(
                                 chrome.checkInRequiredBlurb,
@@ -1034,7 +1148,7 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                   ),
                                 ),
                             ],
-                            if (isArena && started && myEntry != null) ...[
+                            if (isArena && started && joined) ...[
                               const SizedBox(height: 12),
                               if (arenaFinished)
                                 Text(
@@ -1168,7 +1282,7 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                   ),
                                 ),
                             ],
-                            if (_entries.isNotEmpty) ...[
+                            if (pageSize > 0) ...[
                               const SizedBox(height: 16),
                               Text(
                                 softCommunityRosterTitle(
@@ -1178,26 +1292,34 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                   color: tokens.brand,
                                 ),
                               ),
-                              ..._entries.map(
-                                (e) => ListTile(
-                                  dense: true,
-                                  title: Text(
-                                    e.username.trim().isNotEmpty
-                                        ? e.username.trim()
-                                        : empty,
+                              if (_entries.isNotEmpty)
+                                ..._entries.map(
+                                  (e) => ListTile(
+                                    dense: true,
+                                    title: Text(
+                                      e.username.trim().isNotEmpty
+                                          ? e.username.trim()
+                                          : empty,
+                                    ),
+                                    trailing:
+                                        (e.checkedInAt ?? '').trim().isNotEmpty
+                                            ? Text(
+                                                chrome.checkInDone,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: tokens.brand,
+                                                ),
+                                              )
+                                            : null,
                                   ),
-                                  trailing:
-                                      (e.checkedInAt ?? '').trim().isNotEmpty
-                                          ? Text(
-                                              chrome.checkInDone,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: tokens.brand,
-                                              ),
-                                            )
-                                          : null,
                                 ),
-                              ),
+                              if (_rosterMeta != null)
+                                SkipPaginationBar(
+                                  meta: _rosterMeta!,
+                                  busy: _rosterSoftFetching,
+                                  onSkip: (s) =>
+                                      unawaited(_loadRosterPage(skip: s)),
+                                ),
                             ],
                             if (isArena && _arenaStandings.isNotEmpty) ...[
                               const SizedBox(height: 16),
@@ -1241,8 +1363,7 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                 emptyValue: chrome.emptyValue,
                                 groupLabelTemplate: chrome.groupLabelTemplate,
                               ),
-                            ] else if (_entries
-                                .any((e) => e.placement != null)) ...[
+                            ] else if (showPlacedFallback && pageSize > 0) ...[
                               const SizedBox(height: 16),
                               Text(
                                 chrome.lobbyStandingsTitle,
@@ -1251,26 +1372,24 @@ class _EventCupLobbySheetState extends State<_EventCupLobbySheet> {
                                   color: tokens.brand,
                                 ),
                               ),
-                              ...() {
-                                final placed = _entries
-                                    .where((e) => e.placement != null)
-                                    .toList()
-                                  ..sort(
-                                    (a, b) => (a.placement ?? 0)
-                                        .compareTo(b.placement ?? 0),
-                                  );
-                                return placed.map(
-                                  (e) => ListTile(
-                                    dense: true,
-                                    leading: Text('${e.placement}'),
-                                    title: Text(
-                                      e.username.trim().isNotEmpty
-                                          ? e.username.trim()
-                                          : empty,
-                                    ),
+                              ..._placedEntries.map(
+                                (e) => ListTile(
+                                  dense: true,
+                                  leading: Text('${e.placement}'),
+                                  title: Text(
+                                    e.username.trim().isNotEmpty
+                                        ? e.username.trim()
+                                        : empty,
                                   ),
-                                );
-                              }(),
+                                ),
+                              ),
+                              if (_placedMeta != null)
+                                SkipPaginationBar(
+                                  meta: _placedMeta!,
+                                  busy: _placedSoftFetching,
+                                  onSkip: (s) =>
+                                      unawaited(_loadPlacedPage(skip: s)),
+                                ),
                             ],
                             if (_bracket.isNotEmpty) ...[
                               const SizedBox(height: 8),

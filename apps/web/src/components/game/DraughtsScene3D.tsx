@@ -20,7 +20,13 @@ import type { BoardCell, LegalMove, MoveHistoryEntry } from "@/types/game";
 import { OrbitControls, Text } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ACESFilmicToneMapping, type Group, PCFSoftShadowMap, SRGBColorSpace } from "three";
+import {
+  ACESFilmicToneMapping,
+  CanvasTexture,
+  type Group,
+  PCFSoftShadowMap,
+  SRGBColorSpace,
+} from "three";
 
 const PIECE_REST_Y = 0.12;
 const PICK_HEIGHT = 0.5;
@@ -130,6 +136,62 @@ function lightenBoardHighlight(hex: string, towardWhite: number): string {
   const mix = (c: number) => Math.round(c + (255 - c) * t);
   const to = (c: number) => mix(c).toString(16).padStart(2, "0");
   return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+function parseHexRgb(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  const body = m?.[1];
+  if (!body) return null;
+  const n = Number.parseInt(body, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function mixHex(hex: string, other: string, amountOfOther: number): string {
+  const a = parseHexRgb(hex);
+  const b = parseHexRgb(other);
+  if (!a || !b) return hex;
+  const t = Math.min(1, Math.max(0, amountOfOther));
+  const ch = (x: number, y: number) => Math.round(x + (y - x) * t);
+  const to = (c: number) => c.toString(16).padStart(2, "0");
+  return `#${to(ch(a[0], b[0]))}${to(ch(a[1], b[1]))}${to(ch(a[2], b[2]))}`;
+}
+
+/**
+ * 2D quietShade parity (DraughtsBoard2D CSS linear-gradient + color-mix stops).
+ * Cached per palette hex so square meshes stay cheap.
+ */
+const quietSquareTexCache = new Map<string, CanvasTexture>();
+
+function quietSquareTexture(kind: "dark" | "light", baseHex: string): CanvasTexture | null {
+  if (typeof document === "undefined") return null;
+  const base = baseHex.trim().toLowerCase();
+  if (!parseHexRgb(base)) return null;
+  const key = `${kind}:${base}`;
+  const hit = quietSquareTexCache.get(key);
+  if (hit) return hit;
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  // 160deg-equivalent diagonal; stops match 2D color-mix amounts.
+  const g = ctx.createLinearGradient(8, 0, 40, 64);
+  if (kind === "dark") {
+    g.addColorStop(0, mixHex(base, "#ffffff", 0.18));
+    g.addColorStop(0.42, base);
+    g.addColorStop(1, mixHex(base, "#000000", 0.12));
+  } else {
+    g.addColorStop(0, mixHex(base, "#ffffff", 0.28));
+    g.addColorStop(0.48, base);
+    g.addColorStop(1, mixHex(base, "#9a9a7a", 0.1));
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  tex.needsUpdate = true;
+  quietSquareTexCache.set(key, tex);
+  return tex;
 }
 
 type BoardGrid = BoardCell[][];
@@ -517,7 +579,10 @@ function SquareMesh({
         : dark
           ? colors.dark
           : colors.light;
-  const emissive = highlightKind === "none" ? (dark ? colors.frame : colors.light) : fill;
+  const isCue = highlightKind !== "none";
+  // Quiet only: 2D quietShade gradient. Cue squares stay flat CSS hex (2D highlight/last-move).
+  const quietMap = !isCue ? quietSquareTexture(dark ? "dark" : "light", fill) : null;
+  const quietEmissive = dark ? colors.frame : colors.light;
   const showRank = isVisualLeftFile(col, size, flipBoard);
   const showFile = isVisualBottomRank(row, size, flipBoard);
   // After group Y=π flip, local NW becomes SE on screen - invert corner offsets.
@@ -526,24 +591,44 @@ function SquareMesh({
   const ink = boardCoordUsesLightInk(dark) ? colors.light : colors.dark;
   const fontSize = size >= 10 ? 0.2 : 0.24;
   const textRotY = flipBoard ? Math.PI : 0;
+  const commonMesh = {
+    position: [x, playable ? 0.004 : 0.002, z] as [number, number, number],
+    rotation: [-Math.PI / 2, 0, 0] as [number, number, number],
+    receiveShadow: true as const,
+    ...(playable ? interactiveProps(onSelect) : {}),
+  };
   return (
     <group>
-      <mesh
-        position={[x, playable ? 0.004 : 0.002, z]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
-        {...(playable ? interactiveProps(onSelect) : {})}
-      >
-        <planeGeometry args={[1, 1]} />
-        <meshStandardMaterial
-          color={fill}
-          // Keep highlight flat like 2D CSS fills - strong emissive shifts the hue.
-          emissive={emissive}
-          emissiveIntensity={highlightKind !== "none" ? 0.08 : dark ? 0.04 : 0.02}
-          roughness={highlightKind !== "none" ? 0.92 : 0.78}
-          metalness={0}
-        />
-      </mesh>
+      {/*
+        Original 3D lit+shadow path (meshStandard + receiveShadow + emissive/roughness).
+        toneMapped=false keeps 2D gradient / cue hex; split meshes avoid stale quiet maps on cues.
+      */}
+      {isCue ? (
+        <mesh key={`cue-${highlightKind}`} {...commonMesh}>
+          <planeGeometry args={[1, 1]} />
+          <meshStandardMaterial
+            color={fill}
+            emissive={fill}
+            emissiveIntensity={0.08}
+            roughness={0.92}
+            metalness={0}
+            toneMapped={false}
+          />
+        </mesh>
+      ) : (
+        <mesh key="quiet" {...commonMesh}>
+          <planeGeometry args={[1, 1]} />
+          <meshStandardMaterial
+            color={quietMap ? "#ffffff" : fill}
+            map={quietMap ?? undefined}
+            emissive={quietEmissive}
+            emissiveIntensity={dark ? 0.04 : 0.02}
+            roughness={0.78}
+            metalness={0}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
       {showRank ? (
         <Text
           position={[x + corner, 0.02, z + corner]}
@@ -1077,7 +1162,7 @@ function BoardScene({
         const col = Number(cs);
         if (!Number.isFinite(row) || !Number.isFinite(col)) return null;
         const { x, z } = boardToWorld(row, col, size);
-        // Match 2D: lighten highlight toward white so the ghost reads on the green square.
+        // Match 2D disc color; restore original lit indicator material + soft emissive.
         const disc = lightenBoardHighlight(colors.highlight, 0.45);
         return (
           <mesh
@@ -1095,6 +1180,7 @@ function BoardScene({
               opacity={0.95}
               roughness={0.9}
               metalness={0}
+              toneMapped={false}
             />
           </mesh>
         );

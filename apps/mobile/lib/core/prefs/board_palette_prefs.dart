@@ -23,6 +23,7 @@ class BoardPalette {
     required this.label,
     required this.boardLight,
     required this.boardDark,
+    required this.boardFrame,
     required this.highlight,
   });
 
@@ -30,6 +31,9 @@ class BoardPalette {
   final String label;
   final Color boardLight;
   final Color boardDark;
+
+  /// 3D rim / under-plane (web `--dama-board-frame` parity).
+  final Color boardFrame;
   final Color highlight;
 }
 
@@ -65,6 +69,7 @@ const kBoardPalettes = <BoardPalette>[
     label: 'Forest',
     boardLight: Color(0xFFEEEED2),
     boardDark: Color(0xFF769656),
+    boardFrame: Color(0xFF4A6741),
     highlight: Color(0xFFBACA44),
   ),
   BoardPalette(
@@ -72,6 +77,7 @@ const kBoardPalettes = <BoardPalette>[
     label: 'Classic wood',
     boardLight: Color(0xFFE8DCC8),
     boardDark: Color(0xFF7C4A23),
+    boardFrame: Color(0xFF5C4A32),
     highlight: Color(0xFF22C55E),
   ),
   BoardPalette(
@@ -79,6 +85,7 @@ const kBoardPalettes = <BoardPalette>[
     label: 'Black & white',
     boardLight: Color(0xFFF5F5F5),
     boardDark: Color(0xFF2C2C2C),
+    boardFrame: Color(0xFF1A1A1A),
     highlight: Color(0xFF6B7280),
   ),
   BoardPalette(
@@ -86,6 +93,7 @@ const kBoardPalettes = <BoardPalette>[
     label: 'Burgundy',
     boardLight: Color(0xFFF7EEF1),
     boardDark: Color(0xFF9B1B3A),
+    boardFrame: Color(0xFF4A0012),
     highlight: Color(0xFFC0264A),
   ),
   BoardPalette(
@@ -93,6 +101,7 @@ const kBoardPalettes = <BoardPalette>[
     label: 'Slate',
     boardLight: Color(0xFFD8DCE3),
     boardDark: Color(0xFF4A5568),
+    boardFrame: Color(0xFF2D3748),
     highlight: Color(0xFFA31D38),
   ),
 ];
@@ -326,6 +335,7 @@ class BoardPaletteScope extends StatelessWidget {
     final next = base.copyWith(
       boardDark: board.boardDark,
       boardLight: board.boardLight,
+      boardFrame: board.boardFrame,
       boardSelected: board.highlight,
       pieceLight: piece.pieceLight,
       pieceDark: piece.pieceDark,

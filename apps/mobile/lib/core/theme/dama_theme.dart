@@ -27,6 +27,7 @@ class DamaColors extends ThemeExtension<DamaColors> {
     required this.overlayScrim,
     required this.boardDark,
     required this.boardLight,
+    required this.boardFrame,
     required this.boardSelected,
     required this.pieceLight,
     required this.pieceDark,
@@ -74,6 +75,9 @@ class DamaColors extends ThemeExtension<DamaColors> {
   final Color overlayScrim;
   final Color boardDark;
   final Color boardLight;
+
+  /// 3D rim / under-plane (web `--dama-board-frame`).
+  final Color boardFrame;
   final Color boardSelected;
   final Color pieceLight;
   final Color pieceDark;
@@ -105,6 +109,7 @@ class DamaColors extends ThemeExtension<DamaColors> {
     // Forest board + White & half pieces (product defaults / Neo).
     boardDark: Color(0xFF769656),
     boardLight: Color(0xFFEEEED2),
+    boardFrame: Color(0xFF4A6741),
     boardSelected: Color(0xFFBACA44),
     pieceLight: Color(0xFFFFFFFF),
     pieceDark: Color(0xFF141414),
@@ -134,6 +139,7 @@ class DamaColors extends ThemeExtension<DamaColors> {
     overlayScrim: Color(0xB8000000),
     boardDark: Color(0xFF769656),
     boardLight: Color(0xFFEEEED2),
+    boardFrame: Color(0xFF4A6741),
     boardSelected: Color(0xFFBACA44),
     pieceLight: Color(0xFFFFFFFF),
     pieceDark: Color(0xFF141414),
@@ -163,6 +169,7 @@ class DamaColors extends ThemeExtension<DamaColors> {
     Color? overlayScrim,
     Color? boardDark,
     Color? boardLight,
+    Color? boardFrame,
     Color? boardSelected,
     Color? pieceLight,
     Color? pieceDark,
@@ -190,6 +197,7 @@ class DamaColors extends ThemeExtension<DamaColors> {
       overlayScrim: overlayScrim ?? this.overlayScrim,
       boardDark: boardDark ?? this.boardDark,
       boardLight: boardLight ?? this.boardLight,
+      boardFrame: boardFrame ?? this.boardFrame,
       boardSelected: boardSelected ?? this.boardSelected,
       pieceLight: pieceLight ?? this.pieceLight,
       pieceDark: pieceDark ?? this.pieceDark,
@@ -222,6 +230,7 @@ class DamaColors extends ThemeExtension<DamaColors> {
       overlayScrim: Color.lerp(overlayScrim, other.overlayScrim, t)!,
       boardDark: Color.lerp(boardDark, other.boardDark, t)!,
       boardLight: Color.lerp(boardLight, other.boardLight, t)!,
+      boardFrame: Color.lerp(boardFrame, other.boardFrame, t)!,
       boardSelected: Color.lerp(boardSelected, other.boardSelected, t)!,
       pieceLight: Color.lerp(pieceLight, other.pieceLight, t)!,
       pieceDark: Color.lerp(pieceDark, other.pieceDark, t)!,

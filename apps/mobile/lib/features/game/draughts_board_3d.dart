@@ -655,19 +655,21 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
               flipBoard: widget.flipBoard,
               selectedRow: widget.selectedRow,
               selectedCol: widget.selectedCol,
+              mustContinueRow: widget.mustContinueRow,
+              mustContinueCol: widget.mustContinueCol,
               highlights: _highlights,
               destinationKeys: _destinationKeys,
               lastMoveKeys: _lastMoveKeys,
               hiddenKeys: _hiddenKeys,
               light: tokens.boardLight,
               dark: tokens.boardDark,
-              frame: const Color(0xFF4A0012),
+              frame: tokens.boardFrame,
               pieceLight: tokens.pieceLight,
               pieceDark: tokens.pieceDark,
               pieceDarkSplit: tokens.pieceDarkSplit,
               gold: tokens.boardSelected,
               lastMove: tokens.lastMove,
-              bg: const Color(0xFF4A0012),
+              bg: tokens.boardFrame,
               flyCol: fly?.$1,
               flyRow: fly?.$2,
               flyLift: fly?.$3,
@@ -730,19 +732,21 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
                         flipBoard: widget.flipBoard,
                         selectedRow: widget.selectedRow,
                         selectedCol: widget.selectedCol,
+                        mustContinueRow: widget.mustContinueRow,
+                        mustContinueCol: widget.mustContinueCol,
                         highlights: _highlights,
                         destinationKeys: _destinationKeys,
                         lastMoveKeys: _lastMoveKeys,
                         hiddenKeys: _hiddenKeys,
                         light: tokens.boardLight,
                         dark: tokens.boardDark,
-                        frame: const Color(0xFF4A0012),
+                        frame: tokens.boardFrame,
                         pieceLight: tokens.pieceLight,
                         pieceDark: tokens.pieceDark,
                         pieceDarkSplit: tokens.pieceDarkSplit,
                         gold: tokens.boardSelected,
                         lastMove: tokens.lastMove,
-                        bg: const Color(0xFF4A0012),
+                        bg: tokens.boardFrame,
                         captureBursts: const [],
                         burstProgress: 0,
                       ).findSquareAt(local, box.size);
@@ -774,6 +778,8 @@ class _Board3DPainter extends CustomPainter {
     required this.flipBoard,
     required this.selectedRow,
     required this.selectedCol,
+    this.mustContinueRow,
+    this.mustContinueCol,
     required this.highlights,
     required this.destinationKeys,
     required this.lastMoveKeys,
@@ -808,6 +814,8 @@ class _Board3DPainter extends CustomPainter {
   final bool flipBoard;
   final int? selectedRow;
   final int? selectedCol;
+  final int? mustContinueRow;
+  final int? mustContinueCol;
   final Set<String> highlights;
   final Set<String> destinationKeys;
   final Set<String> lastMoveKeys;
@@ -1163,15 +1171,35 @@ class _Board3DPainter extends CustomPainter {
         _project(c - size / 2 + 1, 0, r - size / 2 + 1, canvasSize),
         _project(c - size / 2, 0, r - size / 2 + 1, canvasSize),
       ];
-      canvas.drawPath(
-        Path()..addPolygon(corners, true),
-        Paint()
-          ..color = highlighted
-              ? gold
-              : isLast
-                  ? lastMove
-                  : (isDark ? dark : light),
-      );
+      // Cue squares: flat gold/lastMove (web/Flutter 2D highlight parity).
+      // Quiet squares: same quietShade gradient stops as web DraughtsBoard2D CSS.
+      final path = Path()..addPolygon(corners, true);
+      if (highlighted || isLast) {
+        canvas.drawPath(
+          path,
+          Paint()..color = highlighted ? gold : lastMove,
+        );
+      } else {
+        final base = isDark ? dark : light;
+        final bounds = path.getBounds();
+        final shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  Color.lerp(base, Colors.white, 0.18) ?? base,
+                  base,
+                  Color.lerp(base, Colors.black, 0.12) ?? base,
+                ]
+              : [
+                  Color.lerp(base, Colors.white, 0.28) ?? base,
+                  base,
+                  Color.lerp(base, const Color(0xFF9A9A7A), 0.1) ?? base,
+                ],
+          stops: isDark ? const [0.0, 0.42, 1.0] : const [0.0, 0.48, 1.0],
+        ).createShader(bounds);
+        canvas.drawPath(path, Paint()..shader = shader);
+      }
       _drawSquareCoords(
         canvas,
         canvasSize,
@@ -1197,12 +1225,13 @@ class _Board3DPainter extends CustomPainter {
         canvasSize,
       );
       final radius = canvasSize.shortestSide / (size * 4.5);
+      // 2D parity: soft hi glow under the lightened disc (BoxShadow(hi, 0.7)).
       canvas.drawCircle(
         center,
-        radius,
+        radius * 1.35,
         Paint()
-          ..color = disc.withValues(alpha: 0.95)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
+          ..color = gold.withValues(alpha: 0.7)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
       );
       canvas.drawCircle(
         center,
@@ -1219,7 +1248,9 @@ class _Board3DPainter extends CustomPainter {
       final cell = board[r][c];
       if (cell is! Map) continue;
       final p = (cell['p'] as num?)?.toInt() ?? 1;
+      // 2D parity: piece glow on selected OR must-continue (`glow: selected || must`).
       final isSelected = selectedRow == r && selectedCol == c;
+      final isMust = mustContinueRow == r && mustContinueCol == c;
       _drawPiece(
         canvas,
         canvasSize,
@@ -1227,7 +1258,7 @@ class _Board3DPainter extends CustomPainter {
         r.toDouble(),
         p,
         cell['k'] == true,
-        isSelected,
+        isSelected || isMust,
       );
     }
 
@@ -1257,12 +1288,16 @@ class _Board3DPainter extends CustomPainter {
         old.flipBoard != flipBoard ||
         old.selectedRow != selectedRow ||
         old.selectedCol != selectedCol ||
+        old.mustContinueRow != mustContinueRow ||
+        old.mustContinueCol != mustContinueCol ||
         old.highlights != highlights ||
         old.destinationKeys != destinationKeys ||
         old.lastMoveKeys != lastMoveKeys ||
         old.lastMove != lastMove ||
         old.light != light ||
         old.dark != dark ||
+        old.frame != frame ||
+        old.bg != bg ||
         old.pieceDarkSplit != pieceDarkSplit ||
         old.pieceLight != pieceLight ||
         old.pieceDark != pieceDark ||
@@ -1274,8 +1309,6 @@ class _Board3DPainter extends CustomPainter {
         old.flyYaw != flyYaw ||
         old.burstProgress != burstProgress ||
         old.captureBursts != captureBursts ||
-        old.light != light ||
-        old.dark != dark ||
         old.gold != gold;
   }
 }

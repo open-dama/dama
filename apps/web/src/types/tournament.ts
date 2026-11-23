@@ -38,6 +38,8 @@ export type Tournament = {
   viewer_enrolled?: boolean;
   /** Present when Bearer viewer has a tournament_entries row (list mine / enrolled). */
   viewer_placement?: number | null;
+  viewer_checked_in?: boolean;
+  viewer_checked_in_at?: string | null;
   viewer_arena_points?: number;
   viewer_arena_streak?: number;
   viewer_prize_amount?: number;
@@ -81,6 +83,7 @@ export type TournamentReport = {
 export type TournamentRosterEntry = {
   user_id: string;
   username?: string;
+  status?: string;
   checked_in_at?: string | null;
   joined_at: string;
   placement?: number | null;

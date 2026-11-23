@@ -115,6 +115,9 @@ export type ClientEnums = {
   hosted_event_entry_approved?: string;
   hosted_event_entry_rejected?: string;
   hosted_event_entry_kicked?: string;
+  tournament_entry_statuses?: string[];
+  tournament_entry_registered?: string;
+  tournament_entry_status_labels?: Record<string, string>;
   hosted_event_bracket_statuses?: string[];
   hosted_event_bracket_pending?: string;
   hosted_event_bracket_ready?: string;

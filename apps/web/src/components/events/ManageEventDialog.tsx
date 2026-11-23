@@ -184,6 +184,8 @@ export function ManageEventDialog({
   const [liveOfficialPausedOnly, setLiveOfficialPausedOnly] = useState(false);
   const [activityGameId, setActivityGameId] = useState<string>("");
   const [rosterSkip, setRosterSkip] = useState(0);
+  const [rosterStatusFilter, setRosterStatusFilter] = useState("");
+  const [rosterCheckedInFilter, setRosterCheckedInFilter] = useState("");
   const [liveSkip, setLiveSkip] = useState(0);
   const [mediaFirstInBranding, setMediaFirstInBranding] = useState(false);
   const prizeMediaRef = useRef<HTMLDivElement | null>(null);
@@ -218,7 +220,12 @@ export function ManageEventDialog({
     eventId,
     rosterSkip,
     pageSize,
-    sessionActive && pageSize > 0,
+    {
+      status: rosterStatusFilter,
+      checkedIn: rosterCheckedInFilter,
+    },
+    sessionActive && pageSize > 0 && Boolean(token),
+    { requireFeeTotals: true },
   );
   const liveBoardsQuery = useEventLiveBoardsQuery(
     token,
@@ -233,7 +240,7 @@ export function ManageEventDialog({
   const shareQuery = useEventShareQuery(eventId, sessionActive);
   const patch = usePatchHostedEventMutation(token);
 
-  useResetSkipOnChange(setRosterSkip, [eventId ?? ""]);
+  useResetSkipOnChange(setRosterSkip, [eventId ?? "", rosterStatusFilter, rosterCheckedInFilter]);
   useResetSkipOnChange(setLiveSkip, [eventId ?? "", liveOfficialPausedOnly]);
 
   const cancelCloseReset = useCallback(() => {
@@ -253,6 +260,8 @@ export function ManageEventDialog({
     setActivityGameId("");
     setOfficialPauseTarget(null);
     setRosterSkip(0);
+    setRosterStatusFilter("");
+    setRosterCheckedInFilter("");
     setLiveSkip(0);
   }, []);
 
@@ -770,6 +779,65 @@ export function ManageEventDialog({
 
               {tab === "players" ? (
                 <div className="space-y-3">
+                  {pageSize > 0 ? (
+                    <div className="flex flex-wrap gap-3">
+                      {(chrome.players_filter_status_label || "").trim() ? (
+                        <Field
+                          id="manage-roster-status"
+                          label={(chrome.players_filter_status_label || "").trim()}
+                        >
+                          <Select
+                            value={rosterStatusFilter || "__all__"}
+                            onValueChange={(v) => setRosterStatusFilter(v === "__all__" ? "" : v)}
+                          >
+                            <SelectTrigger id="manage-roster-status">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__all__">
+                                {(chrome.players_filter_all || "").trim() || chrome.empty_value}
+                              </SelectItem>
+                              {(enumsQuery.data?.hosted_event_entry_statuses ?? []).map((st) => (
+                                <SelectItem key={st} value={st}>
+                                  {(
+                                    enumsQuery.data?.hosted_event_entry_status_labels?.[st] || st
+                                  ).trim()}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      ) : null}
+                      {(chrome.players_filter_checked_in_label || "").trim() ? (
+                        <Field
+                          id="manage-roster-checked-in"
+                          label={(chrome.players_filter_checked_in_label || "").trim()}
+                        >
+                          <Select
+                            value={rosterCheckedInFilter || "__all__"}
+                            onValueChange={(v) =>
+                              setRosterCheckedInFilter(v === "__all__" ? "" : v)
+                            }
+                          >
+                            <SelectTrigger id="manage-roster-checked-in">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__all__">
+                                {(chrome.players_filter_all || "").trim() || chrome.empty_value}
+                              </SelectItem>
+                              <SelectItem value="1">
+                                {(chrome.players_filter_checked_in || "").trim() || "1"}
+                              </SelectItem>
+                              <SelectItem value="0">
+                                {(chrome.players_filter_not_checked_in || "").trim() || "0"}
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {pageSize < 1 ? null : rosterPagedQuery.isLoading ? (
                     <ShimmerBlock className="w-full rounded-md" style={{ height: loadH }} />
                   ) : null}

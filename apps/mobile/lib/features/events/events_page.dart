@@ -2874,6 +2874,8 @@ class _ManageEventPageState extends State<_ManageEventPage>
   List<HostedEventEntry> _rosterEntries = const [];
   SkipMeta? _rosterMeta;
   int _rosterSkip = 0;
+  String _rosterStatusFilter = '';
+  String _rosterCheckedInFilter = '';
   bool _rosterSoftFetching = false;
   double? _entryFeesGross;
   double? _entryFeesCommission;
@@ -3234,6 +3236,24 @@ class _ManageEventPageState extends State<_ManageEventPage>
     }
   }
 
+  List<String> _hostedEntryStatusOptions() {
+    final raw = _clientEnums?['hosted_event_entry_statuses'];
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => e.toString().trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  String _hostedEntryStatusLabel(String code) {
+    final labels = _clientEnums?['hosted_event_entry_status_labels'];
+    if (labels is Map) {
+      final l = labels[code];
+      if (l is String && l.trim().isNotEmpty) return l.trim();
+    }
+    return code;
+  }
+
   Future<void> _loadRosterPage({int? skip}) async {
     final limit = widget.chrome.listPageSizeInt;
     if (limit < 1) return;
@@ -3242,12 +3262,19 @@ class _ManageEventPageState extends State<_ManageEventPage>
     if (mounted) setState(() => _rosterSoftFetching = true);
     try {
       final id = widget.eventId;
+      final params = <String, String>{
+        'skip': '$nextSkip',
+        'limit': '$limit',
+      };
+      final status = _rosterStatusFilter.trim();
+      if (status.isNotEmpty) params['status'] = status;
+      final checked = _rosterCheckedInFilter.trim();
+      if (checked == '1' || checked == '0') {
+        params['checked_in'] = checked;
+      }
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/v1/events/$id/entries').replace(
-          queryParameters: {
-            'skip': '$nextSkip',
-            'limit': '$limit',
-          },
+          queryParameters: params,
         ),
         headers: _authHeaders,
       );
@@ -5072,9 +5099,88 @@ class _ManageEventPageState extends State<_ManageEventPage>
     final approveNote =
         softCommunityJoinStatusMessage(chrome.forceAutoApproveNote);
     final meta = _rosterMeta;
+    final statusFilterLabel = chrome.playersFilterStatusLabel.trim();
+    final checkedInFilterLabel = chrome.playersFilterCheckedInLabel.trim();
+    final filterAll = chrome.playersFilterAll.trim().isNotEmpty
+        ? chrome.playersFilterAll.trim()
+        : chrome.emptyValue;
+    final statusOptions = _hostedEntryStatusOptions();
     return ListView(
       padding: _pagePad!,
       children: [
+        if (pageSize > 0 && statusFilterLabel.isNotEmpty) ...[
+          ChromeSelectField(
+            label: statusFilterLabel,
+            valueLabel: _rosterStatusFilter.isEmpty
+                ? filterAll
+                : _hostedEntryStatusLabel(_rosterStatusFilter),
+            onTap: () async {
+              final options = <ChromeSelectOption<String>>[
+                ChromeSelectOption(value: '', label: filterAll),
+                for (final st in statusOptions)
+                  ChromeSelectOption(
+                    value: st,
+                    label: _hostedEntryStatusLabel(st),
+                  ),
+              ];
+              final picked = await showChromeOptionSheet<String>(
+                context: context,
+                title: statusFilterLabel,
+                options: options,
+                selected: _rosterStatusFilter,
+              );
+              if (picked == null || picked == _rosterStatusFilter) return;
+              setState(() {
+                _rosterStatusFilter = picked;
+                _rosterSkip = 0;
+              });
+              unawaited(_loadRosterPage(skip: 0));
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (pageSize > 0 && checkedInFilterLabel.isNotEmpty) ...[
+          ChromeSelectField(
+            label: checkedInFilterLabel,
+            valueLabel: switch (_rosterCheckedInFilter) {
+              '1' => chrome.playersFilterCheckedIn.trim().isNotEmpty
+                  ? chrome.playersFilterCheckedIn.trim()
+                  : '1',
+              '0' => chrome.playersFilterNotCheckedIn.trim().isNotEmpty
+                  ? chrome.playersFilterNotCheckedIn.trim()
+                  : '0',
+              _ => filterAll,
+            },
+            onTap: () async {
+              final checkedInLabel =
+                  chrome.playersFilterCheckedIn.trim().isNotEmpty
+                      ? chrome.playersFilterCheckedIn.trim()
+                      : '1';
+              final notCheckedInLabel =
+                  chrome.playersFilterNotCheckedIn.trim().isNotEmpty
+                      ? chrome.playersFilterNotCheckedIn.trim()
+                      : '0';
+              final options = <ChromeSelectOption<String>>[
+                ChromeSelectOption(value: '', label: filterAll),
+                ChromeSelectOption(value: '1', label: checkedInLabel),
+                ChromeSelectOption(value: '0', label: notCheckedInLabel),
+              ];
+              final picked = await showChromeOptionSheet<String>(
+                context: context,
+                title: checkedInFilterLabel,
+                options: options,
+                selected: _rosterCheckedInFilter,
+              );
+              if (picked == null || picked == _rosterCheckedInFilter) return;
+              setState(() {
+                _rosterCheckedInFilter = picked;
+                _rosterSkip = 0;
+              });
+              unawaited(_loadRosterPage(skip: 0));
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
         if (approveNote.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),

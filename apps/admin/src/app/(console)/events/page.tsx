@@ -161,12 +161,18 @@ export default function ConsoleEventsCatalogPage() {
   const detailReportDialog = useDeferredDialogValue<HostedEventReport>();
   const detailReport = detailReportDialog.value;
   const [detailEntriesSkip, setDetailEntriesSkip] = useState(0);
+  const [detailEntriesStatus, setDetailEntriesStatus] = useState("");
+  const [detailEntriesCheckedIn, setDetailEntriesCheckedIn] = useState("");
   const [reportsSkip, setReportsSkip] = useUrlSkip("reports_skip");
   const [reportsRowSelection, setReportsRowSelection] = useState<OpsRowSelectionState>({});
   const [reportsBulkPending, setReportsBulkPending] = useState(false);
   const [pinnedFocusEvent, setPinnedFocusEvent] = useState<HostedEventConsoleRow | null>(null);
   useResetSkipOnChange(setHostedSkip, [hostedEntryFilter, hostedSearchQ]);
-  useResetSkipOnChange(setDetailEntriesSkip, [detailEvent?.id || ""]);
+  useResetSkipOnChange(setDetailEntriesSkip, [
+    detailEvent?.id || "",
+    detailEntriesStatus,
+    detailEntriesCheckedIn,
+  ]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: clear selection when list context changes
   useEffect(() => {
     setHostedRowSelection({});
@@ -186,6 +192,7 @@ export default function ConsoleEventsCatalogPage() {
     detailEntriesSkip,
     pageSize,
     Boolean(detailEvent?.id) && canManage && pageSize > 0,
+    { status: detailEntriesStatus, checkedIn: detailEntriesCheckedIn },
   );
   const detailEntries = detailEntriesQuery.data?.entries ?? [];
   const detailEntriesMeta = detailEntriesQuery.data?.meta;
@@ -1435,6 +1442,72 @@ export default function ConsoleEventsCatalogPage() {
                     </p>
                   ) : null}
                 </div>
+                {(chrome.detail_players_filter_status_label || "").trim() ||
+                (chrome.detail_players_filter_checked_in_label || "").trim() ? (
+                  <div className="flex flex-wrap gap-3">
+                    {(chrome.detail_players_filter_status_label || "").trim() ? (
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="admin-event-roster-status"
+                          className="text-xs text-[var(--dama-muted)]"
+                        >
+                          {(chrome.detail_players_filter_status_label || "").trim()}
+                        </label>
+                        <Select
+                          value={detailEntriesStatus || "__all__"}
+                          onValueChange={(v) => setDetailEntriesStatus(v === "__all__" ? "" : v)}
+                        >
+                          <SelectTrigger id="admin-event-roster-status" className="w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">
+                              {(chrome.detail_players_filter_all || "").trim() ||
+                                chrome.empty_value}
+                            </SelectItem>
+                            {(enumsQuery.data?.hosted_event_entry_statuses ?? []).map((st) => (
+                              <SelectItem key={st} value={st}>
+                                {(
+                                  enumsQuery.data?.hosted_event_entry_status_labels?.[st] || st
+                                ).trim()}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    {(chrome.detail_players_filter_checked_in_label || "").trim() ? (
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="admin-event-roster-checked-in"
+                          className="text-xs text-[var(--dama-muted)]"
+                        >
+                          {(chrome.detail_players_filter_checked_in_label || "").trim()}
+                        </label>
+                        <Select
+                          value={detailEntriesCheckedIn || "__all__"}
+                          onValueChange={(v) => setDetailEntriesCheckedIn(v === "__all__" ? "" : v)}
+                        >
+                          <SelectTrigger id="admin-event-roster-checked-in" className="w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">
+                              {(chrome.detail_players_filter_all || "").trim() ||
+                                chrome.empty_value}
+                            </SelectItem>
+                            <SelectItem value="1">
+                              {(chrome.detail_players_filter_checked_in || "").trim() || "1"}
+                            </SelectItem>
+                            <SelectItem value="0">
+                              {(chrome.detail_players_filter_not_checked_in || "").trim() || "0"}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {detailEntriesQuery.isLoading ? (
                   <OpsDataTableSkeleton columns={5} rows={4} />
                 ) : detailEntries.length === 0 ? (

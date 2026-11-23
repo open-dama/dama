@@ -71,6 +71,7 @@ export function invalidateTournamentCup(qc: QueryClient, tournamentId?: string |
     id
       ? qc.invalidateQueries({ queryKey: ["tournament-entries", id] })
       : qc.invalidateQueries({ queryKey: ["tournament-entries"] }),
+    qc.invalidateQueries({ queryKey: ["tournament-entries-paged"] }),
   ]);
 }
 

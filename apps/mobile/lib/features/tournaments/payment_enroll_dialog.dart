@@ -678,7 +678,7 @@ class _PaymentEnrollDialogState extends State<PaymentEnrollDialog> {
                           style: TextStyle(color: tokens.danger),
                         ),
                         const SizedBox(height: 8),
-                          FilledButton(
+                        FilledButton(
                           onPressed: chrome.topUpHref.isEmpty
                               ? null
                               : () {

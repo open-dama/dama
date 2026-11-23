@@ -2006,10 +2006,10 @@ func (s *HostedEventStore) ListEntries(ctx context.Context, eventID string) ([]H
 	return out, rows.Err()
 }
 
-// ListEntriesPage returns a skip/limit page of entries (joined_at ASC) plus total matching rows.
-// statusFilter empty = all statuses; otherwise exact status match (e.g. approved-only roster).
+// ListEntriesPage returns a skip/limit page of entries plus total matching rows.
+// filter.Status empty = all statuses; CheckedIn nil = any check-in state; PlacedOnly orders by place.
 func (s *HostedEventStore) ListEntriesPage(
-	ctx context.Context, eventID string, skip, limit int, statusFilter string,
+	ctx context.Context, eventID string, skip, limit int, filter EntryRosterFilter,
 ) ([]HostedEventEntry, int, error) {
 	if !s.ready() {
 		return nil, 0, errors.New("database unavailable")
@@ -2020,11 +2020,20 @@ func (s *HostedEventStore) ListEntriesPage(
 	where := []string{"en.event_id = $1"}
 	args := []any{eventID}
 	argN := 2
-	statusFilter = strings.TrimSpace(statusFilter)
-	if statusFilter != "" {
+	if st := strings.TrimSpace(filter.Status); st != "" {
 		where = append(where, fmt.Sprintf("en.status = $%d", argN))
-		args = append(args, statusFilter)
+		args = append(args, st)
 		argN++
+	}
+	if filter.CheckedIn != nil {
+		if *filter.CheckedIn {
+			where = append(where, "en.checked_in_at IS NOT NULL")
+		} else {
+			where = append(where, "en.checked_in_at IS NULL")
+		}
+	}
+	if filter.PlacedOnly {
+		where = append(where, "en.placement IS NOT NULL")
 	}
 	whereSQL := strings.Join(where, " AND ")
 	var total int
@@ -2033,10 +2042,14 @@ func (s *HostedEventStore) ListEntriesPage(
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	orderSQL := "en.joined_at ASC"
+	if filter.PlacedOnly {
+		orderSQL = "en.placement ASC, en.joined_at ASC"
+	}
 	listArgs := append(append([]any{}, args...), skip, limit)
 	rows, err := s.db.Pool.Query(ctx, hostedEventEntrySelect+`
 		WHERE `+whereSQL+`
-		ORDER BY en.joined_at ASC
+		ORDER BY `+orderSQL+`
 		OFFSET $`+fmt.Sprintf("%d", argN)+` LIMIT $`+fmt.Sprintf("%d", argN+1), listArgs...)
 	if err != nil {
 		return nil, 0, err
@@ -2051,6 +2064,29 @@ func (s *HostedEventStore) ListEntriesPage(
 		out = append(out, *en)
 	}
 	return out, total, rows.Err()
+}
+
+// GetRosterEntry returns one entrant's row for lobby viewer check-in / placement.
+func (s *HostedEventStore) GetRosterEntry(ctx context.Context, eventID, userID string) (*HostedEventEntry, error) {
+	eventID = strings.TrimSpace(eventID)
+	userID = strings.TrimSpace(userID)
+	if eventID == "" || userID == "" {
+		return nil, errors.New("event and user required")
+	}
+	if !s.ready() {
+		return nil, errors.New("database unavailable")
+	}
+	row := s.db.Pool.QueryRow(ctx, hostedEventEntrySelect+`
+		WHERE en.event_id = $1 AND en.user_id = $2::uuid
+		LIMIT 1`, eventID, userID)
+	en, err := scanHostedEventEntry(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return en, nil
 }
 
 // HostedEntryFeeTotals is the honest full-roster fee rollup for one cup (not page-scoped).

@@ -683,9 +683,32 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                           : (isLast && !selected && !must && !isTarget
                               ? lastHi
                               : hi);
+                      // Quiet = web DraughtsBoard2D quietShade; cues stay flat hi/lastHi.
+                      final isQuiet = !squareHighlighted;
+                      final base = dark ? tokens.boardDark : tokens.boardLight;
+                      final quietGradient = LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: dark
+                            ? [
+                                Color.lerp(base, Colors.white, 0.18) ?? base,
+                                base,
+                                Color.lerp(base, Colors.black, 0.12) ?? base,
+                              ]
+                            : [
+                                Color.lerp(base, Colors.white, 0.28) ?? base,
+                                base,
+                                Color.lerp(
+                                        base, const Color(0xFF9A9A7A), 0.1) ??
+                                    base,
+                              ],
+                        stops: dark
+                            ? const [0.0, 0.42, 1.0]
+                            : const [0.0, 0.48, 1.0],
+                      );
 
                       return Material(
-                        color: squareColor,
+                        color: Colors.transparent,
                         elevation: 0,
                         shadowColor: Colors.transparent,
                         surfaceTintColor: Colors.transparent,
@@ -696,55 +719,61 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                           onTap: canTap
                               ? () => widget.onSelectSquare(row, col)
                               : null,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              ..._boardCoordLabels(
-                                row: row,
-                                col: col,
-                                boardSize: size,
-                                flipBoard: widget.flipBoard,
-                                isDark: dark,
-                                light: tokens.boardLight,
-                                darkColor: tokens.boardDark,
-                              ),
-                              if (isTarget)
-                                FractionallySizedBox(
-                                  widthFactor: 0.44,
-                                  heightFactor: 0.44,
-                                  // Flat fill disc like 3D destination mesh - no stroke.
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: disc.withValues(alpha: 0.95),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: hi.withValues(alpha: 0.7),
-                                          blurRadius: 10,
-                                        ),
-                                      ],
+                          child: Ink(
+                            decoration: BoxDecoration(
+                              color: isQuiet ? null : squareColor,
+                              gradient: isQuiet ? quietGradient : null,
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                ..._boardCoordLabels(
+                                  row: row,
+                                  col: col,
+                                  boardSize: size,
+                                  flipBoard: widget.flipBoard,
+                                  isDark: dark,
+                                  light: tokens.boardLight,
+                                  darkColor: tokens.boardDark,
+                                ),
+                                if (isTarget)
+                                  FractionallySizedBox(
+                                    widthFactor: 0.44,
+                                    heightFactor: 0.44,
+                                    // Flat fill disc like 3D destination mesh - no stroke.
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: disc.withValues(alpha: 0.95),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: hi.withValues(alpha: 0.7),
+                                            blurRadius: 10,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                              if (player != null && !hidePiece)
-                                FractionallySizedBox(
-                                  widthFactor: 0.98,
-                                  heightFactor: 0.98,
-                                  // Square fill is the movable cue - no under-piece ring.
-                                  child: _PieceDisc(
-                                    player: player,
-                                    king: king,
-                                    light: tokens.pieceLight,
-                                    dark: tokens.pieceDark,
-                                    darkSplit: tokens.pieceDarkSplit,
-                                    border: Colors.transparent,
-                                    borderWidth: 0,
-                                    glow: selected || must ? hi : null,
-                                    // No CSS/Flutter scale on select - 3D uses mesh cue only (web parity).
-                                    scale: 1.0,
+                                if (player != null && !hidePiece)
+                                  FractionallySizedBox(
+                                    widthFactor: 0.98,
+                                    heightFactor: 0.98,
+                                    // Square fill is the movable cue - no under-piece ring.
+                                    child: _PieceDisc(
+                                      player: player,
+                                      king: king,
+                                      light: tokens.pieceLight,
+                                      dark: tokens.pieceDark,
+                                      darkSplit: tokens.pieceDarkSplit,
+                                      border: Colors.transparent,
+                                      borderWidth: 0,
+                                      glow: selected || must ? hi : null,
+                                      // No CSS/Flutter scale on select - 3D uses mesh cue only (web parity).
+                                      scale: 1.0,
+                                    ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       );

@@ -102,6 +102,11 @@ class EventsOrganizerChrome {
     required this.playersRejectedLabel,
     this.playersCheckedInLabel = '',
     this.playersOpenPlayerLabel = '',
+    this.playersFilterAll = '',
+    this.playersFilterStatusLabel = '',
+    this.playersFilterCheckedInLabel = '',
+    this.playersFilterCheckedIn = '',
+    this.playersFilterNotCheckedIn = '',
     required this.bracketTitle,
     required this.winnersTitle,
     required this.shareResultAction,
@@ -459,6 +464,11 @@ class EventsOrganizerChrome {
   final String playersRejectedLabel;
   final String playersCheckedInLabel;
   final String playersOpenPlayerLabel;
+  final String playersFilterAll;
+  final String playersFilterStatusLabel;
+  final String playersFilterCheckedInLabel;
+  final String playersFilterCheckedIn;
+  final String playersFilterNotCheckedIn;
   final String bracketTitle;
   final String winnersTitle;
   final String shareResultAction;
@@ -1141,6 +1151,11 @@ class EventsOrganizerChrome {
       playersRejectedLabel: s('players_rejected_label'),
       playersCheckedInLabel: s('players_checked_in_label'),
       playersOpenPlayerLabel: s('players_open_player_label'),
+      playersFilterAll: s('players_filter_all'),
+      playersFilterStatusLabel: s('players_filter_status_label'),
+      playersFilterCheckedInLabel: s('players_filter_checked_in_label'),
+      playersFilterCheckedIn: s('players_filter_checked_in'),
+      playersFilterNotCheckedIn: s('players_filter_not_checked_in'),
       bracketTitle: s('bracket_title'),
       winnersTitle: s('winners_title'),
       shareResultAction: s('share_result_action'),

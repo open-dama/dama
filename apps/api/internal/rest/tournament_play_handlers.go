@@ -73,10 +73,21 @@ func (a *TournamentAPI) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := map[string]any{"tournament": a.publicTournament(r.Context(), t, enrolled)}
-	if userID != "" && a.Tournaments != nil {
-		if queued, qerr := a.Tournaments.ViewerArenaQueued(r.Context(), id, userID); qerr == nil && queued {
-			if tm, ok := out["tournament"].(map[string]any); ok && tm != nil {
+	if tm, ok := out["tournament"].(map[string]any); ok && tm != nil {
+		if userID != "" && a.Tournaments != nil {
+			if queued, qerr := a.Tournaments.ViewerArenaQueued(r.Context(), id, userID); qerr == nil && queued {
 				tm["viewer_arena_queued"] = true
+			}
+		}
+		if enrolled && userID != "" && a.Entries != nil {
+			if row, rerr := a.Entries.GetRosterEntry(r.Context(), id, userID); rerr == nil && row != nil {
+				if row.CheckedInAt != nil {
+					tm["viewer_checked_in"] = true
+					tm["viewer_checked_in_at"] = row.CheckedInAt
+				}
+				if row.Placement != nil {
+					tm["viewer_placement"] = *row.Placement
+				}
 			}
 		}
 	}
@@ -152,6 +163,30 @@ func (a *TournamentAPI) ListEntries(w http.ResponseWriter, r *http.Request) {
 		writeTournamentsPlayerErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_bracket_failed")
 		return
 	}
+	// Paged roster when skip+limit present (lobby SkipPagination). Unpaged keeps Results fallbacks.
+	wantsPage := strings.TrimSpace(r.URL.Query().Get("skip")) != "" ||
+		strings.TrimSpace(r.URL.Query().Get("limit")) != ""
+	if wantsPage {
+		params, labels, skipCap, pageOK := parseListPagination(w, r, a.Settings)
+		if !pageOK {
+			return
+		}
+		filter, filterOK := parseEntryRosterFilter(r)
+		if !filterOK {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid checked_in filter"})
+			return
+		}
+		entries, total, err := a.Entries.ListRosterPageForTournament(
+			r.Context(), id, params.Skip, params.Limit, filter,
+		)
+		if err != nil {
+			writeTournamentsPlayerErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_bracket_failed")
+			return
+		}
+		meta := pagination.BuildMeta(params, total, skipCap, labels)
+		writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "meta": meta})
+		return
+	}
 	entries, err := a.Entries.ListRosterForTournament(r.Context(), id)
 	if err != nil {
 		writeTournamentsPlayerErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_bracket_failed")
@@ -170,6 +205,17 @@ func (a *TournamentAPI) ConsoleListEntries(w http.ResponseWriter, r *http.Reques
 	if !pageOK {
 		return
 	}
+	filter, filterOK := parseEntryRosterFilter(r)
+	if !filterOK {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid checked_in filter"})
+		return
+	}
+	if st := strings.TrimSpace(filter.Status); st != "" {
+		if a.Settings == nil || !a.Settings.IsAllowedTournamentEntryStatus(st) {
+			writeAdminTournamentErr(w, a.Settings, r.Context(), http.StatusBadRequest, "err_start_failed")
+			return
+		}
+	}
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		writeAdminTournamentErr(w, a.Settings, r.Context(), http.StatusNotFound, "err_tournament_not_found")
@@ -183,7 +229,9 @@ func (a *TournamentAPI) ConsoleListEntries(w http.ResponseWriter, r *http.Reques
 		writeAdminTournamentErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_start_failed")
 		return
 	}
-	entries, total, err := a.Entries.ListRosterPageForTournament(r.Context(), id, params.Skip, params.Limit)
+	entries, total, err := a.Entries.ListRosterPageForTournament(
+		r.Context(), id, params.Skip, params.Limit, filter,
+	)
 	if err != nil {
 		writeAdminTournamentErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_start_failed")
 		return

@@ -8,6 +8,7 @@ import { ReportEventDialog } from "@/components/events/ReportEventDialog";
 import { GalleryCarousel } from "@/components/media/GalleryCarousel";
 import { Button } from "@/components/ui/button";
 import { ShimmerBlock } from "@/components/ui/shimmer-skeletons";
+import { SkipPagination } from "@/components/ui/skip-pagination";
 import {
   useEventArenaLeaveQueueMutation,
   useEventArenaQueueMutation,
@@ -18,10 +19,12 @@ import { useStartHostedEventGameMutation } from "@/hooks/mutation/useStartHosted
 import { useClientEnumsQuery } from "@/hooks/query/useClientEnumsQuery";
 import { useEventArenaStandingsQuery } from "@/hooks/query/useEventArenaStandingsQuery";
 import { useEventBracketQuery } from "@/hooks/query/useEventBracketQuery";
-import { useEventEntriesQuery } from "@/hooks/query/useEventEntriesQuery";
+import { useEventEntriesPagedQuery } from "@/hooks/query/useEventEntriesPagedQuery";
 import { useEventQuery } from "@/hooks/query/useEventQuery";
 import { useEventStandingsQuery } from "@/hooks/query/useEventStandingsQuery";
 import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
+import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
+import { parseListPageSize } from "@/lib/parse-list-page-size";
 import {
   isRadixSelectPortalTarget,
   releaseBodyPointerEvents,
@@ -123,7 +126,6 @@ export function EventCupLobby({
   const router = useRouter();
   // Enable on id (not open): keep cache warm through close animation (deferred id clear).
   const detailQuery = useEventQuery(id, Boolean(id));
-  const entriesQuery = useEventEntriesQuery(token, id, Boolean(id));
   const catalogQuery = useEventsCatalogQuery(Boolean(id));
   const enumsQuery = useClientEnumsQuery(Boolean(id));
 
@@ -136,6 +138,19 @@ export function EventCupLobby({
     ? isEventsArenaLobbyChromeReady(chromeRaw)
     : isEventsCupLobbyChromeReady(chromeRaw);
   const lobbyChrome = lobbyChromeReady ? chromeRaw : undefined;
+  const pageSize = parseListPageSize(chromeRaw?.list_page_size);
+  const [rosterSkip, setRosterSkip] = useState(0);
+  useResetSkipOnChange(setRosterSkip, [id]);
+  const entriesPagedQuery = useEventEntriesPagedQuery(
+    token,
+    id,
+    rosterSkip,
+    pageSize,
+    {},
+    Boolean(id) && pageSize > 0,
+  );
+  const [placedSkip, setPlacedSkip] = useState(0);
+  useResetSkipOnChange(setPlacedSkip, [id]);
   const lobbyPollMs = parseLobbyPollMs(chromeRaw?.lobby_poll_interval_ms);
   const bracketQuery = useEventBracketQuery(id, Boolean(id), lobbyPollMs);
 
@@ -158,11 +173,10 @@ export function EventCupLobby({
       setArenaQueued(true);
     }
   }, [ev?.viewer_arena_queued]);
-  const myEntry = useMemo(() => {
-    if (!myUserId) return undefined;
-    return (entriesQuery.data ?? []).find((e) => (e.user_id || "").trim() === myUserId);
-  }, [entriesQuery.data, myUserId]);
-  const joined = viewerJoined || Boolean(myEntry);
+  const joined =
+    viewerJoined ||
+    Boolean((ev?.viewer_entry_status || "").trim()) ||
+    ev?.viewer_checked_in === true;
   const started = eventCupStarted(ev);
   const canReport =
     Boolean(token) && joined && started && reportChromeReady && reasonCodes.length > 0;
@@ -198,15 +212,6 @@ export function EventCupLobby({
   const arenaActive = arenaClockActive(ev?.arena_ends_at);
   // Only server finished_at counts - timer expiry alone must not fake a finished cup.
   const arenaFinished = isArenaFormat && started && (ev?.finished_at || "").trim() !== "";
-
-  const placedEntries = useMemo(
-    () =>
-      (entriesQuery.data ?? [])
-        .filter((e) => typeof e.placement === "number")
-        .slice()
-        .sort((a, b) => (a.placement as number) - (b.placement as number)),
-    [entriesQuery.data],
-  );
 
   const nextMatch = useMemo(
     () => pickNextMatch(bracketQuery.data ?? [], myUserId),
@@ -266,7 +271,7 @@ export function EventCupLobby({
       }
     }
     let placement: number | null =
-      typeof myEntry?.placement === "number" ? myEntry.placement : null;
+      typeof ev?.viewer_placement === "number" ? ev.viewer_placement : null;
     if (placement == null && isArenaFormat) {
       const arenaIdx = arenaRows.findIndex((r) => (r.user_id || "").trim() === myUserId);
       if (arenaIdx >= 0) {
@@ -315,11 +320,26 @@ export function EventCupLobby({
     standingsQuery.data,
     arenaStandingsQuery.data,
     myUserId,
-    myEntry?.placement,
+    ev?.viewer_placement,
   ]);
 
   const checkInState = eventCheckInWindowState(ev);
-  const checkedIn = Boolean((myEntry?.checked_in_at || "").trim());
+  const checkedIn =
+    ev?.viewer_checked_in === true || Boolean((ev?.viewer_checked_in_at || "").trim());
+
+  const showPlacedFallback =
+    Boolean(started) &&
+    !isArenaFormat &&
+    !usesStandingsTable &&
+    Boolean((ev?.finished_at || "").trim());
+  const placedPagedQuery = useEventEntriesPagedQuery(
+    token,
+    id,
+    placedSkip,
+    pageSize,
+    { placed: true },
+    Boolean(id) && pageSize > 0 && showPlacedFallback,
+  );
 
   // Must stay above the !open return. Lobby stays mounted while closed; a hook
   // after that return changes hook order when join opens it and crashes the page.
@@ -782,26 +802,39 @@ export function EventCupLobby({
                   </section>
                 ) : null}
 
-                {(entriesQuery.data ?? []).length > 0 ? (
+                {pageSize > 0 ? (
                   <section className="space-y-2">
                     <h2 className="font-semibold text-[var(--dama-gold)]">
                       {softCommunityRosterTitle(lobbyChrome.lobby_roster_title)}
                     </h2>
-                    <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
-                      {(entriesQuery.data ?? []).map((e) => (
-                        <li
-                          key={e.user_id}
-                          className="flex items-center justify-between gap-2 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
-                        >
-                          <span>{(e.username || "").trim() || empty}</span>
-                          {(e.checked_in_at || "").trim() ? (
-                            <span className="text-xs text-[var(--dama-gold)]">
-                              {lobbyChrome.check_in_done}
-                            </span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
+                    {(entriesPagedQuery.data?.entries ?? []).length > 0 ? (
+                      <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
+                        {(entriesPagedQuery.data?.entries ?? []).map((e) => (
+                          <li
+                            key={e.user_id}
+                            className="flex items-center justify-between gap-2 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
+                          >
+                            <span>{(e.username || "").trim() || empty}</span>
+                            {(e.checked_in_at || "").trim() ? (
+                              <span className="text-xs text-[var(--dama-gold)]">
+                                {lobbyChrome.check_in_done}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : entriesPagedQuery.isLoading ? (
+                      <ShimmerBlock className="h-16 w-full rounded-md" />
+                    ) : null}
+                    {entriesPagedQuery.data?.meta ? (
+                      <SkipPagination
+                        meta={entriesPagedQuery.data.meta}
+                        onPrev={setRosterSkip}
+                        onNext={setRosterSkip}
+                        disabled={entriesPagedQuery.isFetching && !entriesPagedQuery.isLoading}
+                        inputId="event-lobby-roster-skip"
+                      />
+                    ) : null}
                   </section>
                 ) : null}
 
@@ -834,24 +867,37 @@ export function EventCupLobby({
                     }}
                     loading={standingsQuery.isLoading}
                   />
-                ) : placedEntries.length > 0 ? (
+                ) : showPlacedFallback && pageSize > 0 ? (
                   <section className="space-y-2">
                     <h2 className="font-semibold text-[var(--dama-gold)]">
                       {lobbyChrome.lobby_standings_title}
                     </h2>
-                    <ul className="space-y-2 text-sm">
-                      {placedEntries.map((e) => (
-                        <li
-                          key={e.user_id}
-                          className="flex items-center gap-3 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
-                        >
-                          <span className="tabular-nums font-semibold text-[var(--dama-gold)]">
-                            {e.placement}
-                          </span>
-                          <span>{(e.username || "").trim() || empty}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {(placedPagedQuery.data?.entries ?? []).length > 0 ? (
+                      <ul className="space-y-2 text-sm">
+                        {(placedPagedQuery.data?.entries ?? []).map((e) => (
+                          <li
+                            key={e.user_id}
+                            className="flex items-center gap-3 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
+                          >
+                            <span className="tabular-nums font-semibold text-[var(--dama-gold)]">
+                              {e.placement}
+                            </span>
+                            <span>{(e.username || "").trim() || empty}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : placedPagedQuery.isLoading ? (
+                      <ShimmerBlock className="h-16 w-full rounded-md" />
+                    ) : null}
+                    {placedPagedQuery.data?.meta ? (
+                      <SkipPagination
+                        meta={placedPagedQuery.data.meta}
+                        onPrev={setPlacedSkip}
+                        onNext={setPlacedSkip}
+                        disabled={placedPagedQuery.isFetching && !placedPagedQuery.isLoading}
+                        inputId="event-lobby-placed-skip"
+                      />
+                    ) : null}
                   </section>
                 ) : null}
 

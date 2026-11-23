@@ -80,6 +80,11 @@ export type ClientEnums = {
   hosted_event_report_status_labels?: Record<string, string>;
   hosted_event_visibility_labels?: Record<string, string>;
   hosted_event_status_labels?: Record<string, string>;
+  hosted_event_entry_statuses?: string[];
+  hosted_event_entry_status_labels?: Record<string, string>;
+  tournament_entry_statuses?: string[];
+  tournament_entry_registered?: string;
+  tournament_entry_status_labels?: Record<string, string>;
   hosted_event_public_visibility?: string;
   hosted_event_private_visibility?: string;
   hosted_event_report_open_status?: string;

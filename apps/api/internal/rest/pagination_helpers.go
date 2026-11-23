@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"dama/apps/api/internal/pagination"
 	"dama/apps/api/internal/store"
@@ -81,4 +82,32 @@ func parseListPagination(w http.ResponseWriter, r *http.Request, settings *store
 		return pagination.Params{}, pagination.Labels{}, 0, false
 	}
 	return params, labels, skipCap, true
+}
+
+// parseEntryRosterFilter reads optional roster filters from query:
+//
+//	status=… (exact entry status), checked_in=1|0|true|false, placed=1
+//
+// Invalid checked_in values fail closed (ok=false).
+func parseEntryRosterFilter(r *http.Request) (store.EntryRosterFilter, bool) {
+	out := store.EntryRosterFilter{
+		Status:     strings.TrimSpace(r.URL.Query().Get("status")),
+		PlacedOnly: strings.TrimSpace(r.URL.Query().Get("placed")) == "1",
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("checked_in"))
+	if raw == "" {
+		return out, true
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes":
+		v := true
+		out.CheckedIn = &v
+		return out, true
+	case "0", "false", "no":
+		v := false
+		out.CheckedIn = &v
+		return out, true
+	default:
+		return store.EntryRosterFilter{}, false
+	}
 }

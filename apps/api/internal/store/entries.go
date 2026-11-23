@@ -331,9 +331,17 @@ func (s *EntryStore) ListRosterForTournament(ctx context.Context, tournamentID s
 	return []TournamentRosterEntry{}, nil
 }
 
-// ListRosterPageForTournament returns a skip/limit page of entrants plus total count.
+// EntryRosterFilter scopes skip/limit roster pages (status / check-in / placed-only).
+// Empty Status and nil CheckedIn mean no filter on those columns.
+type EntryRosterFilter struct {
+	Status     string
+	CheckedIn  *bool
+	PlacedOnly bool
+}
+
+// ListRosterPageForTournament returns a skip/limit page of entrants plus total matching count.
 func (s *EntryStore) ListRosterPageForTournament(
-	ctx context.Context, tournamentID string, skip, limit int,
+	ctx context.Context, tournamentID string, skip, limit int, filter EntryRosterFilter,
 ) ([]TournamentRosterEntry, int, error) {
 	tournamentID = strings.TrimSpace(tournamentID)
 	if tournamentID == "" {
@@ -345,19 +353,43 @@ func (s *EntryStore) ListRosterPageForTournament(
 	if s.db == nil || !s.db.Ready() {
 		return nil, 0, fmt.Errorf("database unavailable")
 	}
+	where := []string{"e.tournament_id = $1"}
+	args := []any{tournamentID}
+	argN := 2
+	if st := strings.TrimSpace(filter.Status); st != "" {
+		where = append(where, fmt.Sprintf("e.status = $%d", argN))
+		args = append(args, st)
+		argN++
+	}
+	if filter.CheckedIn != nil {
+		if *filter.CheckedIn {
+			where = append(where, "e.checked_in_at IS NOT NULL")
+		} else {
+			where = append(where, "e.checked_in_at IS NULL")
+		}
+	}
+	if filter.PlacedOnly {
+		where = append(where, "e.placement IS NOT NULL")
+	}
+	whereSQL := strings.Join(where, " AND ")
 	var total int
-	if err := s.db.Pool.QueryRow(ctx, `
-		SELECT COUNT(*)::int FROM tournament_entries WHERE tournament_id = $1`, tournamentID,
+	if err := s.db.Pool.QueryRow(ctx,
+		`SELECT COUNT(*)::int FROM tournament_entries e WHERE `+whereSQL, args...,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	orderSQL := "e.created_at ASC"
+	if filter.PlacedOnly {
+		orderSQL = "e.placement ASC, e.created_at ASC"
+	}
+	listArgs := append(append([]any{}, args...), skip, limit)
 	rows, err := s.db.Pool.Query(ctx, `
 		SELECT e.user_id::text, COALESCE(u.username, ''), COALESCE(e.status, ''), e.checked_in_at, e.created_at, e.placement
 		FROM tournament_entries e
 		LEFT JOIN users u ON u.id = e.user_id
-		WHERE e.tournament_id = $1
-		ORDER BY e.created_at ASC
-		OFFSET $2 LIMIT $3`, tournamentID, skip, limit)
+		WHERE `+whereSQL+`
+		ORDER BY `+orderSQL+`
+		OFFSET $`+fmt.Sprintf("%d", argN)+` LIMIT $`+fmt.Sprintf("%d", argN+1), listArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -371,6 +403,34 @@ func (s *EntryStore) ListRosterPageForTournament(
 		out = append(out, row)
 	}
 	return out, total, rows.Err()
+}
+
+// GetRosterEntry returns one entrant's public roster row (lobby viewer check-in / placement).
+func (s *EntryStore) GetRosterEntry(ctx context.Context, tournamentID, userID string) (*TournamentRosterEntry, error) {
+	tournamentID = strings.TrimSpace(tournamentID)
+	userID = strings.TrimSpace(userID)
+	if tournamentID == "" || userID == "" {
+		return nil, fmt.Errorf("tournament and user required")
+	}
+	if s.db == nil || !s.db.Ready() {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	var row TournamentRosterEntry
+	err := s.db.Pool.QueryRow(ctx, `
+		SELECT e.user_id::text, COALESCE(u.username, ''), COALESCE(e.status, ''), e.checked_in_at, e.created_at, e.placement
+		FROM tournament_entries e
+		LEFT JOIN users u ON u.id = e.user_id
+		WHERE e.tournament_id = $1 AND e.user_id = $2::uuid
+		LIMIT 1`, tournamentID, userID).Scan(
+		&row.UserID, &row.Username, &row.Status, &row.CheckedInAt, &row.JoinedAt, &row.Placement,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
 }
 
 // Exists reports whether the user already has a tournament entry (before wallet debit).

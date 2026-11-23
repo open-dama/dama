@@ -2101,6 +2101,16 @@ func (a *HostedEventsAPI) Get(w http.ResponseWriter, r *http.Request) {
 		if queued, qerr := a.Events.ViewerArenaQueued(r.Context(), ev.ID, userID); qerr == nil && queued {
 			m["viewer_arena_queued"] = true
 		}
+		if row, rerr := a.Events.GetRosterEntry(r.Context(), ev.ID, userID); rerr == nil && row != nil {
+			m["viewer_entry_status"] = row.Status
+			if row.CheckedInAt != nil {
+				m["viewer_checked_in"] = true
+				m["viewer_checked_in_at"] = row.CheckedInAt
+			}
+			if row.Placement != nil {
+				m["viewer_placement"] = *row.Placement
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, m)
 }
@@ -2368,7 +2378,7 @@ func (a *HostedEventsAPI) ListEntries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Paged roster when skip+limit present (Manage Players/Payments). Unpaged keeps Results/lobby full.
+	// Paged roster when skip+limit present (Manage / lobby SkipPagination). Unpaged keeps Results full.
 	wantsPage := strings.TrimSpace(r.URL.Query().Get("skip")) != "" ||
 		strings.TrimSpace(r.URL.Query().Get("limit")) != ""
 	if wantsPage {
@@ -2376,8 +2386,22 @@ func (a *HostedEventsAPI) ListEntries(w http.ResponseWriter, r *http.Request) {
 		if !pageOK {
 			return
 		}
+		filter, filterOK := parseEntryRosterFilter(r)
+		if !filterOK {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid checked_in filter"})
+			return
+		}
+		// Non-organizers always see approved-only; organizers may pass status=…
+		if !isOrganizer {
+			filter.Status = approvedOnly
+		} else if st := strings.TrimSpace(filter.Status); st != "" {
+			if a.Settings == nil || !a.Settings.IsAllowedHostedEventEntryStatus(st) {
+				writeEventsOrgErr(w, a.Settings, r.Context(), http.StatusBadRequest, "err_entries_failed")
+				return
+			}
+		}
 		entries, total, err := a.Events.ListEntriesPage(
-			r.Context(), ev.ID, params.Skip, params.Limit, approvedOnly,
+			r.Context(), ev.ID, params.Skip, params.Limit, filter,
 		)
 		if err != nil {
 			writeEventsOrgErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_entries_failed")
@@ -4196,7 +4220,18 @@ func (a *HostedEventsAPI) ConsoleListEventEntries(w http.ResponseWriter, r *http
 		writeEventsAdminErr(w, a.Settings, r.Context(), http.StatusNotFound, "err_event_not_found")
 		return
 	}
-	entries, total, err := a.Events.ListEntriesPage(r.Context(), id, params.Skip, params.Limit, "")
+	filter, filterOK := parseEntryRosterFilter(r)
+	if !filterOK {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid checked_in filter"})
+		return
+	}
+	if st := strings.TrimSpace(filter.Status); st != "" {
+		if a.Settings == nil || !a.Settings.IsAllowedHostedEventEntryStatus(st) {
+			writeEventsAdminErr(w, a.Settings, r.Context(), http.StatusBadRequest, "err_entries_failed")
+			return
+		}
+	}
+	entries, total, err := a.Events.ListEntriesPage(r.Context(), id, params.Skip, params.Limit, filter)
 	if err != nil {
 		writeEventsAdminErr(w, a.Settings, r.Context(), http.StatusInternalServerError, "err_entries_failed")
 		return

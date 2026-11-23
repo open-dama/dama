@@ -6,6 +6,7 @@ import { EventStandingsTable } from "@/components/events/EventStandingsTable";
 import { ReportEventDialog } from "@/components/events/ReportEventDialog";
 import { Button } from "@/components/ui/button";
 import { ShimmerBlock } from "@/components/ui/shimmer-skeletons";
+import { SkipPagination } from "@/components/ui/skip-pagination";
 import {
   useTournamentArenaLeaveQueueMutation,
   useTournamentArenaQueueMutation,
@@ -18,8 +19,10 @@ import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
 import { useTournamentArenaStandingsQuery } from "@/hooks/query/useTournamentArenaStandingsQuery";
 import { useTournamentBracketQuery } from "@/hooks/query/useTournamentBracketQuery";
 import { useTournamentDetailQuery } from "@/hooks/query/useTournamentDetailQuery";
-import { useTournamentEntriesQuery } from "@/hooks/query/useTournamentEntriesQuery";
+import { useTournamentEntriesPagedQuery } from "@/hooks/query/useTournamentEntriesPagedQuery";
 import { useTournamentStandingsQuery } from "@/hooks/query/useTournamentStandingsQuery";
+import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
+import { parseListPageSize } from "@/lib/parse-list-page-size";
 import {
   isRadixSelectPortalTarget,
   releaseBodyPointerEvents,
@@ -123,7 +126,6 @@ export function TournamentCupLobby({
   const router = useRouter();
   // Enable on id (not open): keep cache warm through close animation (deferred id clear).
   const detailQuery = useTournamentDetailQuery(token, id, Boolean(id));
-  const entriesQuery = useTournamentEntriesQuery(id, Boolean(id));
   const catalogQuery = useEventsCatalogQuery(Boolean(id));
   const enumsQuery = useClientEnumsQuery(Boolean(id));
 
@@ -136,6 +138,18 @@ export function TournamentCupLobby({
     ? isTournamentArenaLobbyChromeReady(chromeRaw)
     : isTournamentCupLobbyChromeReady(chromeRaw);
   const lobbyChrome = lobbyChromeReady ? chromeRaw : undefined;
+  const pageSize = parseListPageSize(chromeRaw?.list_page_size);
+  const [rosterSkip, setRosterSkip] = useState(0);
+  useResetSkipOnChange(setRosterSkip, [id]);
+  const entriesPagedQuery = useTournamentEntriesPagedQuery(
+    id,
+    rosterSkip,
+    pageSize,
+    {},
+    Boolean(id) && pageSize > 0,
+  );
+  const [placedSkip, setPlacedSkip] = useState(0);
+  useResetSkipOnChange(setPlacedSkip, [id]);
 
   const [reportOpen, setReportOpen] = useState(false);
   const reportChromeReady = isTournamentReportChromeReady(chromeRaw);
@@ -155,12 +169,8 @@ export function TournamentCupLobby({
       setArenaQueued(true);
     }
   }, [t?.viewer_arena_queued]);
-  const myEntry = useMemo(() => {
-    if (!myUserId) return undefined;
-    return (entriesQuery.data ?? []).find((e) => (e.user_id || "").trim() === myUserId);
-  }, [entriesQuery.data, myUserId]);
-  // Seat latch: prop / detail flag OR roster entry (paginated enroll miss parity with EventCupLobby).
-  const enrolled = viewerEnrolled || t?.viewer_enrolled === true || Boolean(myEntry);
+  // Seat latch: prop / detail flag (viewer fields are stamped on GET - not the paged roster page).
+  const enrolled = viewerEnrolled || t?.viewer_enrolled === true;
   const started = tournamentCupStarted(t);
   const lobbyPollMs = parseLobbyPollMs(chromeRaw?.lobby_poll_interval_ms);
   const bracketQuery = useTournamentBracketQuery(id, Boolean(id), lobbyPollMs);
@@ -199,15 +209,6 @@ export function TournamentCupLobby({
   const empty = (lobbyChrome?.empty_value || "").trim();
   const sep = chromeSeparator(lobbyChrome?.meta_separator);
   const autoOpenedGameRef = useRef("");
-
-  const placedEntries = useMemo(
-    () =>
-      (entriesQuery.data ?? [])
-        .filter((e) => typeof e.placement === "number")
-        .slice()
-        .sort((a, b) => (a.placement as number) - (b.placement as number)),
-    [entriesQuery.data],
-  );
 
   const nextMatch = useMemo(
     () => pickNextMatch(bracketQuery.data ?? [], myUserId),
@@ -269,7 +270,7 @@ export function TournamentCupLobby({
       }
     }
     let placement: number | null =
-      typeof myEntry?.placement === "number" ? myEntry.placement : null;
+      typeof t?.viewer_placement === "number" ? t.viewer_placement : null;
     if (placement == null && isArenaFormat) {
       const arenaIdx = arenaRows.findIndex((r) => (r.user_id || "").trim() === myUserId);
       if (arenaIdx >= 0) {
@@ -318,11 +319,25 @@ export function TournamentCupLobby({
     standingsQuery.data,
     arenaStandingsQuery.data,
     myUserId,
-    myEntry?.placement,
+    t?.viewer_placement,
   ]);
 
   const checkInState = checkInWindowState(t);
-  const checkedIn = Boolean((myEntry?.checked_in_at || "").trim());
+  const checkedIn =
+    t?.viewer_checked_in === true || Boolean((t?.viewer_checked_in_at || "").trim());
+
+  const showPlacedFallback =
+    Boolean(started) &&
+    !isArenaFormat &&
+    !usesStandingsTable &&
+    Boolean((t?.finished_at || "").trim());
+  const placedPagedQuery = useTournamentEntriesPagedQuery(
+    id,
+    placedSkip,
+    pageSize,
+    { placed: true },
+    Boolean(id) && pageSize > 0 && showPlacedFallback,
+  );
 
   // Must stay above the !open return. Lobby stays mounted while closed; a hook
   // after that return changes hook order when enroll opens it and crashes the page.
@@ -749,26 +764,39 @@ export function TournamentCupLobby({
                   </section>
                 ) : null}
 
-                {(entriesQuery.data ?? []).length > 0 ? (
+                {pageSize > 0 ? (
                   <section className="space-y-2">
                     <h2 className="font-semibold text-[var(--dama-gold)]">
                       {softCommunityRosterTitle(lobbyChrome.lobby_roster_title)}
                     </h2>
-                    <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
-                      {(entriesQuery.data ?? []).map((e) => (
-                        <li
-                          key={e.user_id}
-                          className="flex items-center justify-between gap-2 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
-                        >
-                          <span>{(e.username || "").trim() || empty}</span>
-                          {(e.checked_in_at || "").trim() ? (
-                            <span className="text-xs text-[var(--dama-gold)]">
-                              {lobbyChrome.check_in_done}
-                            </span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
+                    {(entriesPagedQuery.data?.entries ?? []).length > 0 ? (
+                      <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
+                        {(entriesPagedQuery.data?.entries ?? []).map((e) => (
+                          <li
+                            key={e.user_id}
+                            className="flex items-center justify-between gap-2 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
+                          >
+                            <span>{(e.username || "").trim() || empty}</span>
+                            {(e.checked_in_at || "").trim() ? (
+                              <span className="text-xs text-[var(--dama-gold)]">
+                                {lobbyChrome.check_in_done}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : entriesPagedQuery.isLoading ? (
+                      <ShimmerBlock className="h-16 w-full rounded-md" />
+                    ) : null}
+                    {entriesPagedQuery.data?.meta ? (
+                      <SkipPagination
+                        meta={entriesPagedQuery.data.meta}
+                        onPrev={setRosterSkip}
+                        onNext={setRosterSkip}
+                        disabled={entriesPagedQuery.isFetching && !entriesPagedQuery.isLoading}
+                        inputId="tournament-lobby-roster-skip"
+                      />
+                    ) : null}
                   </section>
                 ) : null}
 
@@ -801,24 +829,37 @@ export function TournamentCupLobby({
                     }}
                     loading={standingsQuery.isLoading}
                   />
-                ) : placedEntries.length > 0 ? (
+                ) : showPlacedFallback && pageSize > 0 ? (
                   <section className="space-y-2">
                     <h2 className="font-semibold text-[var(--dama-gold)]">
                       {lobbyChrome.lobby_standings_title}
                     </h2>
-                    <ul className="space-y-2 text-sm">
-                      {placedEntries.map((e) => (
-                        <li
-                          key={e.user_id}
-                          className="flex items-center gap-3 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
-                        >
-                          <span className="tabular-nums font-semibold text-[var(--dama-gold)]">
-                            {e.placement}
-                          </span>
-                          <span>{(e.username || "").trim() || empty}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {(placedPagedQuery.data?.entries ?? []).length > 0 ? (
+                      <ul className="space-y-2 text-sm">
+                        {(placedPagedQuery.data?.entries ?? []).map((e) => (
+                          <li
+                            key={e.user_id}
+                            className="flex items-center gap-3 rounded-md border border-[var(--dama-border)] bg-[var(--dama-card)] px-3 py-2"
+                          >
+                            <span className="tabular-nums font-semibold text-[var(--dama-gold)]">
+                              {e.placement}
+                            </span>
+                            <span>{(e.username || "").trim() || empty}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : placedPagedQuery.isLoading ? (
+                      <ShimmerBlock className="h-16 w-full rounded-md" />
+                    ) : null}
+                    {placedPagedQuery.data?.meta ? (
+                      <SkipPagination
+                        meta={placedPagedQuery.data.meta}
+                        onPrev={setPlacedSkip}
+                        onNext={setPlacedSkip}
+                        disabled={placedPagedQuery.isFetching && !placedPagedQuery.isLoading}
+                        inputId="tournament-lobby-placed-skip"
+                      />
+                    ) : null}
                   </section>
                 ) : null}
 

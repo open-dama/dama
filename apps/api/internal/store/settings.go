@@ -337,6 +337,9 @@ type ClientEnumsConfig struct {
 	HostedEventVisibilityLabels                map[string]string `json:"hosted_event_visibility_labels"`
 	CampaignStatusLabels                       map[string]string `json:"campaign_status_labels"`
 	TournamentStatusLabels                     map[string]string `json:"tournament_status_labels"`
+	TournamentEntryStatuses                    []string          `json:"tournament_entry_statuses"`
+	TournamentEntryRegistered                  string            `json:"tournament_entry_registered"`
+	TournamentEntryStatusLabels                map[string]string `json:"tournament_entry_status_labels"`
 	TournamentFormats                          []string          `json:"tournament_formats"`
 	TournamentDefaultFormat                    string            `json:"tournament_default_format"`
 	TournamentBracketStatuses                  []string          `json:"tournament_bracket_statuses"`
@@ -2601,6 +2604,8 @@ func (s *SettingsStore) ReloadClientEnums(ctx context.Context) error {
 		cfg.HostedEventReportDismissedStatus == "" ||
 		cfg.HostedEventReportDeactivatedStatus == "" ||
 		len(cfg.TournamentFormats) == 0 || cfg.TournamentDefaultFormat == "" ||
+		len(cfg.TournamentEntryStatuses) == 0 ||
+		strings.TrimSpace(cfg.TournamentEntryRegistered) == "" ||
 		len(cfg.TournamentBracketStatuses) == 0 ||
 		cfg.TournamentBracketPending == "" || cfg.TournamentBracketReady == "" ||
 		cfg.TournamentBracketLive == "" || cfg.TournamentBracketDone == "" ||
@@ -2682,6 +2687,19 @@ func (s *SettingsStore) ReloadClientEnums(ctx context.Context) error {
 	}
 	if err := requireStatusLabels(cfg.TournamentStatuses, cfg.TournamentStatusLabels, "tournament_status_labels"); err != nil {
 		return err
+	}
+	if err := requireStatusLabels(cfg.TournamentEntryStatuses, cfg.TournamentEntryStatusLabels, "tournament_entry_status_labels"); err != nil {
+		return err
+	}
+	foundTournamentEntryRegistered := false
+	for _, st := range cfg.TournamentEntryStatuses {
+		if st == cfg.TournamentEntryRegistered {
+			foundTournamentEntryRegistered = true
+			break
+		}
+	}
+	if !foundTournamentEntryRegistered {
+		return errors.New("client_enums tournament_entry_registered not in tournament_entry_statuses")
 	}
 	if err := requireStatusLabels(cfg.TournamentBracketStatuses, cfg.TournamentBracketStatusLabels, "tournament_bracket_status_labels"); err != nil {
 		return err
@@ -2788,6 +2806,8 @@ func (s *SettingsStore) ClientEnums() ClientEnumsConfig {
 	cp.HostedEventVisibilityLabels = cloneStringMap(s.enums.HostedEventVisibilityLabels)
 	cp.CampaignStatusLabels = cloneStringMap(s.enums.CampaignStatusLabels)
 	cp.TournamentStatusLabels = cloneStringMap(s.enums.TournamentStatusLabels)
+	cp.TournamentEntryStatuses = append([]string{}, s.enums.TournamentEntryStatuses...)
+	cp.TournamentEntryStatusLabels = cloneStringMap(s.enums.TournamentEntryStatusLabels)
 	cp.TournamentFormats = append([]string{}, s.enums.TournamentFormats...)
 	cp.TournamentBracketStatuses = append([]string{}, s.enums.TournamentBracketStatuses...)
 	cp.TournamentBracketStatusLabels = cloneStringMap(s.enums.TournamentBracketStatusLabels)
@@ -3088,6 +3108,15 @@ func (s *SettingsStore) ResolveTournamentFormatID(formatID string) (string, erro
 
 func (s *SettingsStore) IsAllowedHostedEventEntryStatus(status string) bool {
 	for _, st := range s.ClientEnums().HostedEventEntryStatuses {
+		if st == status {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SettingsStore) IsAllowedTournamentEntryStatus(status string) bool {
+	for _, st := range s.ClientEnums().TournamentEntryStatuses {
 		if st == status {
 			return true
 		}
