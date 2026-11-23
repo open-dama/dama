@@ -120,7 +120,7 @@ export function PaymentEnrollModal({
   const [forcePhoneGate, setForcePhoneGate] = useState(false);
   const suggestedTopUpRef = useRef(false);
 
-  /** Close enroll first, then open wallet top-up — avoids stacked-dialog glitch. */
+  /** Close enroll first, then open wallet top-up - avoids stacked-dialog glitch. */
   const openWalletTopUp = useCallback(
     (href: string) => {
       const target = withWalletFocusParam(href, "topup");

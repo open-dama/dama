@@ -26,7 +26,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
 
-/// Dialog exit animation budget — match web `DIALOG_CLEAR_MS` (200ms).
+/// Dialog exit animation budget - match web `DIALOG_CLEAR_MS` (200ms).
 const Duration _kDialogHandoffMs = Duration(milliseconds: 200);
 
 void _openTopUpHref(

@@ -135,7 +135,7 @@ export function PaymentEventJoinModal({
   const [forcePhoneGate, setForcePhoneGate] = useState(false);
   const suggestedTopUpRef = useRef(false);
 
-  /** Close join confirm first, then open wallet top-up — avoids stacked-dialog glitch. */
+  /** Close join confirm first, then open wallet top-up - avoids stacked-dialog glitch. */
   const openWalletTopUp = useCallback(
     (href: string) => {
       const target = withWalletFocusParam(href, "topup");

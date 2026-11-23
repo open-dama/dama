@@ -273,7 +273,7 @@ export function WalletWorkspace({ moneyBasePath = "" }: WalletWorkspaceProps) {
   useEffect(() => {
     if (!chrome || focusOpened.current || ageBlocked || phoneBlocked) return;
     if (focusPayoutForm) {
-      // Latch only after open fires — latching early + effect cleanup cancelled the open.
+      // Latch only after open fires - latching early + effect cleanup cancelled the open.
       const t = window.setTimeout(() => {
         if (focusOpened.current) return;
         focusOpened.current = true;
