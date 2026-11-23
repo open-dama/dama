@@ -1,10 +1,11 @@
 "use client";
 
 import { useMaxLg } from "@/hooks/useMaxLg";
+import { useTextInputKeyboardScroll } from "@/hooks/useTextInputKeyboardScroll";
 import { playRailAsideClass } from "@/lib/player-shell-ui";
 import { cn } from "@/lib/utils";
 import { useShellChromeStore } from "@/store/shell-chrome";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 type Props = {
   children: ReactNode;
@@ -19,12 +20,16 @@ type Props = {
  * lg+: column shell; body PlayRailScrollPort owns the scroll attribute.
  * Immersive chat only hides the mobile bottom nav - it must not freeze aside overflow on
  * phone/tablet (that made Friends/DMs/Players lists unscrollable).
+ * Phone/tablet: character text fields scroll above the soft keyboard (shared helper).
  */
 export function PlayRailAside({ children, className, "aria-label": ariaLabel }: Props) {
   const maxLg = useMaxLg();
   const immersiveChat = useShellChromeStore((s) => s.immersiveChat);
+  const [railRoot, setRailRoot] = useState<HTMLElement | null>(null);
+  useTextInputKeyboardScroll(railRoot, maxLg);
   return (
     <aside
+      ref={setRailRoot}
       className={cn(playRailAsideClass, className)}
       aria-label={ariaLabel}
       data-dama-immersive-chat={immersiveChat ? "" : undefined}

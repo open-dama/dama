@@ -9,6 +9,7 @@ import 'package:dama_mobile/core/ui/chrome_select_sheet.dart';
 import 'package:dama_mobile/core/types/types.dart';
 import 'package:dama_mobile/core/ui/country_flag.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
+import 'package:dama_mobile/core/ui/text_input_keyboard_scroll.dart';
 import 'package:dama_mobile/features/auth/auth_cubit.dart';
 import 'package:dama_mobile/features/auth/sign_in_dialog.dart';
 import 'package:dama_mobile/features/chat/compose_message_sheet.dart';
@@ -188,7 +189,8 @@ class PlayRailPanel extends StatefulWidget {
   State<PlayRailPanel> createState() => _PlayRailPanelState();
 }
 
-class _PlayRailPanelState extends State<PlayRailPanel> {
+class _PlayRailPanelState extends State<PlayRailPanel>
+    with WidgetsBindingObserver {
   int _newSub = 0; // 0 = AI, 1 = challenge
   int _gamesSub = 0; // 0 watch, 1 history
   int _playersSub = 2; // 0 friends, 1 requests, 2 all, 3 dms
@@ -298,6 +300,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final boot = widget.initialPlayersSub;
     _playersSub = boot >= 0 && boot <= 3 ? boot : 2;
     _pendingDmRequestId = (widget.initialDmRequestId ?? '').trim();
@@ -312,6 +315,27 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
       _bindAvatarRt();
       _resumeComposeOutbox();
     });
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!mounted) return;
+    // Rebuild so playRailScrollPadding picks up viewInsets (keyboard height).
+    if (isDamaMobileTabletWidth(context)) {
+      setState(() {});
+    }
+    final focusCtx = FocusManager.instance.primaryFocus?.context;
+    if (focusCtx == null) return;
+    if (!isDamaMobileTabletWidth(context)) return;
+    // Only rail text fields (descendant of this panel).
+    if (focusCtx.findAncestorStateOfType<_PlayRailPanelState>() != this) {
+      return;
+    }
+    ensureTextFieldAboveKeyboard(
+      focusCtx,
+      delay: const Duration(milliseconds: 50),
+    );
   }
 
   void _resumeComposeOutbox() {
@@ -599,6 +623,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _avatarRt?.removeListener(_onAvatarRt);
     _avatarRt = null;
     _opponentQueryCtrl.dispose();
@@ -2322,7 +2347,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
                           child: SingleChildScrollView(
                             controller: _railScrollController,
                             clipBehavior: Clip.hardEdge,
-                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                            padding: playRailScrollPadding(context),
                             child: body,
                           ),
                         ),
@@ -2330,7 +2355,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
                     )
                   : SingleChildScrollView(
                       controller: _railScrollController,
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                      padding: playRailScrollPadding(context),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -2344,6 +2369,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
           );
         }
 
+        // Unbounded (page ListView): still add keyboard inset so fields stay reachable.
         return DecoratedBox(
           decoration: BoxDecoration(
             color: tokens.card,
@@ -2351,7 +2377,10 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
             border: Border.all(color: tokens.borderSubtle),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: playRailScrollPadding(
+              context,
+              base: const EdgeInsets.all(12),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2897,7 +2926,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
+        KeyboardAwareTextField(
           controller: _opponentQueryCtrl,
           enabled: signedIn,
           decoration: InputDecoration(
@@ -3125,7 +3154,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
+              KeyboardAwareTextField(
                 controller: _playerSearchCtrl,
                 enabled: _gamesSub == 0 || signedIn,
                 decoration: InputDecoration(
@@ -3486,7 +3515,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
         ),
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: TextField(
+          child: KeyboardAwareTextField(
             controller: _liveViewerSearchCtrl,
             decoration: InputDecoration(
               isDense: true,
@@ -3876,7 +3905,7 @@ class _PlayRailPanelState extends State<PlayRailPanel> {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
+                    child: KeyboardAwareTextField(
                       controller: _playerSearchCtrl,
                       decoration: InputDecoration(
                         isDense: true,

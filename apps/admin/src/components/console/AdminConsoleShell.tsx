@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { FetchProgressBar } from "@/components/ui/fetch-progress";
 import { NavLinksSkeleton } from "@/components/ui/shimmer-skeletons";
 import { useConsoleNavQuery } from "@/hooks/query";
+import { useTextInputKeyboardScroll } from "@/hooks/useTextInputKeyboardScroll";
 import { adminNavIconForHref } from "@/lib/admin-nav-icons";
 import { cn } from "@/lib/utils";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
@@ -248,6 +249,9 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
   const hydrated = useAuthHydrated();
   const token = useAuthStore((s) => s.token);
   const mobileChips = useMemo(() => flattenConsoleNavChips(sections, modules), [sections, modules]);
+  const [shellRoot, setShellRoot] = useState<HTMLElement | null>(null);
+  // Phone/tablet: character text fields scroll above the soft keyboard (web play-rail parity).
+  useTextInputKeyboardScroll(shellRoot);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: collapse tray on route change
   useEffect(() => {
@@ -282,7 +286,10 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--dama-bg)] text-[var(--dama-text)] md:flex">
+    <div
+      ref={setShellRoot}
+      className="min-h-screen bg-[var(--dama-bg)] text-[var(--dama-text)] md:flex"
+    >
       {/* Desktop / tablet: flex column + min-h-0 so nav scrolls to last leaf */}
       <aside className="sticky top-0 z-30 hidden h-dvh max-h-dvh w-60 shrink-0 flex-col self-start overflow-hidden border-r border-[var(--dama-border)] bg-[var(--dama-card)] md:flex">
         <div className="flex h-14 shrink-0 items-center border-b border-[var(--dama-border)] px-4">
@@ -305,7 +312,12 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
           </div>
           <FetchProgressBar active={navQuery.isFetching && !navQuery.isLoading} />
         </header>
-        <main className="w-full flex-1 p-3 pb-24 sm:p-4 md:p-6 md:pb-6 lg:px-8">{children}</main>
+        <main
+          className="w-full flex-1 p-3 pb-24 sm:p-4 md:p-6 md:pb-6 lg:px-8"
+          data-dama-kb-scroll=""
+        >
+          {children}
+        </main>
       </div>
 
       {/* Mobile: collapsed brand FAB → menus expand left → right (web BottomNavBar parity). */}

@@ -26,6 +26,8 @@ Future<void> showPlayRailSheet(BuildContext context) {
     barrierColor: Colors.black54,
     transitionDuration: const Duration(milliseconds: 220),
     pageBuilder: (ctx, anim, secondary) {
+      // pageBuilder does not rebuild on keyboard - PlayRailPanel handles
+      // viewInsets via playRailScrollPadding + ensureTextFieldAboveKeyboard.
       final width = MediaQuery.sizeOf(ctx).width;
       final sheetW = width < 440 ? width : 440.0;
       return SafeArea(
