@@ -63,13 +63,23 @@ import {
 } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { pieceSeatNames, usePiecePalette } from "@/lib/board-palette";
-import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle, useBoardViewMode } from "@/lib/board-view";
+import {
+  PLY_IDLE_FAIL_OPEN_MS,
+  PLY_SYNC_IDLE_GRACE_MS,
+  runWhenPlyIdle,
+  useBoardViewMode,
+} from "@/lib/board-view";
+import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import { notifyIncomingChatMessage } from "@/lib/chat-message-notify";
 import { CountryFlag } from "@/lib/country-flag";
 import { formatDmUnreadBadge } from "@/lib/dm-unread-badge";
 import { getMatchCaptureScores } from "@/lib/game-board-stats";
 import { fireGameDefeatPulse, fireGameVictoryCelebration } from "@/lib/game-victory";
-import { mergeBoardStateAfterPlayerMove, mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
+import {
+  mergeBoardStateAfterPlayerMove,
+  mergeBoardStateAfterReconnect,
+  mergeRemoteBoardState,
+} from "@/lib/gameBoardStateMerge";
 import {
   activeClockPlayer,
   boardsEqual,
@@ -534,6 +544,74 @@ export function LivePlayHub({
     resolve: (g: GamePayload) => void;
     reject: (e: Error) => void;
   } | null>(null);
+  const effectiveTokenRef = useRef(effectiveToken);
+  effectiveTokenRef.current = effectiveToken;
+
+  /** Snap optimistic ghost plies the server never saw (half-open WS / timed-out move). */
+  const hardResyncGameState = useCallback(
+    async (gameId?: string | null) => {
+      const gid = (gameId || gameRef.current?.id || gameIdParam || "").trim();
+      const tok = (effectiveTokenRef.current || "").trim();
+      if (!gid || !tok) return;
+      try {
+        const { data } = await restClient.get<GamePayload>(`/games/${gid}/state`, {
+          headers: authHeaders(tok),
+        });
+        if (!data?.id) return;
+        setAiThinking(false);
+        pendingLocalMoveRef.current = false;
+        setGame((prev) => {
+          const merged = mergeBoardStateAfterReconnect(prev, data);
+          gameRef.current = merged;
+          if (merged.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+          return merged;
+        });
+        setSelected(null);
+      } catch {
+        /* keep painted; sticky ply-safety still applies */
+      }
+    },
+    [gameIdParam, qc],
+  );
+
+  /** Apply server ack after local optimistic (WS move_ack or REST /move). */
+  const applyMoveServerAck = useCallback(
+    (incoming: GamePayload) => {
+      setAiThinking(false);
+      pendingLocalMoveRef.current = false;
+      setGame((prev) => {
+        const merged = mergeBoardStateAfterPlayerMove(prev, incoming);
+        gameRef.current = merged;
+        if (merged.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+        return merged;
+      });
+      setSelected(null);
+    },
+    [qc],
+  );
+
+  /**
+   * REST `/games/:id/move` when WSS is down or half-open (primary ingress is WSS).
+   * Without this, dead sockets leave optimistic AI/opponent turns forever.
+   */
+  const submitMoveViaRest = useCallback(
+    async (gameId: string, from: [number, number], to: [number, number]) => {
+      const tok = (effectiveTokenRef.current || "").trim();
+      if (!tok) throw new Error("auth required");
+      const { data } = await restClient.post<GamePayload>(
+        `/games/${gameId}/move`,
+        { from, to },
+        {
+          headers: authHeaders(tok),
+          // VS-AI ApplyMoveCore waits for the computer ply; do not hang forever.
+          timeout: 45_000,
+        },
+      );
+      if (!data?.id) throw new Error("empty move response");
+      applyMoveServerAck(data);
+    },
+    [applyMoveServerAck],
+  );
 
   useEffect(() => {
     gameRef.current = game;
@@ -993,12 +1071,17 @@ export function LivePlayHub({
     const bindSocket = (ws: WebSocket) => {
       wsRef.current = ws;
       ws.onopen = () => {
+        const wasReconnect = attempt > 0;
         attempt = 0;
         clearPing();
         // Keepalive: Render/proxy idle kills ~2–3m silent sockets → mid-game Move failed.
         pingTimer = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) ws.send("ping");
         }, 20000);
+        // Proxy drops leave optimistic turn/history ahead of the server → interactive
+        // stays false (AI turn ghost / boardPlySynced lag) until a hard resync.
+        if (!wasReconnect || disposed) return;
+        void hardResyncGameState(activeId);
       };
       ws.onmessage = (ev) => {
         try {
@@ -1176,9 +1259,19 @@ export function LivePlayHub({
           moveWaitRef.current.reject(new Error(chrome.toast_live_error));
           moveWaitRef.current = null;
         }
+        pendingLocalMoveRef.current = false;
+        setAiThinking(false);
       };
       ws.onclose = () => {
         clearPing();
+        // Drop pending move wait immediately - 12s timeout left the board feeling frozen
+        // after proxy kill while optimistic history still gated interactive.
+        if (moveWaitRef.current) {
+          moveWaitRef.current.reject(new Error(chrome.toast_live_error));
+          moveWaitRef.current = null;
+        }
+        pendingLocalMoveRef.current = false;
+        setAiThinking(false);
         if (disposed) return;
         if (wsRef.current === ws) wsRef.current = null;
         const delay = Math.min(1000 * 2 ** attempt, 8000);
@@ -1199,16 +1292,26 @@ export function LivePlayHub({
       wsRef.current = null;
       cur?.close();
     };
-  }, [chrome, officialPauseChrome, hydrated, game?.id, gameIdParam, effectiveToken, qc]);
+  }, [
+    chrome,
+    officialPauseChrome,
+    hydrated,
+    game?.id,
+    gameIdParam,
+    effectiveToken,
+    qc,
+    hardResyncGameState,
+  ]);
 
   const history = useMemo(() => game?.move_history ?? [], [game?.move_history]);
   const yourPlayer = useMemo(() => {
     if (!game) return null;
     if (userId && game.player1_id === userId) return 1;
     if (userId && game.player2_id === userId) return 2;
-    if (game.mode === "ai") return 1;
+    // VS-AI / practice URL: human is seat 1 even if mode/player1_id briefly lag.
+    if (game.mode === "ai" || isAiMode) return 1;
     return null;
-  }, [game, userId]);
+  }, [game, userId, isAiMode]);
 
   // DB play_chrome toast when server ends on flag-fall / clock draw (once per game id).
   // Seated: seat-aware on-time result copy. Unseated: ambient toast_clock_flag.
@@ -1388,11 +1491,19 @@ export function LivePlayHub({
   // Otherwise server turn/legals flash onto a still-frozen pre-ply board.
   const boardPlySynced = useMemo(() => isBoardPlySynced(game), [game]);
   const showMoveHighlights = Boolean(isYourTurn && boardPlySynced);
+  // Input must not wait on boardPlySynced - a missed land used to disable every
+  // square until the 5.5s safety fired (mid-game freeze). Own-piece air lock in
+  // DraughtsBoard2D / blockInputForAnimation still blocks mid pick→put. Highlights
+  // stay gated on showMoveHighlights so legals do not flash onto a pre-ply grid.
+  const boardInputEnabled = Boolean(
+    phase === "playing" && !game?.paused && replayIndex == null && isYourTurn,
+  );
 
   // Safety net: if land commit never reaches the parent (hitch / stall recover),
   // force-sync board to latest board_after so interactive play cannot freeze forever.
-  // Aligned with PLY_IDLE_FAIL_OPEN_MS - a 2.5s snap mid multi-capture remounted
-  // pieces under the fly (pick→put flicker). Sticky like Flutter `_plySyncWatch`.
+  // Idle uses PLY_SYNC_IDLE_GRACE_MS (not the full airborne budget) - a 5.5s idle
+  // wait after a missed land locked input mid-match. While pick→put is airborne,
+  // poll until land or hard-cap (multi-capture chain safe). Flutter `_plySyncWatch`.
   useEffect(() => {
     // Also arm during finished: wipe plies may still be landing after phase flip.
     if (!game || boardPlySynced || replayIndex != null) {
@@ -1419,7 +1530,7 @@ export function LivePlayHub({
     }
     if (plySyncSafetyTimerRef.current != null) return;
     const armedAt = Date.now();
-    const arm = () => {
+    const arm = (delayMs: number) => {
       plySyncSafetyTimerRef.current = window.setTimeout(() => {
         plySyncSafetyTimerRef.current = null;
         // Still airborne (long capture chain) - wait; hard-cap so orphan attr cannot
@@ -1428,7 +1539,7 @@ export function LivePlayHub({
           document.querySelector("[data-dama-ply-inflight]") &&
           Date.now() - armedAt < PLY_IDLE_FAIL_OPEN_MS * 2
         ) {
-          arm();
+          arm(PLY_SYNC_IDLE_GRACE_MS);
           return;
         }
         setGame((prev) => {
@@ -1441,9 +1552,9 @@ export function LivePlayHub({
           qc.setQueryData(gameStateQueryKey(next.id), next);
           return next;
         });
-      }, PLY_IDLE_FAIL_OPEN_MS);
+      }, delayMs);
     };
-    arm();
+    arm(PLY_SYNC_IDLE_GRACE_MS);
   }, [game, boardPlySynced, phase, replayIndex, qc]);
 
   useEffect(() => {
@@ -1454,6 +1565,36 @@ export function LivePlayHub({
       }
     };
   }, []);
+
+  // AI/opponent replies arrive on WSS only. Half-open sockets never fire onclose, so
+  // after our ply the board sits on their turn forever. Poll GET /state while waiting.
+  useEffect(() => {
+    if (phase !== "playing" || replayIndex != null) return;
+    const gid = (game?.id || "").trim();
+    if (!gid || !effectiveToken) return;
+    if (game?.outcome != null || game?.draw || game?.paused) return;
+    if (isYourTurn) return;
+    const first = window.setTimeout(() => {
+      void hardResyncGameState(gid);
+    }, 3500);
+    const interval = window.setInterval(() => {
+      void hardResyncGameState(gid);
+    }, 4500);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+    };
+  }, [
+    phase,
+    replayIndex,
+    game?.id,
+    game?.outcome,
+    game?.draw,
+    game?.paused,
+    isYourTurn,
+    effectiveToken,
+    hardResyncGameState,
+  ]);
 
   // Clock color follows animating ply (not raw server turn) so AI/opponent slides
   // don't flash your timer white before the piece lands.
@@ -1665,7 +1806,12 @@ export function LivePlayHub({
 
   const onSelectSquare = useCallback(
     (row: number, col: number) => {
-      if (!chrome || !game || busy || game.outcome != null || game.draw || game.paused) {
+      // First board interaction dismisses timed VS cover (pointer-events-none alone
+      // still looked frozen under opaque scrim → zero-move abandons).
+      if (matchIntroActive) setMatchIntroActive(false);
+      // Do not gate on `busy` - start/hydrate busy used to swallow taps on a painted
+      // board (API logs: start → abandon with zero /move).
+      if (!chrome || !game || game.outcome != null || game.draw || game.paused) {
         if (chrome && game?.paused) {
           const raw = isOfficialPause(game) ? chrome.err_officially_paused : chrome.err_game_paused;
           const label = (raw || "").trim();
@@ -1677,9 +1823,10 @@ export function LivePlayHub({
       if (game.mode === "ai" && game.ai_player != null && game.turn === game.ai_player) return;
 
       const cell = game.board[row]?.[col];
-      const captureMoves = game.legal_moves.filter((m) => (m.captures?.length ?? 0) > 0);
-      const forcedCaptures =
-        captureMoves.length > 0 && captureMoves.length === game.legal_moves.length;
+      // Partial WS/merge payloads can omit legal_moves - never throw (that froze the board).
+      const legals = game.legal_moves ?? [];
+      const captureMoves = legals.filter((m) => (m.captures?.length ?? 0) > 0);
+      const forcedCaptures = captureMoves.length > 0 && captureMoves.length === legals.length;
       const canSelectPiece = (r: number, c: number) => {
         if (game.must_continue) {
           return game.must_continue[0] === r && game.must_continue[1] === c;
@@ -1707,7 +1854,7 @@ export function LivePlayHub({
         return;
       }
 
-      const legal = game.legal_moves.find(
+      const legal = legals.find(
         (m) =>
           m.from[0] === selected[0] &&
           m.from[1] === selected[1] &&
@@ -1720,12 +1867,6 @@ export function LivePlayHub({
         return;
       }
 
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        toast.error(chrome.toast_live_required);
-        return;
-      }
-
       const seat =
         userId && game.player1_id === userId
           ? 1
@@ -1735,8 +1876,9 @@ export function LivePlayHub({
               ? 1
               : game.turn;
       const from = selected;
+      const to: [number, number] = [row, col];
       void unlockGameAudio();
-      const optimistic = applyOptimisticDraughtsMove(game, selected, [row, col], seat);
+      const optimistic = applyOptimisticDraughtsMove(game, selected, to, seat);
       if (optimistic) {
         pendingLocalMoveRef.current = true;
         // Keep gameRef in sync immediately so a fast move_ack cannot merge against pre-optimistic state.
@@ -1750,51 +1892,30 @@ export function LivePlayHub({
         setSelected(null);
       }
 
-      // Do not hold global `busy` for WS/AI RTT - that froze the UI after put-down.
-      // Scene animation + turn/must_continue gate input; pendingLocalMoveRef merges WS.
-      const moveCountAtSend = game.move_count ?? 0;
-      const waitPromise = new Promise<GamePayload>((resolve, reject) => {
-        const timer = window.setTimeout(() => {
-          if (moveWaitRef.current) {
-            moveWaitRef.current = null;
-            pendingLocalMoveRef.current = false;
-            reject(new Error(chrome.toast_move_timeout));
-          }
-        }, 12000);
-        moveWaitRef.current = {
-          resolve: (g) => {
-            window.clearTimeout(timer);
-            resolve(g);
-          },
-          reject: (e) => {
-            window.clearTimeout(timer);
-            reject(e);
-          },
-        };
-        ws.send(
-          JSON.stringify({
-            type: "move",
-            game_id: game.id,
-            from,
-            to: [row, col],
-          }),
-        );
-      });
-      void waitPromise.catch((err: unknown) => {
+      // REST `/move` is primary (same ApplyMoveCore as WSS). Half-open `/ws/game`
+      // accepted writes with no ack and left optimistic AI/opponent turns forever.
+      // WSS still receives BroadcastGame for opponents/spectate; do not dual-send
+      // (second ApplyMoveCore → false "illegal" / ghost interactive freeze).
+      void submitMoveViaRest(game.id, from, to).catch(() => {
         pendingLocalMoveRef.current = false;
+        setAiThinking(false);
         const live = gameRef.current;
-        // Server already advanced / ended - never contradict with Move failed.
         if (live?.outcome != null || live?.draw) return;
-        if ((live?.move_count ?? 0) > moveCountAtSend) return;
-        const raw = err instanceof Error ? err.message.trim() : "";
-        if (raw && raw === chrome.toast_move_timeout) {
-          toast.error(chrome.toast_move_timeout);
-          return;
-        }
-        toast.error(raw || chrome.toast_move_failed);
+        toast.error(chrome.toast_move_failed || chrome.toast_live_required);
+        void hardResyncGameState(game.id);
       });
     },
-    [busy, chrome, game, selected, userId, yourPlayer, qc],
+    [
+      chrome,
+      game,
+      selected,
+      userId,
+      yourPlayer,
+      qc,
+      hardResyncGameState,
+      submitMoveViaRest,
+      matchIntroActive,
+    ],
   );
 
   // Honor URL mode and live game.mode - AI resume must not stay stuck as PvP.
@@ -1824,9 +1945,21 @@ export function LivePlayHub({
     // Mark seen only when we actually arm the overlay (not before chrome is ready).
     if (!(railChrome?.match_intro_vs_label || chrome?.match_intro_vs_label || "").trim()) return;
     if (!(railChrome?.match_intro_aria || chrome?.match_intro_aria || "").trim()) return;
+    // Zero/invalid duration: never mount a cover that can eat board taps.
+    const durRaw = Number.parseInt(
+      (railChrome?.match_intro_duration_ms || chrome?.match_intro_duration_ms || "").trim(),
+      10,
+    );
+    if (!Number.isFinite(durRaw) || durRaw <= 0) {
+      matchIntroSeenRef.current = id;
+      void playGameNotify("game_start");
+      return;
+    }
+    // Never mount a timed VS board cover on a live seat. Opaque/light covers
+    // both correlated with start→abandon and zero POST /move (guest AI logs).
+    // Sound-only; pause/result covers still mount when needed.
     matchIntroSeenRef.current = id;
-    setMatchResultActive(false);
-    setMatchIntroActive(true);
+    void playGameNotify("game_start");
   }, [
     game?.id,
     game?.mode,
@@ -1841,7 +1974,38 @@ export function LivePlayHub({
     chrome,
     railChrome?.match_intro_vs_label,
     railChrome?.match_intro_aria,
+    railChrome?.match_intro_duration_ms,
   ]);
+
+  // Hard fail-open: intro cover must never outlive its cap (stuck active → freeze).
+  useEffect(() => {
+    if (!matchIntroActive) return;
+    const t = window.setTimeout(() => setMatchIntroActive(false), 5500);
+    return () => window.clearTimeout(t);
+  }, [matchIntroActive]);
+
+  // Your-turn fail-open: opaque VS cinematic over a live seat read as a frozen
+  // board → start→abandon with zero /move. Keep a brief brand flash, then clear.
+  useEffect(() => {
+    if (!matchIntroActive || !boardInputEnabled) return;
+    const t = window.setTimeout(() => setMatchIntroActive(false), 400);
+    return () => window.clearTimeout(t);
+  }, [matchIntroActive, boardInputEnabled]);
+
+  // Radix/popover can leave body { pointer-events: none } - clear when play starts.
+  // Mid-match Depth/Time/rail teardown used to re-lock body and freeze the plane
+  // until the next 1s tick; poll faster + clear on every board pointer.
+  // Key on game id so rematch (phase stays playing) re-arms the poll.
+  const bodyPeGameId = phase === "playing" ? (game?.id || "").trim() : "";
+  useEffect(() => {
+    if (!bodyPeGameId) return;
+    releaseBodyPointerEvents();
+    const id = window.setInterval(releaseBodyPointerEvents, 250);
+    return () => {
+      window.clearInterval(id);
+      releaseBodyPointerEvents();
+    };
+  }, [bodyPeGameId]);
 
   // Must stay above chrome/token early-returns (Rules of Hooks).
   // Dual authoritative clocks from server; local tick only interpolates between syncs.
@@ -2228,10 +2392,15 @@ export function LivePlayHub({
     chrome.match_intro_starting_label ||
     ""
   ).trim();
-  const introDurationMs = Number.parseInt(
+  // Cap intro so misconfigured chrome cannot cover the board forever (reads as freeze).
+  const introDurationRaw = Number.parseInt(
     (railChrome?.match_intro_duration_ms || chrome.match_intro_duration_ms || "").trim(),
     10,
   );
+  const introDurationMs =
+    Number.isFinite(introDurationRaw) && introDurationRaw > 0
+      ? Math.min(introDurationRaw, 5000)
+      : 0;
   const resultDurationMs = Number.parseInt(
     (railChrome?.match_result_duration_ms || chrome.match_result_duration_ms || "").trim(),
     10,
@@ -2258,8 +2427,18 @@ export function LivePlayHub({
         key={game.id}
         className={cn(
           "relative h-full w-full overflow-hidden",
-          replayIndex != null ? "opacity-90" : busy ? "pointer-events-none opacity-60" : undefined,
+          // Never block pointers once playing - busy was for start/hydrate only and
+          // left the live board unclickable (abandon-with-zero-moves in API logs).
+          replayIndex != null
+            ? "opacity-90"
+            : busy && phase !== "playing"
+              ? "pointer-events-none opacity-60"
+              : undefined,
         )}
+        onPointerDownCapture={() => {
+          // Clear stuck body locks before the square handler runs (mid-game freeze).
+          releaseBodyPointerEvents();
+        }}
       >
         {boardView === "2d" ? (
           <DraughtsBoard2D
@@ -2275,13 +2454,7 @@ export function LivePlayHub({
                 : selected
             }
             onSelectSquare={onSelectSquare}
-            interactive={
-              phase === "playing" &&
-              !busy &&
-              !game.paused &&
-              replayIndex == null &&
-              showMoveHighlights
-            }
+            interactive={boardInputEnabled}
             mustContinue={
               phase !== "playing" || game.paused || replayIndex != null || !showMoveHighlights
                 ? null
@@ -2310,13 +2483,7 @@ export function LivePlayHub({
                 : selected
             }
             onSelectSquare={onSelectSquare}
-            interactive={
-              phase === "playing" &&
-              !busy &&
-              !game.paused &&
-              replayIndex == null &&
-              showMoveHighlights
-            }
+            interactive={boardInputEnabled}
             mustContinue={
               phase !== "playing" || game.paused || replayIndex != null || !showMoveHighlights
                 ? null
@@ -2568,7 +2735,11 @@ export function LivePlayHub({
 
   const confirmAndAds = (
     <>
-      <InMatchAdOverlay active={phase === "playing"} gameStartedAtMs={gameStartedAtMs} />
+      <InMatchAdOverlay
+        active={phase === "playing"}
+        gameStartedAtMs={gameStartedAtMs}
+        moveCount={game?.move_count ?? 0}
+      />
       <ConfirmDialog
         open={stopConfirmOpen}
         onOpenChange={(open) => {

@@ -40,7 +40,12 @@ import { playGameNotify } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { pieceSeatNames, usePiecePalette } from "@/lib/board-palette";
 import { formatMoveAlgebraic } from "@/lib/board-square";
-import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle, useBoardViewMode } from "@/lib/board-view";
+import {
+  PLY_IDLE_FAIL_OPEN_MS,
+  PLY_SYNC_IDLE_GRACE_MS,
+  runWhenPlyIdle,
+  useBoardViewMode,
+} from "@/lib/board-view";
 import { notifyIncomingChatMessage } from "@/lib/chat-message-notify";
 import {
   softSpectateEventLogTitle,
@@ -430,8 +435,7 @@ export default function SpectateHub({
   );
 
   // Safety net: force-sync board if land commit never reaches parent (freeze recovery).
-  // Aligned with PLY_IDLE_FAIL_OPEN_MS - a 2.5s snap mid multi-capture remounted
-  // pieces under the fly. Sticky like Flutter `_plySyncWatch?.isActive`.
+  // Idle uses PLY_SYNC_IDLE_GRACE_MS; airborne polls until land / hard-cap (LivePlayHub).
   useEffect(() => {
     if (!game || replayIndex != null || isBoardPlySynced(game)) {
       if (plySyncSafetyTimerRef.current != null) {
@@ -450,14 +454,14 @@ export default function SpectateHub({
     }
     if (plySyncSafetyTimerRef.current != null) return;
     const armedAt = Date.now();
-    const arm = () => {
+    const arm = (delayMs: number) => {
       plySyncSafetyTimerRef.current = window.setTimeout(() => {
         plySyncSafetyTimerRef.current = null;
         if (
           document.querySelector("[data-dama-ply-inflight]") &&
           Date.now() - armedAt < PLY_IDLE_FAIL_OPEN_MS * 2
         ) {
-          arm();
+          arm(PLY_SYNC_IDLE_GRACE_MS);
           return;
         }
         setGame((prev) => {
@@ -468,9 +472,9 @@ export default function SpectateHub({
           queryClient.setQueryData(gameStateQueryKey(next.id), next);
           return next;
         });
-      }, PLY_IDLE_FAIL_OPEN_MS);
+      }, delayMs);
     };
-    arm();
+    arm(PLY_SYNC_IDLE_GRACE_MS);
   }, [game, replayIndex, queryClient]);
 
   useEffect(() => {
@@ -578,6 +582,16 @@ export default function SpectateHub({
     setUrlBootstrapped(true);
   }, [searchParams, urlBootstrapped]);
 
+  // Half-open spectate WSS stops live plies with no onclose - poll /state so watch unfreezes.
+  useEffect(() => {
+    if (!connected || !gameId || replayIndex != null) return;
+    if (game?.outcome != null || game?.draw) return;
+    const interval = window.setInterval(() => {
+      void queryClient.refetchQueries({ queryKey: gameStateQueryKey(gameId) });
+    }, 6000);
+    return () => window.clearInterval(interval);
+  }, [connected, gameId, game?.outcome, game?.draw, replayIndex, queryClient]);
+
   // Re-apply REST hydrate whenever we (re)connect - cached query data may not change
   // identity after connect() clears local `game`, which previously left a forever skeleton.
   useEffect(() => {
@@ -619,145 +633,175 @@ export default function SpectateHub({
       .replace(/\/$/, "");
     const q = new URLSearchParams({ game_id: gameId });
     if (token) q.set("token", token);
-    const ws = new WebSocket(`${wsRoot}/spectate?${q.toString()}`);
     let lastMoves = -1;
     let disposed = false;
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(String(ev.data)) as GameWsMessage;
-        setEvents((prev) => [msg, ...prev].slice(0, 40));
-        if (msg.type === "game_state" && msg.game) {
-          const incoming = msg.game;
-          const moves = incoming.move_count ?? 0;
-          if (incoming.outcome != null) {
-            void playGameNotify("info");
-          } else if (moves > lastMoves && lastMoves >= 0) {
-            void playGameNotify("your_turn");
-          }
-          lastMoves = moves;
-          const eventName =
-            typeof (msg as { event?: string }).event === "string"
-              ? String((msg as { event?: string }).event).trim()
-              : "";
-          const actorRole =
-            typeof (msg as { actor_role?: string }).actor_role === "string"
-              ? String((msg as { actor_role?: string }).actor_role).trim()
-              : (incoming.pause_actor_role || "").trim();
-          const actorName =
-            typeof (msg as { actor_display_name?: string }).actor_display_name === "string"
-              ? String((msg as { actor_display_name?: string }).actor_display_name).trim()
-              : (incoming.pause_actor_display_name || "").trim();
-          if (incoming.paused && (incoming.pause_kind || "").trim() === "official") {
-            wasOfficiallyPausedRef.current = true;
-            if (actorRole || actorName) {
-              lastOfficialActorRef.current = { role: actorRole, name: actorName };
+    let attempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let activeWs: WebSocket | null = null;
+
+    const bindSocket = () => {
+      const ws = new WebSocket(`${wsRoot}/spectate?${q.toString()}`);
+      activeWs = ws;
+      ws.onopen = () => {
+        const wasReconnect = attempt > 0;
+        attempt = 0;
+        // Proxy drop stopped live plies - refetch so the board unfreezes on reconnect.
+        if (wasReconnect && gameId) {
+          void queryClient.refetchQueries({ queryKey: gameStateQueryKey(gameId) });
+        }
+      };
+      ws.onclose = () => {
+        if (disposed) return;
+        if (activeWs === ws) activeWs = null;
+        const delay = Math.min(1000 * 2 ** attempt, 8000);
+        attempt += 1;
+        reconnectTimer = setTimeout(() => {
+          if (disposed) return;
+          bindSocket();
+        }, delay);
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(String(ev.data)) as GameWsMessage;
+          setEvents((prev) => [msg, ...prev].slice(0, 40));
+          if (msg.type === "game_state" && msg.game) {
+            const incoming = msg.game;
+            const moves = incoming.move_count ?? 0;
+            if (incoming.outcome != null) {
+              void playGameNotify("info");
+            } else if (moves > lastMoves && lastMoves >= 0) {
+              void playGameNotify("your_turn");
             }
-          } else if (
-            !incoming.paused &&
-            (eventName === "match.resumed" || wasOfficiallyPausedRef.current)
-          ) {
-            const snap = lastOfficialActorRef.current;
-            const roleLabel = officialPauseRoleLabel(
+            lastMoves = moves;
+            const eventName =
+              typeof (msg as { event?: string }).event === "string"
+                ? String((msg as { event?: string }).event).trim()
+                : "";
+            const actorRole =
               typeof (msg as { actor_role?: string }).actor_role === "string"
-                ? String((msg as { actor_role?: string }).actor_role)
-                : snap?.role,
-              officialPauseChrome,
-            );
-            const name =
+                ? String((msg as { actor_role?: string }).actor_role).trim()
+                : (incoming.pause_actor_role || "").trim();
+            const actorName =
               typeof (msg as { actor_display_name?: string }).actor_display_name === "string"
                 ? String((msg as { actor_display_name?: string }).actor_display_name).trim()
-                : (snap?.name || "").trim();
-            // Fail closed: never show hollow "Resumed by ·" (fmt needs both role and name).
-            if (roleLabel && name) {
-              const fmt = (officialPauseChrome?.banner_resumed_fmt || "").trim();
-              const line = applyOfficialPauseFmt(fmt, { role: roleLabel, name });
-              if (line) setResumeBanner(line);
+                : (incoming.pause_actor_display_name || "").trim();
+            if (incoming.paused && (incoming.pause_kind || "").trim() === "official") {
+              wasOfficiallyPausedRef.current = true;
+              if (actorRole || actorName) {
+                lastOfficialActorRef.current = { role: actorRole, name: actorName };
+              }
+            } else if (
+              !incoming.paused &&
+              (eventName === "match.resumed" || wasOfficiallyPausedRef.current)
+            ) {
+              const snap = lastOfficialActorRef.current;
+              const roleLabel = officialPauseRoleLabel(
+                typeof (msg as { actor_role?: string }).actor_role === "string"
+                  ? String((msg as { actor_role?: string }).actor_role)
+                  : snap?.role,
+                officialPauseChrome,
+              );
+              const name =
+                typeof (msg as { actor_display_name?: string }).actor_display_name === "string"
+                  ? String((msg as { actor_display_name?: string }).actor_display_name).trim()
+                  : (snap?.name || "").trim();
+              // Fail closed: never show hollow "Resumed by ·" (fmt needs both role and name).
+              if (roleLabel && name) {
+                const fmt = (officialPauseChrome?.banner_resumed_fmt || "").trim();
+                const line = applyOfficialPauseFmt(fmt, { role: roleLabel, name });
+                if (line) setResumeBanner(line);
+              }
+              wasOfficiallyPausedRef.current = false;
+              lastOfficialActorRef.current = null;
             }
-            wasOfficiallyPausedRef.current = false;
-            lastOfficialActorRef.current = null;
+            // Freeze board while history grows so ply anim + seat clock stay in sync.
+            setGame((prev) => {
+              const merged = mergeRemoteBoardState(prev, incoming);
+              // Store freeze-merged state (not raw board_after) so leave→back /
+              // RQ hydrate cannot seed a mid pick→put snap from cache (LivePlayHub parity).
+              if (merged.id) {
+                queryClient.setQueryData(gameStateQueryKey(merged.id), merged);
+              }
+              return merged;
+            });
+            setError(null);
           }
-          // Freeze board while history grows so ply anim + seat clock stay in sync.
-          setGame((prev) => {
-            const merged = mergeRemoteBoardState(prev, incoming);
-            // Store freeze-merged state (not raw board_after) so leave→back /
-            // RQ hydrate cannot seed a mid pick→put snap from cache (LivePlayHub parity).
-            if (merged.id) {
-              queryClient.setQueryData(gameStateQueryKey(merged.id), merged);
+          if (msg.type === "vote_update" && "votes" in msg && msg.votes && gameId) {
+            const incoming = msg.votes as MatchVotesPayload;
+            const authKey = (token || "").trim();
+            queryClient.setQueryData(
+              matchVotesQueryKey(gameId, authKey),
+              (prev: MatchVotesPayload | undefined) => ({
+                ...incoming,
+                // Preserve this client's pick - room broadcast must not overwrite my_vote.
+                my_vote: prev?.my_vote ?? null,
+                has_my_vote: Boolean(prev?.has_my_vote),
+              }),
+            );
+          }
+          if (msg.type === "avatar_updated") {
+            const uid = typeof msg.user_id === "string" ? msg.user_id.trim() : "";
+            const thumbRaw = msg.avatar_thumb_url;
+            const fullRaw = msg.avatar_full_url;
+            const thumb =
+              typeof thumbRaw === "string" ? thumbRaw.trim() : thumbRaw === null ? "" : undefined;
+            const full =
+              typeof fullRaw === "string" ? fullRaw.trim() : fullRaw === null ? "" : undefined;
+            if (uid && (thumb !== undefined || full !== undefined)) {
+              const nextThumb = thumb ?? "";
+              const nextFull = full ?? "";
+              patchAvatarEverywhere(queryClient, uid, nextThumb || null, nextFull || null);
             }
-            return merged;
-          });
-          setError(null);
-        }
-        if (msg.type === "vote_update" && "votes" in msg && msg.votes && gameId) {
-          const incoming = msg.votes as MatchVotesPayload;
-          const authKey = (token || "").trim();
-          queryClient.setQueryData(
-            matchVotesQueryKey(gameId, authKey),
-            (prev: MatchVotesPayload | undefined) => ({
-              ...incoming,
-              // Preserve this client's pick - room broadcast must not overwrite my_vote.
-              my_vote: prev?.my_vote ?? null,
-              has_my_vote: Boolean(prev?.has_my_vote),
-            }),
-          );
-        }
-        if (msg.type === "avatar_updated") {
-          const uid = typeof msg.user_id === "string" ? msg.user_id.trim() : "";
-          const thumbRaw = msg.avatar_thumb_url;
-          const fullRaw = msg.avatar_full_url;
-          const thumb =
-            typeof thumbRaw === "string" ? thumbRaw.trim() : thumbRaw === null ? "" : undefined;
-          const full =
-            typeof fullRaw === "string" ? fullRaw.trim() : fullRaw === null ? "" : undefined;
-          if (uid && (thumb !== undefined || full !== undefined)) {
-            const nextThumb = thumb ?? "";
-            const nextFull = full ?? "";
-            patchAvatarEverywhere(queryClient, uid, nextThumb || null, nextFull || null);
+            void invalidateAvatarSurfaces(queryClient, uid || null);
           }
-          void invalidateAvatarSurfaces(queryClient, uid || null);
-        }
-        if (
-          msg.type === "game_chat_message" ||
-          msg.type === "game_chat_toggle" ||
-          msg.type === "game_chat_reaction" ||
-          msg.type === "game_chat_read"
-        ) {
-          if (msg.type === "game_chat_message") {
-            notifyIncomingChatMessage({
-              myUserId: useAuthStore.getState().user?.id,
-              payload: msg,
-            });
+          if (
+            msg.type === "game_chat_message" ||
+            msg.type === "game_chat_toggle" ||
+            msg.type === "game_chat_reaction" ||
+            msg.type === "game_chat_read"
+          ) {
+            if (msg.type === "game_chat_message") {
+              notifyIncomingChatMessage({
+                myUserId: useAuthStore.getState().user?.id,
+                payload: msg,
+              });
+            }
+            const gid = (msg.game_id || gameId || "").trim();
+            if (gid) void queryClient.invalidateQueries({ queryKey: ["game-chat", gid] });
           }
-          const gid = (msg.game_id || gameId || "").trim();
-          if (gid) void queryClient.invalidateQueries({ queryKey: ["game-chat", gid] });
-        }
-        if (
-          msg.type === "dm_request" ||
-          msg.type === "dm_message" ||
-          msg.type === "dm_request_updated" ||
-          msg.type === "dm_reaction" ||
-          msg.type === "dm_read"
-        ) {
-          if (msg.type === "dm_message") {
-            notifyIncomingChatMessage({
-              myUserId: useAuthStore.getState().user?.id,
-              payload: msg,
-            });
+          if (
+            msg.type === "dm_request" ||
+            msg.type === "dm_message" ||
+            msg.type === "dm_request_updated" ||
+            msg.type === "dm_reaction" ||
+            msg.type === "dm_read"
+          ) {
+            if (msg.type === "dm_message") {
+              notifyIncomingChatMessage({
+                myUserId: useAuthStore.getState().user?.id,
+                payload: msg,
+              });
+            }
+            void queryClient.invalidateQueries({ queryKey: ["dms"] });
           }
-          void queryClient.invalidateQueries({ queryKey: ["dms"] });
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
-      }
+      };
+      // LivePlayHub parity: do not drop `connected` on teardown close (Strict Mode /
+      // dep churn would clear connect mid-hydrate and strand the UI).
+      ws.onerror = () => {
+        if (!disposed && chrome) setError(chrome.unable_to_spectate);
+      };
     };
-    // LivePlayHub parity: do not drop `connected` on teardown close (Strict Mode /
-    // dep churn would clear connect mid-hydrate and strand the UI).
-    ws.onerror = () => {
-      if (!disposed && chrome) setError(chrome.unable_to_spectate);
-    };
+
+    bindSocket();
     return () => {
       disposed = true;
-      ws.close();
+      if (reconnectTimer != null) clearTimeout(reconnectTimer);
+      const cur = activeWs;
+      activeWs = null;
+      cur?.close();
     };
   }, [hydrated, connected, gameId, token, queryClient, chrome, officialPauseChrome]);
 

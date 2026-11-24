@@ -103,6 +103,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   /// null = follow seat orientation; otherwise override (manual flip).
   bool? _manualFlip;
+
   /// Painted orientation - sticky while pick→put (seatFlip/auth must not remap mid-fly).
   bool _paintedFlip = false;
   bool _flipFlushScheduled = false;
@@ -110,6 +111,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   bool _replaySelectScheduled = false;
   int? _pendingReplayIdx;
   bool _liveSelectScheduled = false;
+
   /// Rematch/id clear: drop stale dispose land (web suppressPlyLandRef parity).
   int _plyLandEpoch = 0;
   bool _shareCopied = false;
@@ -117,6 +119,9 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   bool _matchResultVisible = false;
   String? _matchIntroSeenGameId;
   String? _matchIntroPendingGameId;
+
+  /// Caps stuck timed VS cover (web LivePlayHub 5500ms fail-open parity).
+  Timer? _matchIntroFailOpen;
   int? _piecesPerSide;
   String? _boardVariant;
   bool _clockEnabled = false;
@@ -152,6 +157,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   MatchmakingRealtimeController? _avatarRt;
   int _seenAvatarSeq = 0;
   bool _aiThinking = false;
+
+  /// Skip hard resync on the first WS open; only after a drop/reconnect.
+  bool _wsSawOpen = false;
+
+  /// AI/opponent ply only arrives on WSS; half-open sockets never deliver → poll /state.
+  Timer? _awaitingReplyWatch;
   bool _abandoning = false;
 
   /// True while Stop confirm dialog is open (dismiss if official pause lands).
@@ -187,9 +198,14 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   int? get _yourPlayer {
     final uid = context.read<AuthCubit>().state.userId;
-    if (uid == null || uid.isEmpty) return null;
-    if (_player1Id != null && uid == _player1Id) return 1;
-    if (_player2Id != null && uid == _player2Id) return 2;
+    if (uid != null && uid.isNotEmpty) {
+      if (_player1Id != null && uid == _player1Id) return 1;
+      if (_player2Id != null && uid == _player2Id) return 2;
+    }
+    // VS-AI practice: human is always seat 1 (web LivePlayHub parity). Missing
+    // player1_id on a cold payload used to leave interactive=false forever.
+    final mode = widget.mode.trim().toLowerCase();
+    if (mode == 'ai') return 1;
     return null;
   }
 
@@ -209,6 +225,32 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   /// Hide legal/must-continue until the piece lands (same predicate as clocks).
   bool get _showMoveHighlights => _isYourTurn && _boardPlySynced && !_paused;
 
+  /// Taps follow seat/turn only - never wait on `_boardPlySynced` (web
+  /// `boardInputEnabled` parity). Own-piece air lock in the board widgets still
+  /// blocks mid pick→put; highlights stay on `_showMoveHighlights`.
+  bool get _boardInputEnabled =>
+      _board != null &&
+      _replayIndex == null &&
+      _isYourTurn &&
+      !_paused &&
+      _outcome == null &&
+      !_draw &&
+      !_gameOverVisible;
+
+  /// Hard fail-open: intro cover must never outlive its cap (stuck active → freeze).
+  void _armMatchIntroFailOpen() {
+    if (!_matchIntroVisible) {
+      _matchIntroFailOpen?.cancel();
+      _matchIntroFailOpen = null;
+      return;
+    }
+    if (_matchIntroFailOpen?.isActive == true) return;
+    _matchIntroFailOpen = Timer(const Duration(milliseconds: 5500), () {
+      if (!mounted || !_matchIntroVisible) return;
+      setState(() => _matchIntroVisible = false);
+    });
+  }
+
   void _armPlySyncSafety() {
     if (_boardPlySynced || _replayIndex != null) {
       _plySyncWatch?.cancel();
@@ -218,18 +260,18 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (_plySyncWatch?.isActive == true) return;
     final after = _moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null;
     if (after == null || after.isEmpty) return;
-    // Align with BoardPlyFlight.idleTimeout - a 2.5s snap mid multi-capture
-    // remounted pieces under the fly (web PLY_IDLE_FAIL_OPEN_MS parity).
+    // Idle uses syncIdleGrace (not full idleTimeout) - a 5.5s idle wait after a
+    // missed land locked taps mid-match (web PLY_SYNC_IDLE_GRACE_MS parity).
     final armedAt = DateTime.now();
-    void arm() {
-      _plySyncWatch = Timer(BoardPlyFlight.idleTimeout, () {
+    void arm(Duration delay) {
+      _plySyncWatch = Timer(delay, () {
         if (!mounted || _boardPlySynced || _replayIndex != null) return;
         // Still airborne (long capture chain) - wait; hard-cap so a stuck gate
         // cannot delay forever.
         if (BoardPlyFlight.isActive &&
             DateTime.now().difference(armedAt) <
                 BoardPlyFlight.idleTimeout * 2) {
-          arm();
+          arm(BoardPlyFlight.syncIdleGrace);
           return;
         }
         final snap =
@@ -243,7 +285,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       });
     }
 
-    arm();
+    arm(BoardPlyFlight.syncIdleGrace);
   }
 
   /// Persist painted board so leave→back / remount does not re-freeze until safety.
@@ -568,35 +610,6 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       ..addAll(next));
   }
 
-  Future<void> _showMatchIntroAfterSeats(String gameId) async {
-    final gid = gameId.trim();
-    if (gid.isEmpty) return;
-    await _hydrateSeatPlayers();
-    if (!mounted) return;
-    if (_matchIntroSeenGameId == gid) return;
-    if (_matchIntroPendingGameId != gid) return;
-    // Wait for rail chrome so VS intro duration/labels are DB-driven (no skip race).
-    for (var i = 0; i < 50 && _railChrome == null; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      if (!mounted) return;
-      if (_matchIntroPendingGameId != gid) return;
-    }
-    if (_railChrome == null) {
-      // Fail closed: do not invent intro without chrome; mark seen so we don't loop.
-      _matchIntroSeenGameId = gid;
-      _matchIntroPendingGameId = null;
-      return;
-    }
-    if (!mounted) return;
-    if (_matchIntroSeenGameId == gid) return;
-    if (_matchIntroPendingGameId != gid) return;
-    setState(() {
-      _matchIntroSeenGameId = gid;
-      _matchIntroVisible = true;
-      _matchIntroPendingGameId = null;
-    });
-  }
-
   List<List<dynamic>>? get _displayBoard {
     if (_replayIndex == null) return _board;
     if (_replayIndex! <= 0) return _liveBoard ?? _board;
@@ -605,15 +618,20 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     return _moveHistory[idx].boardAfter ?? _board;
   }
 
-  void _applyBoardPayload(GameStatePayload payload) {
+  void _applyBoardPayload(GameStatePayload payload,
+      {bool authoritative = false}) {
     // Freeze parent board while history grows so the scene can animate plies.
     // Turn/legal/must_continue still update from the server, but highlights are
     // gated on _boardPlySynced so they do not flash onto a frozen pre-ply board.
     final incomingHist = payload.moveHistory;
     final histGrew = incomingHist.length > _moveHistory.length;
+    final histShrunk = incomingHist.length < _moveHistory.length;
     if (payload.board != null) {
       _liveBoard = payload.board;
-      if (_replayIndex == null && !histGrew) {
+      if (authoritative || histShrunk) {
+        // WS reconnect / rejected optimistic ghost: snap to server so turn unlocks.
+        _board = payload.board;
+      } else if (_replayIndex == null && !histGrew) {
         // Same-ply WS (move_ack + game_state) must not snap the board mid-flight.
         final lastAfter = incomingHist.isNotEmpty
             ? incomingHist.last.boardAfter
@@ -684,9 +702,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         if (payload.moveCount > 0) {
           _matchIntroSeenGameId = gid;
         } else {
-          // Wait for seat bios (web LivePlayHub parity) before starting the VS intro.
-          _matchIntroPendingGameId = gid;
-          unawaited(_showMatchIntroAfterSeats(gid));
+          // Never mount timed VS board cover (web LivePlayHub parity).
+          // Covers correlated with start→abandon and zero /move; pause/result stay.
+          _matchIntroSeenGameId = gid;
+          unawaited(GameNotify.play('game_start'));
         }
       }
     }
@@ -776,6 +795,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     }
     _syncStoredSession();
     _flushAutoResumeToast();
+    _armAwaitingReplyWatch();
   }
 
   void _bindActiveBoard(String? id) {
@@ -1449,6 +1469,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   void _onSquareTap(int row, int col) {
     unawaited(GameNotify.unlock());
+    // First board tap dismisses timed VS cover (web onSelectSquare parity).
+    if (_matchIntroVisible) {
+      _matchIntroFailOpen?.cancel();
+      _matchIntroFailOpen = null;
+      setState(() => _matchIntroVisible = false);
+    }
     if (_paused) {
       final official = (_chrome?.errOfficiallyPaused ?? '').trim();
       final specific = (_chrome?.errGamePaused ?? '').trim();
@@ -1462,8 +1488,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       }
       return;
     }
-    if (_busy || _board == null || _gameId == null || _replayIndex != null)
-      return;
+    // Do not gate taps on start/hydrate `_busy` once the board is painted.
+    if (_board == null || _gameId == null || _replayIndex != null) return;
     final yp = _yourPlayer;
     if (yp == null || _turn != yp) return;
     final cell = _board![row][col];
@@ -1542,11 +1568,109 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       _cachePaintedBoard(_board!);
     }
     if (optimistic?.outcome != null) _scheduleGameOverIfNeeded();
-    _ws.sendMove({
-      'game_id': _gameId,
-      'from': [fromR, fromC],
-      'to': [row, col],
+    // Optimistic turn flip to AI/opponent: poll if their WSS reply never lands.
+    _armAwaitingReplyWatch();
+    // REST `/move` is primary (same ApplyMoveCore as WSS). Half-open `/ws/game`
+    // accepted writes with no ack and left optimistic AI turns forever. Do not
+    // dual-send over WSS (second ApplyMoveCore → illegal / ghost freeze).
+    unawaited(_submitMoveViaRest(fromR, fromC, row, col));
+  }
+
+  Future<void> _submitMoveViaRest(
+      int fromR, int fromC, int toR, int toC) async {
+    final id = (_gameId ?? '').trim();
+    if (id.isEmpty || !mounted) return;
+    try {
+      final res = await authPost(
+        Uri.parse('${ApiConfig.baseUrl}/api/v1/games/$id/move'),
+        token: widget.accessToken,
+        body: jsonEncode({
+          'from': [fromR, fromC],
+          'to': [toR, toC],
+        }),
+      ).timeout(const Duration(seconds: 45));
+      if (!mounted) return;
+      if (res.statusCode >= 300) {
+        final label = (_chrome?.toastWsConnectionError ?? '').trim();
+        setState(() {
+          _aiThinking = false;
+          if (label.isNotEmpty) _error = label;
+        });
+        if (label.isNotEmpty) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(label)));
+        }
+        await _resyncAfterWsReconnect();
+        return;
+      }
+      final payload = GameStatePayload.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>,
+      );
+      setState(() {
+        _aiThinking = false;
+        _busy = false;
+        _applyBoardPayload(payload);
+      });
+      _armPlySyncSafety();
+      _scheduleGameOverIfNeeded();
+    } catch (_) {
+      if (!mounted) return;
+      await _resyncAfterWsReconnect();
+    }
+  }
+
+  /// Poll GET /state while awaiting AI/opponent - half-open WSS never delivers their ply.
+  void _armAwaitingReplyWatch() {
+    _awaitingReplyWatch?.cancel();
+    _awaitingReplyWatch = null;
+    if (!mounted) return;
+    if (_outcome != null || _draw || _paused) return;
+    if (_replayIndex != null) return;
+    final id = (_gameId ?? '').trim();
+    if (id.isEmpty) return;
+    final yp = _yourPlayer;
+    if (yp == null || _turn == yp) return;
+    _awaitingReplyWatch = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      if (_outcome != null || _draw || _paused || _replayIndex != null) {
+        _awaitingReplyWatch?.cancel();
+        _awaitingReplyWatch = null;
+        return;
+      }
+      final seat = _yourPlayer;
+      if (seat != null && _turn == seat) {
+        _awaitingReplyWatch?.cancel();
+        _awaitingReplyWatch = null;
+        return;
+      }
+      unawaited(_resyncAfterWsReconnect());
     });
+  }
+
+  /// After WS drop/reconnect: snap away optimistic ghost plies that freeze input.
+  Future<void> _resyncAfterWsReconnect() async {
+    final id = (_gameId ?? '').trim();
+    if (id.isEmpty || !mounted) return;
+    try {
+      final res = await authGet(
+        Uri.parse('${ApiConfig.baseUrl}/api/v1/games/$id/state'),
+        token: widget.accessToken,
+      );
+      if (!mounted || res.statusCode >= 300) return;
+      final payload = GameStatePayload.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>,
+      );
+      setState(() {
+        _aiThinking = false;
+        _busy = false;
+        _applyBoardPayload(payload, authoritative: true);
+      });
+      _armPlySyncSafety();
+      _scheduleGameOverIfNeeded();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _aiThinking = false);
+    }
   }
 
   @override
@@ -2060,6 +2184,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       });
       _scheduleGameOverIfNeeded();
       if (_error != null) return;
+      _wsSawOpen = false;
       await _ws.connectGame(token: widget.accessToken, gameId: id);
       await GameNotify.play('match_found');
       _sub = _ws.messages.listen(_onWsMessage);
@@ -2083,6 +2208,18 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       }
       GameChatLive.notify(chatGid);
       unawaited(_refreshChatUnread());
+      return;
+    }
+    if (msg['type'] == 'ws_open') {
+      if (_wsSawOpen) {
+        // Auto-reconnect after proxy kill - hard resync so ghost turns unlock.
+        unawaited(_resyncAfterWsReconnect());
+      }
+      _wsSawOpen = true;
+      return;
+    }
+    if (msg['type'] == 'closed') {
+      setState(() => _aiThinking = false);
       return;
     }
     if (msg['type'] == 'welcome') {
@@ -2367,6 +2504,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       });
       if (_error != null) return;
       if (id != null) {
+        _wsSawOpen = false;
         await _ws.connectGame(token: widget.accessToken, gameId: id);
         await GameNotify.play('match_found');
         _sub = _ws.messages.listen(_onWsMessage);
@@ -2399,6 +2537,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     _clockTimer?.cancel();
     _gameOverGrace?.cancel();
     _plySyncWatch?.cancel();
+    _matchIntroFailOpen?.cancel();
+    _matchIntroFailOpen = null;
+    _awaitingReplyWatch?.cancel();
+    _awaitingReplyWatch = null;
     _sub?.cancel();
     _ws.dispose();
     super.dispose();
@@ -2790,102 +2932,95 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                             child: KeyedSubtree(
                               key: ValueKey(_gameId ?? 'idle'),
                               child: _boardView == BoardViewMode.flat2d
-                                ? DraughtsBoard2D(
-                                    board: _displayBoard!,
-                                    boardSize: _boardSize,
-                                    legalMoves: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? const []
-                                        : _legalMoves,
-                                    selectedRow: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : _selectedRow,
-                                    selectedCol: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : _selectedCol,
-                                    mustContinueRow: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : (_mustContinue != null &&
-                                                _mustContinue!.length >= 2
-                                            ? _mustContinue![0]
-                                            : null),
-                                    mustContinueCol: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : (_mustContinue != null &&
-                                                _mustContinue!.length >= 2
-                                            ? _mustContinue![1]
-                                            : null),
-                                    onSelectSquare: _onSquareTap,
-                                    interactive: !_busy &&
-                                        _replayIndex == null &&
-                                        _showMoveHighlights &&
-                                        _outcome == null &&
-                                        !_draw &&
-                                        !_gameOverVisible,
-                                    yourPlayer: _yourPlayer,
-                                    flipBoard: _flipBoard,
-                                    moveHistory: _replayIndex != null
-                                        ? const []
-                                        : _moveHistory,
-                                    replayMode: _replayIndex != null,
-                                    illegalShakeKey: _illegalShakeKey,
-                                    // Keep land sync even after game-over UI / during
-                                    // replay scrub - displayBoard is historical; tip
-                                    // must still land in `_board`/`_liveBoard`.
-                                    onPlyAnimated: _handlePlyAnimated,
-                                  )
-                                : DraughtsBoard3D(
-                                    board: _displayBoard!,
-                                    boardSize: _boardSize,
-                                    legalMoves: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? const []
-                                        : _legalMoves,
-                                    selectedRow: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : _selectedRow,
-                                    selectedCol: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : _selectedCol,
-                                    mustContinueRow: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : (_mustContinue != null &&
-                                                _mustContinue!.length >= 2
-                                            ? _mustContinue![0]
-                                            : null),
-                                    mustContinueCol: _replayIndex != null ||
-                                            !_showMoveHighlights
-                                        ? null
-                                        : (_mustContinue != null &&
-                                                _mustContinue!.length >= 2
-                                            ? _mustContinue![1]
-                                            : null),
-                                    onSelectSquare: _onSquareTap,
-                                    interactive: !_busy &&
-                                        _replayIndex == null &&
-                                        _showMoveHighlights &&
-                                        _outcome == null &&
-                                        !_draw &&
-                                        !_gameOverVisible,
-                                    yourPlayer: _yourPlayer,
-                                    flipBoard: _flipBoard,
-                                    moveHistory: _replayIndex != null
-                                        ? const []
-                                        : _moveHistory,
-                                    replayMode: _replayIndex != null,
-                                    illegalShakeKey: _illegalShakeKey,
-                                    // Keep land sync even after game-over UI / during
-                                    // replay scrub - displayBoard is historical; tip
-                                    // must still land in `_board`/`_liveBoard`.
-                                    onPlyAnimated: _handlePlyAnimated,
-                                  ),
+                                  ? DraughtsBoard2D(
+                                      board: _displayBoard!,
+                                      boardSize: _boardSize,
+                                      legalMoves: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? const []
+                                          : _legalMoves,
+                                      selectedRow: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : _selectedRow,
+                                      selectedCol: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : _selectedCol,
+                                      mustContinueRow: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : (_mustContinue != null &&
+                                                  _mustContinue!.length >= 2
+                                              ? _mustContinue![0]
+                                              : null),
+                                      mustContinueCol: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : (_mustContinue != null &&
+                                                  _mustContinue!.length >= 2
+                                              ? _mustContinue![1]
+                                              : null),
+                                      onSelectSquare: _onSquareTap,
+                                      // Once a live board is painted, never gate taps on
+                                      // start/hydrate `_busy` or `_boardPlySynced`
+                                      // (web boardInputEnabled parity).
+                                      interactive: _boardInputEnabled,
+                                      yourPlayer: _yourPlayer,
+                                      flipBoard: _flipBoard,
+                                      moveHistory: _replayIndex != null
+                                          ? const []
+                                          : _moveHistory,
+                                      replayMode: _replayIndex != null,
+                                      illegalShakeKey: _illegalShakeKey,
+                                      // Keep land sync even after game-over UI / during
+                                      // replay scrub - displayBoard is historical; tip
+                                      // must still land in `_board`/`_liveBoard`.
+                                      onPlyAnimated: _handlePlyAnimated,
+                                    )
+                                  : DraughtsBoard3D(
+                                      board: _displayBoard!,
+                                      boardSize: _boardSize,
+                                      legalMoves: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? const []
+                                          : _legalMoves,
+                                      selectedRow: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : _selectedRow,
+                                      selectedCol: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : _selectedCol,
+                                      mustContinueRow: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : (_mustContinue != null &&
+                                                  _mustContinue!.length >= 2
+                                              ? _mustContinue![0]
+                                              : null),
+                                      mustContinueCol: _replayIndex != null ||
+                                              !_showMoveHighlights
+                                          ? null
+                                          : (_mustContinue != null &&
+                                                  _mustContinue!.length >= 2
+                                              ? _mustContinue![1]
+                                              : null),
+                                      onSelectSquare: _onSquareTap,
+                                      interactive: _boardInputEnabled,
+                                      yourPlayer: _yourPlayer,
+                                      flipBoard: _flipBoard,
+                                      moveHistory: _replayIndex != null
+                                          ? const []
+                                          : _moveHistory,
+                                      replayMode: _replayIndex != null,
+                                      illegalShakeKey: _illegalShakeKey,
+                                      // Keep land sync even after game-over UI / during
+                                      // replay scrub - displayBoard is historical; tip
+                                      // must still land in `_board`/`_liveBoard`.
+                                      onPlyAnimated: _handlePlyAnimated,
+                                    ),
                             ),
                           ),
                           coverOverlay: _boardCoverOverlay(chrome),
@@ -2926,6 +3061,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
             InMatchAdOverlay(
               active: _board != null && _gameStartedAt != null,
               gameStartedAt: _gameStartedAt,
+              moveCount: _moveCount,
             ),
           ],
         ),
@@ -3072,20 +3208,40 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (rail == null) return null;
 
     if (_matchIntroVisible && (widget.mode == 'pvp' || widget.mode == 'ai')) {
+      // Hard fail-open: intro cover must never outlive its cap (stuck active → freeze).
+      // Arm via `_armMatchIntroFailOpen` whenever this flag is set true (sound-only
+      // cold open never mounts; pause/result covers stay on their own paths).
       final introVs = rail.matchIntroVsLabel.trim().isNotEmpty
           ? rail.matchIntroVsLabel.trim()
           : chrome.matchIntroVsLabel.trim();
+      // Cap intro so misconfigured chrome cannot cover the board forever.
+      final introRaw = int.tryParse(rail.matchIntroDurationMs) ?? 0;
+      final introMs = introRaw <= 0 ? 0 : (introRaw > 5000 ? 5000 : introRaw);
+      // Zero duration: clear flag and never mount an opaque hit target.
+      if (introMs <= 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _matchIntroVisible) {
+            _matchIntroFailOpen?.cancel();
+            _matchIntroFailOpen = null;
+            setState(() => _matchIntroVisible = false);
+          }
+        });
+        return null;
+      }
       return MatchIntroOverlay(
         vsLabel: introVs,
         ariaLabel: rail.matchIntroAria,
         startingLabel: rail.matchIntroStartingLabel,
-        durationMs: int.tryParse(rail.matchIntroDurationMs) ?? 0,
+        durationMs: introMs,
         top: topSeat(),
         bottom: bottomSeat(),
         onShow: () {
+          _armMatchIntroFailOpen();
           unawaited(GameNotify.play('game_start'));
         },
         onDone: () {
+          _matchIntroFailOpen?.cancel();
+          _matchIntroFailOpen = null;
           if (mounted) setState(() => _matchIntroVisible = false);
         },
       );

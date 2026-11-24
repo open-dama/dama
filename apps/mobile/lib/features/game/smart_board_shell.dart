@@ -137,12 +137,18 @@ class _SmartBoardShellState extends State<SmartBoardShell>
       }
       // Fail-open remount: do not clear() first - that let sticky ply-sync treat
       // the board as idle and tip-snap under a still-airborne fly. Remount dispose
-      // forceRecoverStall land-syncs + leave(); clear only if depth stays stuck
-      // after sync (orphan enter without a board holder).
+      // forceRecoverStall land-syncs + leave(); clear only after remount commits
+      // (double post-frame). Immediate clear() raced dispose leave() and aborted
+      // land sync → mid-game frozen board after maximize/minimize/compose tuck.
       t.cancel();
       _plyDeferPortal = null;
       _syncPortal(force: force);
-      if (BoardPlyFlight.isActive) BoardPlyFlight.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (BoardPlyFlight.isActive) BoardPlyFlight.clear();
+        });
+      });
     });
   }
 

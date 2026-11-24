@@ -114,6 +114,23 @@ export function mergeBoardStateAfterPlayerMove(
   return withResolvedOutcome(incoming);
 }
 
+/**
+ * After WS reconnect: never keep optimistic plies the server never saw.
+ * Keeping a ghost AI/opponent turn freezes interactive input forever.
+ */
+export function mergeBoardStateAfterReconnect(
+  previous: GamePayload | null | undefined,
+  incoming: GamePayload,
+): GamePayload {
+  if (!previous || previous.id !== incoming.id) return withResolvedOutcome(incoming);
+  const previousPly = plyCount(previous);
+  const incomingPly = plyCount(incoming);
+  if (incomingPly < previousPly) {
+    return withResolvedOutcome(incoming);
+  }
+  return mergeRemoteBoardState(previous, incoming);
+}
+
 /** Remote/WS merge: freeze board while history grows so opponent plies animate. */
 export function mergeRemoteBoardState(
   previous: GamePayload | null | undefined,

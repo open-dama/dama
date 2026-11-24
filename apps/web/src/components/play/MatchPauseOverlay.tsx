@@ -95,7 +95,7 @@ export function MatchPauseOverlay({
   const hasDetails = metaLines.length > 0 || Boolean(footer);
 
   return (
-    <div className={cn("absolute inset-0 z-40", className)}>
+    <div className={cn("pointer-events-auto absolute inset-0 z-40", className)}>
       <MatchIntroOverlay
         active
         persistent

@@ -12,6 +12,7 @@ import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { usePlayerGeoQuery } from "@/hooks/query/usePlayerGeoQuery";
 import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
 import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle } from "@/lib/board-view";
+import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import {
   parseViewportBreakpoints,
   pickCampaignCreative,
@@ -38,12 +39,14 @@ function formatSkip(template: string, seconds: number): string {
 type Props = {
   active: boolean;
   gameStartedAtMs: number | null;
+  /** Hard fail-safe: never eligibility/cover a virgin board (start→abandon, zero /move). */
+  moveCount?: number | null;
 };
 
 /**
  * In-match ad runner. Timing + non-skippable + labels come only from backend.
  */
-export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
+export function InMatchAdOverlay({ active, gameStartedAtMs, moveCount = 0 }: Props) {
   const geoQuery = usePlayerGeoQuery();
   const playbackQuery = useAdPlaybackQuery(active);
   const eligibility = useInMatchEligibilityMutation();
@@ -65,12 +68,14 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
   const checkingRef = useRef(false);
   const activeRef = useRef(active);
   const gameStartedAtMsRef = useRef(gameStartedAtMs);
+  const moveCountRef = useRef(moveCount ?? 0);
   const geoRef = useRef(geoQuery.data);
   const playbackRef = useRef(playbackQuery.data);
   const eligibilityMutateRef = useRef(eligibility.mutateAsync);
   const impressionMutateRef = useRef(impression.mutate);
   activeRef.current = active;
   gameStartedAtMsRef.current = gameStartedAtMs;
+  moveCountRef.current = moveCount ?? 0;
   geoRef.current = geoQuery.data;
   playbackRef.current = playbackQuery.data;
   eligibilityMutateRef.current = eligibility.mutateAsync;
@@ -112,12 +117,25 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
     ) {
       return;
     }
+    // Never eligibility/cover a virgin board (start→abandon, zero /move).
+    if ((moveCountRef.current ?? 0) < 1) {
+      scheduleAfter(5);
+      return;
+    }
     const pb = playbackRef.current;
     const geo = geoRef.current;
     if (!pb?.player_chrome || !geo?.country) return;
     checkingRef.current = true;
     try {
       const elapsed = Math.floor((Date.now() - gameStartedAtMsRef.current) / 1000);
+      // Never cover the opening seconds - eligibility at t≈0 put a full-screen ad
+      // over a cold board and players abandoned with zero moves.
+      const pbEarly = playbackRef.current;
+      const minFirstSec = Math.max(15, pbEarly?.interval_min || 30);
+      if (lastShownAtMs.current == null && elapsed < minFirstSec) {
+        scheduleAfter(minFirstSec - elapsed);
+        return;
+      }
       const sinceLast =
         lastShownAtMs.current == null
           ? null
@@ -202,6 +220,9 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
     setCampaign(null);
     setNonSkippable(null);
     setRemaining(null);
+    // Dialog/top-layer teardown can leave body { pointer-events: none } → frozen board.
+    releaseBodyPointerEvents();
+    window.setTimeout(releaseBodyPointerEvents, 0);
     // Video ads suspend AudioContext / steal autoplay - re-warm so land SFX work again.
     void resumeGameAudio();
     // If resume() is blocked until the next gesture, arm capture so the next tap unlocks.
@@ -225,17 +246,28 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
       return;
     }
     if (!playbackQuery.data?.player_chrome || !geoQuery.data?.country) return;
-    void runCheckRef.current();
+    // Never POST eligibility at t≈0 (API logs: start→eligibility→abandon, zero /move).
+    // Also wait until moveCount >= 1 so a virgin board can never be covered.
+    if ((moveCount ?? 0) < 1) {
+      clearCheck();
+      return;
+    }
+    // Schedule the first check after the cold-open floor; runCheck also re-checks.
+    const minFirst = Math.max(15, playbackQuery.data.interval_min || 30);
+    scheduleAfter(minFirst);
     return () => clearCheck();
     // Intentionally omit mutation identities - they re-render every isPending flip and
     // were cancelling next_check timers (~4s storm + move timeouts).
   }, [
     active,
     gameStartedAtMs,
+    moveCount,
     playbackQuery.data?.player_chrome,
+    playbackQuery.data?.interval_min,
     geoQuery.data?.country,
     clearCheck,
     clearCountdown,
+    scheduleAfter,
   ]);
 
   useEffect(() => {

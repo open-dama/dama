@@ -1142,6 +1142,13 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 			writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_playback_unavailable")
 			return
 		}
+		// Cold-open floor: FirstShowMin may be 0 so a campaign override of 0 used to
+		// allow show:true at t≈0. Stale clients that POST eligibility on start then
+		// covered the virgin board → abandon with zero POST /move.
+		const coldOpenFloorSec = 15
+		if firstShow < coldOpenFloorSec {
+			firstShow = coldOpenFloorSec
+		}
 		// Timing gates first (no DB) so before_first_show / interval waits stay cheap.
 		if body.GameElapsedSeconds < firstShow {
 			wait := firstShow - body.GameElapsedSeconds

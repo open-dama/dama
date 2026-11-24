@@ -34,6 +34,14 @@ const VIEW_EVENT = "dama-board-view";
  */
 export const PLY_IDLE_FAIL_OPEN_MS = 5500;
 
+/**
+ * Parent boardPlySynced safety: grace for startNext / RAF to bind after history
+ * grows. Must stay far below PLY_IDLE_FAIL_OPEN_MS - using the full airborne
+ * budget while idle left interactive locked ~5.5s after a missed land (reads as
+ * mid-game freeze / abandon-with-zero-moves).
+ */
+export const PLY_SYNC_IDLE_GRACE_MS = 400;
+
 function plyInflight(): boolean {
   if (typeof document === "undefined") return false;
   return Boolean(document.querySelector("[data-dama-ply-inflight]"));

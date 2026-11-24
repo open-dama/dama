@@ -108,6 +108,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   static const _durationPerSquareMs = 90;
   static const _moveDurationMaxMs = 820;
   static const _stallGraceMs = 250;
+
   /// Web lastFrameAtRef parity: recover when ticker claims animating but value stalls.
   static const _deadTickerMs = 2000;
 
@@ -124,14 +125,17 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   final List<_ActiveAnim> _queue = [];
   int _prevHistoryLen = 0;
   bool _holdSync = false;
+
   /// True while this board holds BoardPlyFlight (holdSync OR active OR queue).
   bool _plyGateHeld = false;
   late final AnimationController _shakeCtrl;
   Timer? _stallWatch;
   bool _finishQueued = false;
+
   /// True while app lifecycle paused the flight clock (web document.hidden parity).
   /// Stall recover must not snap land while the clock is intentionally frozen.
   bool _flightClockPaused = false;
+
   /// Last monotonic ms when `_anim.value` advanced (dead-ticker detect).
   int _lastAnimAdvanceMs = 0;
   double _lastAnimAdvanceValue = -1;
@@ -921,6 +925,14 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       },
     );
 
+    // 2D/web parity: only lock own piece while still in the air. Gating the
+    // whole GestureDetector on `_active == null` froze multi-jump / next-turn
+    // taps for the full settle after boardApplied (mid-game "frozen board").
+    final ownAirLocked = _active != null &&
+        widget.yourPlayer != null &&
+        _active!.player == widget.yourPlayer &&
+        !_active!.boardApplied;
+
     return AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
@@ -949,7 +961,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
                   }
                 });
               },
-              onTapUp: widget.interactive && _active == null
+              onTapUp: widget.interactive && !ownAirLocked
                   ? (details) {
                       final box = context.findRenderObject() as RenderBox?;
                       if (box == null) return;

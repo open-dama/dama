@@ -15,6 +15,11 @@ class BoardPlyFlight {
   /// the board mid-chain → pick→put flicker / land-sync stall (web PLY_IDLE_FAIL_OPEN_MS).
   static const Duration idleTimeout = Duration(milliseconds: 5500);
 
+  /// Parent `_boardPlySynced` safety grace while nothing is airborne (web
+  /// `PLY_SYNC_IDLE_GRACE_MS`). Using [idleTimeout] while idle left taps locked
+  /// ~5.5s after a missed land (mid-game freeze).
+  static const Duration syncIdleGrace = Duration(milliseconds: 400);
+
   static bool get isActive => _depth > 0;
 
   static void enter() {

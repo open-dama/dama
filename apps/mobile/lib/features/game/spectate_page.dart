@@ -67,6 +67,12 @@ class _SpectatePageState extends State<SpectatePage> {
   int? _blackPieces;
   int? _piecesPerSide;
   int _lastMoveCount = -1;
+
+  /// Skip hard resync on the first WS open; only after a drop/reconnect.
+  bool _wsSawOpen = false;
+
+  /// Half-open spectate WSS stops live plies - poll /state so watch unfreezes.
+  Timer? _spectatePollWatch;
   SpectateChrome? _chrome;
   PlayRailChrome? _railChrome;
   PlayChrome? _playChrome;
@@ -84,6 +90,7 @@ class _SpectatePageState extends State<SpectatePage> {
   int? _pendingReplayIdx;
   bool _liveSelectScheduled = false;
   bool _shareCopied = false;
+
   /// Connect/id swap: drop stale dispose land (web suppressPlyLandRef parity).
   int _plyLandEpoch = 0;
   Map<String, dynamic>? _liveVotes;
@@ -138,16 +145,15 @@ class _SpectatePageState extends State<SpectatePage> {
     if (_plySyncWatch?.isActive == true) return;
     final after = _moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null;
     if (after == null || after.isEmpty) return;
-    // Align with BoardPlyFlight.idleTimeout - a 2.5s snap mid multi-capture
-    // remounted pieces under the fly (web PLY_IDLE_FAIL_OPEN_MS parity).
+    // Idle uses syncIdleGrace (not full idleTimeout) - web LivePlayHub parity.
     final armedAt = DateTime.now();
-    void arm() {
-      _plySyncWatch = Timer(BoardPlyFlight.idleTimeout, () {
+    void arm(Duration delay) {
+      _plySyncWatch = Timer(delay, () {
         if (!mounted || _boardPlySynced || _replayIndex != null) return;
         if (BoardPlyFlight.isActive &&
             DateTime.now().difference(armedAt) <
                 BoardPlyFlight.idleTimeout * 2) {
-          arm();
+          arm(BoardPlyFlight.syncIdleGrace);
           return;
         }
         final snap =
@@ -161,7 +167,7 @@ class _SpectatePageState extends State<SpectatePage> {
       });
     }
 
-    arm();
+    arm(BoardPlyFlight.syncIdleGrace);
   }
 
   /// Persist painted board so leave→back / remount does not re-freeze until safety.
@@ -621,15 +627,18 @@ class _SpectatePageState extends State<SpectatePage> {
     }
   }
 
-  void _applyPayload(GameStatePayload payload) {
+  void _applyPayload(GameStatePayload payload, {bool authoritative = false}) {
     final incomingHist = payload.moveHistory;
     final prevLen = _moveHistory.length;
     final histGrew = incomingHist.length > prevLen;
+    final histShrunk = incomingHist.length < prevLen;
     // Match match_board_page freeze: keep painted board while history grows so
     // the scene can animate; same-ply WS must not snap mid pick→put.
     if (payload.board != null) {
       _liveBoard = payload.board;
-      if (_replayIndex == null && !histGrew) {
+      if (authoritative || histShrunk) {
+        _board = payload.board;
+      } else if (_replayIndex == null && !histGrew) {
         final lastAfter = incomingHist.isNotEmpty
             ? incomingHist.last.boardAfter
             : (_moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null);
@@ -888,12 +897,20 @@ class _SpectatePageState extends State<SpectatePage> {
         }
       }
 
+      _wsSawOpen = false;
       await _ws
           .connectSpectate(gameId: gameId, token: widget.accessToken)
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
       _sub = _ws.messages.listen((msg) {
         if (!mounted) return;
+        if (msg['type'] == 'ws_open') {
+          if (_wsSawOpen) {
+            unawaited(_resyncSpectateAfterWs());
+          }
+          _wsSawOpen = true;
+          return;
+        }
         final chatGid = GameChatLive.gameIdFromWs(msg, fallbackGameId: gameId);
         if (chatGid != null) {
           if (msg['type'] == 'game_chat_message') {
@@ -949,6 +966,7 @@ class _SpectatePageState extends State<SpectatePage> {
           _status = chrome.waitingGameState;
         }
       });
+      _armSpectatePollWatch();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -956,13 +974,59 @@ class _SpectatePageState extends State<SpectatePage> {
         _busy = false;
         _connected = false;
       });
+      _spectatePollWatch?.cancel();
+      _spectatePollWatch = null;
     }
+  }
+
+  Future<void> _resyncSpectateAfterWs() async {
+    final gameId = _gameIdCtrl.text.trim();
+    if (gameId.isEmpty || !mounted) return;
+    try {
+      final res = await http
+          .get(Uri.parse('${ApiConfig.baseUrl}/api/v1/games/$gameId/state'))
+          .timeout(const Duration(seconds: 15));
+      if (!mounted || res.statusCode >= 300) return;
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map<String, dynamic>) return;
+      final payload = GameStatePayload.fromJson(decoded);
+      setState(() {
+        _applyPayload(payload, authoritative: true);
+      });
+      _armPlySyncSafety();
+    } catch (_) {
+      /* keep painted; next game_state still applies */
+    }
+  }
+
+  void _armSpectatePollWatch() {
+    _spectatePollWatch?.cancel();
+    _spectatePollWatch = null;
+    if (!mounted || !_connected) return;
+    if (_outcome != null || _draw) return;
+    if (_replayIndex != null) return;
+    _spectatePollWatch = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (!mounted || !_connected) {
+        _spectatePollWatch?.cancel();
+        _spectatePollWatch = null;
+        return;
+      }
+      if (_outcome != null || _draw || _replayIndex != null) {
+        _spectatePollWatch?.cancel();
+        _spectatePollWatch = null;
+        return;
+      }
+      unawaited(_resyncSpectateAfterWs());
+    });
   }
 
   Future<void> _disconnect() async {
     final chrome = _chrome;
+    _spectatePollWatch?.cancel();
+    _spectatePollWatch = null;
     await _sub?.cancel();
     await _ws.disconnect();
+    _wsSawOpen = false;
     if (!mounted) return;
     setState(() {
       _connected = false;
@@ -1185,6 +1249,8 @@ class _SpectatePageState extends State<SpectatePage> {
   void dispose() {
     _clockTimer?.cancel();
     _plySyncWatch?.cancel();
+    _spectatePollWatch?.cancel();
+    _spectatePollWatch = null;
     _sub?.cancel();
     _chatLiveSub?.cancel();
     _ws.dispose();

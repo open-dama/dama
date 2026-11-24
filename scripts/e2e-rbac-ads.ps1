@@ -271,8 +271,9 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
   monthly_impression_cap = $null
   yearly_impression_cap = $null
 } $token | Out-Null
+# elapsed must clear the API cold-open floor (15s) so the interval gate is what blocks.
 $eligInterval = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   seconds_since_last_ad = 10
   viewer_key = "e2e-viewer-interval"
   country = $geoCountry
@@ -293,8 +294,9 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
 } $token | Out-Null
 
 Write-Host "== eligibility must use admin-changed 15 =="
+# past cold-open floor (campaign first_show=0 is floored to 15 server-side)
 $elig = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   viewer_key = "e2e-viewer-flex"
   country = $geoCountry
 } $null
@@ -314,7 +316,7 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
   yearly_impression_cap = $null
 } $token | Out-Null
 $elig2 = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   seconds_since_last_ad = 999
   viewer_key = "e2e-viewer-flex2"
   country = $geoCountry
@@ -356,7 +358,7 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
   yearly_impression_cap = $null
 } $token | Out-Null
 $eligCap = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   seconds_since_last_ad = 999
   viewer_key = "e2e-viewer-cap-elig"
   country = $geoCountry
@@ -380,7 +382,7 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
   yearly_impression_cap = $null
 } $token | Out-Null
 $eligWeek = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   seconds_since_last_ad = 999
   viewer_key = "e2e-viewer-week-cap"
   country = $geoCountry
@@ -400,7 +402,7 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
   yearly_impression_cap = $null
 } $token | Out-Null
 $eligMonth = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   seconds_since_last_ad = 999
   viewer_key = "e2e-viewer-month-cap"
   country = $geoCountry
@@ -420,7 +422,7 @@ Invoke-Json PATCH "/console/ads/campaigns/$campId/schedule" @{
   yearly_impression_cap = 1
 } $token | Out-Null
 $eligYear = Invoke-Json POST "/ads/in-match/eligibility" @{
-  game_elapsed_seconds = 5
+  game_elapsed_seconds = 20
   seconds_since_last_ad = 999
   viewer_key = "e2e-viewer-year-cap"
   country = $geoCountry

@@ -179,225 +179,234 @@ class _MatchIntroOverlayState extends State<MatchIntroOverlay>
 
   @override
   Widget build(BuildContext context) {
+    // Zero-duration timed intro: IgnorePointer so Positioned.fill cannot leave an
+    // empty hit target over the board (start→abandon with zero moves).
+    if (!widget.persistent && widget.durationMs <= 0) {
+      return const IgnorePointer(child: SizedBox.shrink());
+    }
     final tokens = damaColorsOf(context);
     final theme = Theme.of(context);
     final starting = widget.startingLabel.trim();
-    return Semantics(
-      label: widget.ariaLabel,
-      child: AbsorbPointer(
-        // Web parity: blur fills the whole board panel (Positioned.fill / cover host).
-        child: SizedBox.expand(
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: ColoredBox(
-                color: theme.scaffoldBackgroundColor.withValues(alpha: 0.90),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    // Square board plane is often ~300–420px on phone/tablet - scale down.
-                    final shortSide =
-                        constraints.maxHeight < constraints.maxWidth
-                            ? constraints.maxHeight
-                            : constraints.maxWidth;
-                    final compact = shortSide < 380;
-                    final cozy = shortSide < 460;
-                    final avatarSize = compact
-                        ? 52.0
-                        : cozy
-                            ? 72.0
-                            : 92.0;
-                    final nameFontSize = compact
-                        ? 14.0
-                        : cozy
-                            ? 16.0
-                            : 18.0;
-                    final vsFontSize = compact
-                        ? 22.0
-                        : cozy
-                            ? 28.0
-                            : 32.0;
-                    final maxNameWidth =
-                        (constraints.maxWidth - 24).clamp(120.0, 288.0);
-                    final hPad = compact ? 10.0 : 14.0;
-                    final vGap = compact ? 10.0 : (cozy ? 14.0 : 18.0);
-                    final bottomReserve =
-                        widget.reserveBottom ? (compact ? 88.0 : 104.0) : 0.0;
+    // Timed intro: IgnorePointer so VS cinematic never steals board taps
+    // (opaque GestureDetector → start→abandon with zero moves). Pause cover
+    // stays persistent + absorbing so play cannot continue under official pause.
+    // Timed: lighter blur/alpha so pieces stay visible (opaque 0.90 read as freeze).
+    // Persistent pause keeps heavy cover so play cannot continue underneath.
+    final blurSigma = widget.persistent ? 12.0 : 2.0;
+    final scrimAlpha = widget.persistent ? 0.90 : 0.45;
+    final visual = SizedBox.expand(
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+          child: ColoredBox(
+            color: theme.scaffoldBackgroundColor.withValues(alpha: scrimAlpha),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Square board plane is often ~300–420px on phone/tablet - scale down.
+                final shortSide = constraints.maxHeight < constraints.maxWidth
+                    ? constraints.maxHeight
+                    : constraints.maxWidth;
+                final compact = shortSide < 380;
+                final cozy = shortSide < 460;
+                final avatarSize = compact
+                    ? 52.0
+                    : cozy
+                        ? 72.0
+                        : 92.0;
+                final nameFontSize = compact
+                    ? 14.0
+                    : cozy
+                        ? 16.0
+                        : 18.0;
+                final vsFontSize = compact
+                    ? 22.0
+                    : cozy
+                        ? 28.0
+                        : 32.0;
+                final maxNameWidth =
+                    (constraints.maxWidth - 24).clamp(120.0, 288.0);
+                final hPad = compact ? 10.0 : 14.0;
+                final vGap = compact ? 10.0 : (cozy ? 14.0 : 18.0);
+                final bottomReserve =
+                    widget.reserveBottom ? (compact ? 88.0 : 104.0) : 0.0;
 
-                    return Stack(
-                      children: [
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: RadialGradient(
-                                center: const Alignment(0, -0.1),
-                                radius: 0.9,
-                                colors: [
-                                  tokens.brand.withValues(alpha: 0.28),
-                                  Colors.transparent,
-                                ],
-                              ),
-                            ),
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: const Alignment(0, -0.1),
+                            radius: 0.9,
+                            colors: [
+                              tokens.brand.withValues(alpha: 0.28),
+                              Colors.transparent,
+                            ],
                           ),
                         ),
-                        Align(
-                          alignment: Alignment.center,
-                          child: FadeTransition(
-                            opacity:
-                                Tween(begin: 0.25, end: 0.85).animate(_pulse),
-                            child: Container(
-                              height: 1.5,
-                              margin:
-                                  EdgeInsets.symmetric(horizontal: hPad + 22),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Colors.transparent,
-                                    tokens.brand.withValues(alpha: 0.9),
-                                    Colors.transparent,
-                                  ],
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: tokens.brand.withValues(alpha: 0.55),
-                                    blurRadius: 16,
-                                  ),
-                                ],
-                              ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.center,
+                      child: FadeTransition(
+                        opacity: Tween(begin: 0.25, end: 0.85).animate(_pulse),
+                        child: Container(
+                          height: 1.5,
+                          margin: EdgeInsets.symmetric(horizontal: hPad + 22),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                tokens.brand.withValues(alpha: 0.9),
+                                Colors.transparent,
+                              ],
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: tokens.brand.withValues(alpha: 0.55),
+                                blurRadius: 16,
+                              ),
+                            ],
                           ),
                         ),
-                        // Scroll safety on very short boards; content stays centered when it fits.
-                        Center(
-                          child: SingleChildScrollView(
-                            padding: EdgeInsets.fromLTRB(
-                              hPad,
-                              compact ? 8 : 12,
-                              hPad,
-                              (compact ? 8 : 12) + bottomReserve,
-                            ),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight: (constraints.maxHeight -
-                                        (compact ? 16 : 24) -
-                                        bottomReserve)
-                                    .clamp(0.0, double.infinity),
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (starting.isNotEmpty)
-                                    Padding(
-                                      padding: EdgeInsets.only(bottom: vGap),
-                                      child: FadeTransition(
-                                        opacity: Tween(begin: 0.55, end: 1.0)
-                                            .animate(_pulse),
-                                        child: Text(
-                                          starting.toUpperCase(),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: compact ? 9 : 11,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: compact ? 2.4 : 3.2,
-                                            // Light: brand. Dark: primary text for clear visibility.
-                                            color: theme.brightness ==
-                                                    Brightness.dark
+                      ),
+                    ),
+                    // Scroll safety on very short boards; content stays centered when it fits.
+                    Center(
+                      child: SingleChildScrollView(
+                        padding: EdgeInsets.fromLTRB(
+                          hPad,
+                          compact ? 8 : 12,
+                          hPad,
+                          (compact ? 8 : 12) + bottomReserve,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: (constraints.maxHeight -
+                                    (compact ? 16 : 24) -
+                                    bottomReserve)
+                                .clamp(0.0, double.infinity),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (starting.isNotEmpty)
+                                Padding(
+                                  padding: EdgeInsets.only(bottom: vGap),
+                                  child: FadeTransition(
+                                    opacity: Tween(begin: 0.55, end: 1.0)
+                                        .animate(_pulse),
+                                    child: Text(
+                                      starting.toUpperCase(),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: compact ? 9 : 11,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: compact ? 2.4 : 3.2,
+                                        // Light: brand. Dark: primary text for clear visibility.
+                                        color:
+                                            theme.brightness == Brightness.dark
                                                 ? theme.colorScheme.onSurface
                                                 : tokens.brand,
-                                          ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              _seat(
+                                widget.top,
+                                tokens,
+                                theme.colorScheme.onSurface,
+                                isDark: theme.brightness == Brightness.dark,
+                                avatarSize: avatarSize,
+                                nameFontSize: nameFontSize,
+                                maxNameWidth: maxNameWidth,
+                              ),
+                              Padding(
+                                padding: EdgeInsets.symmetric(vertical: vGap),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    ScaleTransition(
+                                      scale: Tween(begin: 0.85, end: 1.25)
+                                          .animate(_pulse),
+                                      child: Container(
+                                        width: compact ? 48 : 72,
+                                        height: compact ? 48 : 72,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: tokens.brand
+                                              .withValues(alpha: 0.18),
                                         ),
                                       ),
                                     ),
-                                  _seat(
-                                    widget.top,
-                                    tokens,
-                                    theme.colorScheme.onSurface,
-                                    isDark: theme.brightness == Brightness.dark,
-                                    avatarSize: avatarSize,
-                                    nameFontSize: nameFontSize,
-                                    maxNameWidth: maxNameWidth,
-                                  ),
-                                  Padding(
-                                    padding:
-                                        EdgeInsets.symmetric(vertical: vGap),
-                                    child: Stack(
+                                    Stack(
                                       alignment: Alignment.center,
                                       children: [
-                                        ScaleTransition(
-                                          scale: Tween(begin: 0.85, end: 1.25)
-                                              .animate(_pulse),
-                                          child: Container(
-                                            width: compact ? 48 : 72,
-                                            height: compact ? 48 : 72,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: tokens.brand
-                                                  .withValues(alpha: 0.18),
-                                            ),
+                                        Text(
+                                          widget.vsLabel.toUpperCase(),
+                                          style: TextStyle(
+                                            fontSize: vsFontSize,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: compact ? 3 : 5,
+                                            foreground: Paint()
+                                              ..style = PaintingStyle.stroke
+                                              ..strokeWidth = 5
+                                              // Theme card (not hard white) for dark/light pause+intro.
+                                              ..color = tokens.card,
                                           ),
                                         ),
-                                        Stack(
-                                          alignment: Alignment.center,
-                                          children: [
-                                            Text(
-                                              widget.vsLabel.toUpperCase(),
-                                              style: TextStyle(
-                                                fontSize: vsFontSize,
-                                                fontWeight: FontWeight.w900,
-                                                letterSpacing: compact ? 3 : 5,
-                                                foreground: Paint()
-                                                  ..style = PaintingStyle.stroke
-                                                  ..strokeWidth = 5
-                                                  // Theme card (not hard white) for dark/light pause+intro.
-                                                  ..color = tokens.card,
+                                        Text(
+                                          widget.vsLabel.toUpperCase(),
+                                          style: TextStyle(
+                                            fontSize: vsFontSize,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: compact ? 3 : 5,
+                                            color: tokens.brand,
+                                            shadows: [
+                                              Shadow(
+                                                color: tokens.brand
+                                                    .withValues(alpha: 0.7),
+                                                blurRadius: 18,
                                               ),
-                                            ),
-                                            Text(
-                                              widget.vsLabel.toUpperCase(),
-                                              style: TextStyle(
-                                                fontSize: vsFontSize,
-                                                fontWeight: FontWeight.w900,
-                                                letterSpacing: compact ? 3 : 5,
-                                                color: tokens.brand,
-                                                shadows: [
-                                                  Shadow(
-                                                    color: tokens.brand
-                                                        .withValues(alpha: 0.7),
-                                                    blurRadius: 18,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                  _seat(
-                                    widget.bottom,
-                                    tokens,
-                                    theme.colorScheme.onSurface,
-                                    isDark: theme.brightness == Brightness.dark,
-                                    avatarSize: avatarSize,
-                                    nameFontSize: nameFontSize,
-                                    maxNameWidth: maxNameWidth,
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
+                              _seat(
+                                widget.bottom,
+                                tokens,
+                                theme.colorScheme.onSurface,
+                                isDark: theme.brightness == Brightness.dark,
+                                avatarSize: avatarSize,
+                                nameFontSize: nameFontSize,
+                                maxNameWidth: maxNameWidth,
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    );
-                  },
-                ),
-              ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
       ),
+    );
+
+    return Semantics(
+      label: widget.ariaLabel,
+      child: widget.persistent
+          ? AbsorbPointer(absorbing: true, child: visual)
+          : IgnorePointer(ignoring: true, child: visual),
     );
   }
 }

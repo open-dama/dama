@@ -278,7 +278,14 @@ export function PlayBoardColumn({
           >
             <div className="h-full w-full">{board}</div>
             {coverOverlay ? (
-              <div className="absolute inset-0 z-50 overflow-hidden">{coverOverlay}</div>
+              // Wrapper must be pointer-events-none: MatchIntro/Result return null while
+              // parent still mounts them → an empty inset-0 z-50 div ate all board taps
+              // (start→abandon with zero /move). Do NOT force [&>*]:pointer-events-auto -
+              // that override beat timed MatchIntro's pointer-events-none and re-froze taps.
+              // Interactive overlays (result / pause) set pointer-events-auto themselves.
+              <div className="pointer-events-none absolute inset-0 z-50 overflow-hidden">
+                {coverOverlay}
+              </div>
             ) : null}
           </div>
           {bottom ? (

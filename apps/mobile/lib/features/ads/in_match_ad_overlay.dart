@@ -20,10 +20,14 @@ class InMatchAdOverlay extends StatefulWidget {
     super.key,
     required this.active,
     required this.gameStartedAt,
+    this.moveCount = 0,
   });
 
   final bool active;
   final DateTime? gameStartedAt;
+
+  /// Hard fail-safe: never eligibility/cover a virgin board (start→abandon, zero /move).
+  final int moveCount;
 
   @override
   State<InMatchAdOverlay> createState() => _InMatchAdOverlayState();
@@ -60,8 +64,17 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
       return;
     }
     if (oldWidget.gameStartedAt != widget.gameStartedAt ||
-        oldWidget.active != widget.active) {
-      unawaited(_check());
+        oldWidget.active != widget.active ||
+        oldWidget.moveCount != widget.moveCount) {
+      // Never eligibility/cover a virgin board (start→abandon, zero /move).
+      if (widget.moveCount < 1) {
+        _checkTimer?.cancel();
+        return;
+      }
+      // Defer past cold open - never eligibility-storm on start.
+      final minFirst =
+          _intervalMin != null && _intervalMin! > 15 ? _intervalMin! : 15;
+      _schedule(minFirst);
     }
   }
 
@@ -125,8 +138,13 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
         if (located.latitude != null) 'lat': located.latitude,
         if (located.longitude != null) 'lng': located.longitude,
       };
-      if (widget.active && widget.gameStartedAt != null) {
-        await _check();
+      if (widget.active &&
+          widget.gameStartedAt != null &&
+          widget.moveCount >= 1) {
+        // Never POST eligibility at t≈0 (web InMatchAdOverlay parity).
+        final minFirst =
+            _intervalMin != null && _intervalMin! > 15 ? _intervalMin! : 15;
+        _schedule(minFirst);
       }
     } catch (_) {}
   }
@@ -164,6 +182,11 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
   }
 
   Future<void> _check() async {
+    // Never eligibility/cover a virgin board (web InMatchAdOverlay parity).
+    if (widget.moveCount < 1) {
+      _schedule(5);
+      return;
+    }
     if (!widget.active ||
         widget.gameStartedAt == null ||
         _open ||
@@ -178,6 +201,13 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
     try {
       final elapsed =
           DateTime.now().difference(widget.gameStartedAt!).inSeconds;
+      // Never cover the opening seconds (web InMatchAdOverlay parity).
+      final minFirst =
+          _intervalMin != null && _intervalMin! > 15 ? _intervalMin! : 15;
+      if (_lastShownAt == null && elapsed < minFirst) {
+        _schedule(minFirst - elapsed);
+        return;
+      }
       final sinceLast = _lastShownAt == null
           ? null
           : DateTime.now().difference(_lastShownAt!).inSeconds;

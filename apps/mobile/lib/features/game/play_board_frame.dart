@@ -93,6 +93,9 @@ class PlayBoardFrame extends StatelessWidget {
                       clipBehavior: Clip.hardEdge,
                       children: [
                         board,
+                        // Cover is painted above the board. Timed MatchIntro uses
+                        // IgnorePointer; pause/result absorb. Never wrap with a
+                        // hit-absorbing parent here (that re-froze zero-move starts).
                         if (coverOverlay != null)
                           Positioned.fill(child: coverOverlay!),
                       ],

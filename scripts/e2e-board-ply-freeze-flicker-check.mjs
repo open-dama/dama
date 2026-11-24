@@ -2,7 +2,8 @@
  * Board pick→put flicker + mid-game freeze contract (web / Flutter / admin).
  *
  * Freeze root: stall recover cleared fly without onPlyAnimated → board behind
- * board_after → boardPlySynced stuck false → interactive locked.
+ * board_after → boardPlySynced stuck false. Input must not wait on that gate;
+ * idle ply-sync safety uses PLY_SYNC_IDLE_GRACE_MS (not full airborne budget).
  * Flicker roots: fly shrink before resting unhide; 3D select-lift drop; 3D fly
  * mount at origin before first useFrame.
  *
@@ -41,6 +42,11 @@ const spectatePage = read("apps/mobile/lib/features/game/spectate_page.dart");
 const outcome = read("apps/web/src/lib/gameOutcome.ts");
 const optimistic = read("apps/web/src/lib/applyOptimisticDraughtsMove.ts");
 const merge = read("apps/web/src/lib/gameBoardStateMerge.ts");
+const flWs = read("apps/mobile/lib/core/network/game_ws_client.dart");
+const inMatchAd = read("apps/web/src/components/ads/InMatchAdOverlay.tsx");
+const flutterInMatchAd = read("apps/mobile/lib/features/ads/in_match_ad_overlay.dart");
+const matchIntroWeb = read("apps/web/src/components/chat/MatchIntroOverlay.tsx");
+const matchIntroFlutter = read("apps/mobile/lib/features/chat/match_intro_overlay.dart");
 
 // --- Freeze: stall recover must sync parent board_after ---
 assert(web2d.includes("forceRecoverStall"), "web 2D has forceRecoverStall");
@@ -87,17 +93,40 @@ assert(
   /void _forceRecoverStall\(\) \{[\s\S]*?widget\.onPlyAnimated\?\.call\(after\)/.test(fl3d),
   "flutter 3D stall recover calls onPlyAnimated",
 );
+assert(
+  fl3d.includes("ownAirLocked") &&
+    fl3d.includes("!_active!.boardApplied") &&
+    fl3d.includes("onTapUp: widget.interactive && !ownAirLocked") &&
+    !fl3d.includes("onTapUp: widget.interactive && _active == null"),
+  "flutter 3D unlocks taps after boardApplied (not full-fly _active==null freeze)",
+);
 
 assert(outcome.includes("export function isBoardPlySynced"), "isBoardPlySynced exists");
 assert(liveHub.includes("isBoardPlySynced(game)"), "LivePlayHub gates on boardPlySynced");
 assert(
   liveHub.includes("lastBoardAfter") &&
     liveHub.includes("PLY_IDLE_FAIL_OPEN_MS") &&
+    liveHub.includes("PLY_SYNC_IDLE_GRACE_MS") &&
+    liveHub.includes("arm(PLY_SYNC_IDLE_GRACE_MS)") &&
     liveHub.includes("data-dama-ply-inflight") &&
     liveHub.includes('phase !== "finished"') &&
     liveHub.includes("plySyncSafetyTimerRef") &&
     liveHub.includes("if (plySyncSafetyTimerRef.current != null) return"),
-  "LivePlayHub sticky ply safety sync (chain-safe, skip while airborne)",
+  "LivePlayHub sticky ply safety sync (idle grace + airborne poll)",
+);
+assert(
+  liveHub.includes("boardInputEnabled") &&
+    liveHub.includes("interactive={boardInputEnabled}") &&
+    matchPage.includes("_boardInputEnabled") &&
+    matchPage.includes("interactive: _boardInputEnabled"),
+  "web+flutter interactive follows turn (not boardPlySynced)",
+);
+assert(
+  read("apps/web/src/lib/board-view.ts").includes("PLY_SYNC_IDLE_GRACE_MS = 400") &&
+    read("apps/mobile/lib/features/game/board_ply_flight.dart").includes(
+      "syncIdleGrace = Duration(milliseconds: 400)",
+    ),
+  "ply sync idle grace is 400ms (not full airborne budget)",
 );
 assert(
   liveHub.includes("onPlyAnimated={handlePlyAnimated}") &&
@@ -125,19 +154,25 @@ assert(
 assert(
   spectateHub.includes("isBoardPlySynced") &&
     spectateHub.includes("PLY_IDLE_FAIL_OPEN_MS") &&
+    spectateHub.includes("PLY_SYNC_IDLE_GRACE_MS") &&
+    spectateHub.includes("arm(PLY_SYNC_IDLE_GRACE_MS)") &&
     spectateHub.includes("data-dama-ply-inflight") &&
     spectateHub.includes("plySyncSafetyTimerRef") &&
     spectateHub.includes("if (plySyncSafetyTimerRef.current != null) return"),
-  "SpectateHub sticky ply safety sync (chain-safe, skip while airborne)",
+  "SpectateHub sticky ply safety sync (idle grace + airborne poll)",
 );
 assert(
   matchPage.includes("_armPlySyncSafety") &&
+    matchPage.includes("BoardPlyFlight.syncIdleGrace") &&
+    matchPage.includes("arm(BoardPlyFlight.syncIdleGrace)") &&
     matchPage.includes("BoardPlyFlight.idleTimeout") &&
     matchPage.includes("BoardPlyFlight.isActive") &&
     spectatePage.includes("_armPlySyncSafety") &&
+    spectatePage.includes("BoardPlyFlight.syncIdleGrace") &&
+    spectatePage.includes("arm(BoardPlyFlight.syncIdleGrace)") &&
     spectatePage.includes("BoardPlyFlight.idleTimeout") &&
     spectatePage.includes("BoardPlyFlight.isActive"),
-  "flutter match+spectate ply sync safety (chain-safe, skip while airborne)",
+  "flutter match+spectate ply sync safety (idle grace + airborne poll)",
 );
 assert(
   /_board = boardAfter;\s*_liveBoard = boardAfter/.test(matchPage),
@@ -461,6 +496,133 @@ assert(
 assert(
   spectateHub.includes("Keep RQ on freeze-merged paint (reconnect mid pick→put)"),
   "SpectateHub connect writes freeze-merged back to RQ",
+);
+assert(
+  liveHub.includes("mergeBoardStateAfterReconnect") &&
+    liveHub.includes("wasReconnect") &&
+    liveHub.includes("hardResyncGameState") &&
+    merge.includes("export function mergeBoardStateAfterReconnect") &&
+    merge.includes("incomingPly < previousPly") &&
+    merge.includes("return withResolvedOutcome(incoming)"),
+  "LivePlayHub WS reconnect hard-resync snaps optimistic ghost (no AI-turn freeze)",
+);
+assert(
+  liveHub.includes("REST `/move` is primary") &&
+    liveHub.includes("submitMoveViaRest") &&
+    liveHub.includes("/games/${gameId}/move") &&
+    liveHub.includes("void hardResyncGameState(game.id)") &&
+    liveHub.includes("do not dual-send") &&
+    matchPage.includes("REST `/move` is primary") &&
+    matchPage.includes("_submitMoveViaRest") &&
+    matchPage.includes("/api/v1/games/$id/move") &&
+    matchPage.includes("mode == 'ai') return 1"),
+  "web+flutter REST /move primary + flutter AI seat fallback (no WSS ghost-turn freeze)",
+);
+assert(
+  liveHub.includes('busy && phase !== "playing"') &&
+    liveHub.includes("Do not gate on `busy`") &&
+    liveHub.includes("legals = game.legal_moves ?? []") &&
+    liveHub.includes("Math.min(introDurationRaw, 5000)") &&
+    matchPage.includes("introRaw > 5000 ? 5000") &&
+    matchPage.includes("Do not gate taps on start/hydrate") &&
+    !/interactive=\{\s*phase === "playing" &&\s*!busy &&/.test(liveHub),
+  "web+flutter cold-start fail-open (no busy pointer/tap trap / intro cap / legal_moves safe)",
+);
+assert(
+  matchIntroWeb.includes("Timed intro must be pointer-events-none") &&
+    matchIntroWeb.includes("pointer-events-none bg-[var(--dama-bg)]/45") &&
+    matchIntroFlutter.includes("IgnorePointer so VS cinematic never steals board taps") &&
+    matchIntroFlutter.includes("IgnorePointer(ignoring: true, child: visual)") &&
+    matchIntroFlutter.includes("AbsorbPointer(absorbing: true, child: visual)") &&
+    matchIntroFlutter.includes("scrimAlpha = widget.persistent ? 0.90 : 0.45") &&
+    liveHub.includes("Never mount a timed VS board cover") &&
+    liveHub.includes("Sound-only; pause/result covers still mount") &&
+    !/setMatchIntroActive\(true\)/.test(liveHub) &&
+    matchPage.includes("Never mount timed VS board cover") &&
+    matchPage.includes("GameNotify.play('game_start')"),
+  "web+flutter skip timed intro cover on all live seats (pause still absorbs)",
+);
+assert(
+  inMatchAd.includes("Never POST eligibility at t≈0") &&
+    inMatchAd.includes("scheduleAfter(minFirst)") &&
+    inMatchAd.includes("Never eligibility/cover a virgin board") &&
+    inMatchAd.includes("(moveCount ?? 0) < 1") &&
+    flutterInMatchAd.includes("Never POST eligibility at t≈0") &&
+    flutterInMatchAd.includes("_schedule(minFirst)") &&
+    flutterInMatchAd.includes("widget.moveCount < 1") &&
+    flutterInMatchAd.includes("Never eligibility/cover a virgin board") &&
+    read("apps/api/internal/rest/ads_handlers.go").includes("coldOpenFloorSec = 15") &&
+    read("apps/api/internal/rest/ads_handlers.go").includes(
+      "covered the virgin board → abandon with zero POST /move",
+    ),
+  "web+flutter first in-match eligibility deferred past cold open",
+);
+{
+  const playCol = read("apps/web/src/components/play/PlayBoardColumn.tsx");
+  assert(
+    playCol.includes('className="pointer-events-none absolute inset-0 z-50 overflow-hidden"') &&
+      !playCol.includes(
+        'className="pointer-events-none absolute inset-0 z-50 overflow-hidden [&>*]:pointer-events-auto"',
+      ) &&
+      playCol.includes("empty inset-0 z-50 div ate all board taps") &&
+      playCol.includes("Do NOT force [&>*]:pointer-events-auto"),
+    "PlayBoardColumn cover wrapper is pointer-events-none (no child override freezing intro)",
+  );
+  assert(
+    liveHub.includes("releaseBodyPointerEvents") &&
+      liveHub.includes("Hard fail-open: intro cover must never outlive") &&
+      liveHub.includes("Zero/invalid duration: never mount a cover") &&
+      matchIntroFlutter.includes("IgnorePointer(child: SizedBox.shrink())") &&
+      matchPage.includes("Hard fail-open: intro cover must never outlive"),
+    "web+flutter intro fail-open + body pointer-events release on play",
+  );
+  assert(
+    liveHub.includes("setInterval(releaseBodyPointerEvents, 250)") &&
+      liveHub.includes("onPointerDownCapture") &&
+      liveHub.includes("Clear stuck body locks before the square handler"),
+    "LivePlayHub clears body pointer-events mid-play (250ms + board capture)",
+  );
+}
+assert(
+  inMatchAd.includes("Never cover the opening seconds") &&
+    inMatchAd.includes("minFirstSec") &&
+    flutterInMatchAd.includes("Never cover the opening seconds") &&
+    flutterInMatchAd.includes("minFirst"),
+  "web+flutter defer first in-match ad past cold open (no zero-move abandon)",
+);
+assert(
+  liveHub.includes("Half-open sockets never fire onclose") &&
+    liveHub.includes("void hardResyncGameState(gid)") &&
+    matchPage.includes("_armAwaitingReplyWatch") &&
+    matchPage.includes("Timer.periodic(const Duration(seconds: 4)") &&
+    spectateHub.includes("Half-open spectate WSS stops live plies") &&
+    spectatePage.includes("_armSpectatePollWatch"),
+  "web+flutter poll /state while awaiting AI/opponent or spectating (half-open WSS)",
+);
+assert(
+  liveHub.includes("moveWaitRef.current.reject") &&
+    liveHub.includes("pendingLocalMoveRef.current = false") &&
+    liveHub.includes("setAiThinking(false)") &&
+    liveHub.includes("ws.onclose"),
+  "LivePlayHub WS close clears move wait + AI thinking (no mid-game input freeze)",
+);
+assert(
+  spectateHub.includes("wasReconnect && gameId") &&
+    spectateHub.includes("refetchQueries({ queryKey: gameStateQueryKey(gameId) })") &&
+    spectateHub.includes("bindSocket()"),
+  "SpectateHub auto-reconnects + refetches after proxy drop",
+);
+assert(
+  flWs.includes("_scheduleReconnect") &&
+    flWs.includes("type': 'ws_open'") &&
+    flWs.includes("_markDead") &&
+    flWs.includes("bool sendMove") &&
+    matchPage.includes("_resyncAfterWsReconnect") &&
+    matchPage.includes("_wsSawOpen") &&
+    matchPage.includes("authoritative: true") &&
+    spectatePage.includes("_resyncSpectateAfterWs") &&
+    spectatePage.includes("authoritative: true"),
+  "flutter WS auto-reconnect + authoritative resync (match + spectate)",
 );
 assert(
   spectateHub.includes("Never raw-replace same-match cache mid pick→put") &&
@@ -838,6 +1000,8 @@ assert(
       shell.includes("BoardPlyFlight.idleTimeout") &&
       shell.includes("_syncPortal(force: force)") &&
       shell.includes("if (BoardPlyFlight.isActive) BoardPlyFlight.clear()") &&
+      shell.includes("addPostFrameCallback") &&
+      shell.includes("Immediate clear() raced dispose leave()") &&
       shell.indexOf("_syncPortal(force: force)") <
         shell.indexOf("if (BoardPlyFlight.isActive) BoardPlyFlight.clear()") &&
       matchPage.includes("BoardPlyFlight.clear()") &&

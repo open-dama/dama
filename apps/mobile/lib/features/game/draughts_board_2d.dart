@@ -95,6 +95,7 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
   static const _durationPerSquareMs = 90;
   static const _moveDurationMaxMs = 820;
   static const _stallGraceMs = 250;
+
   /// Web lastFrameAtRef parity: recover when ticker claims animating but value stalls.
   static const _deadTickerMs = 2000;
 
@@ -106,13 +107,16 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
   final List<_ActiveAnim> _queue = [];
   int _prevHistoryLen = 0;
   bool _holdSync = false;
+
   /// True while this board holds BoardPlyFlight (holdSync OR active OR queue).
   bool _plyGateHeld = false;
   Timer? _stallWatch;
   bool _finishQueued = false;
+
   /// True while app lifecycle paused the flight clock (web document.hidden parity).
   /// Stall recover must not snap land while the clock is intentionally frozen.
   bool _flightClockPaused = false;
+
   /// Last monotonic ms when `_anim.value` advanced (dead-ticker detect).
   int _lastAnimAdvanceMs = 0;
   double _lastAnimAdvanceValue = -1;
