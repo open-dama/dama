@@ -275,16 +275,13 @@ async function main() {
   assert(/px$/.test(pad) && Number.parseInt(pad, 10) > 200, `pad should be large, got ${pad}`);
   aside.scrollHeight = 500 + Number.parseInt(pad, 10);
   ensureTextFieldAboveKeyboard(input);
-  assert(
-    aside.scrollTop > 0 || globalThis.__scrollByTotal() > 0,
-    "should scroll field into view",
-  );
+  assert(aside.scrollTop > 0 || globalThis.__scrollByTotal() > 0, "should scroll field into view");
 
   // focusin bind path
   globalThis.__resetScrollBy();
   aside.scrollTop = 0;
   aside.scrollHeight = 500;
-  delete aside.style.paddingBottom;
+  aside.style.paddingBottom = undefined;
   aside.removeAttribute("data-dama-kb-pad");
   globalThis.__vv.height = 844;
   captureIdleVisualHeight();
@@ -303,7 +300,7 @@ async function main() {
   globalThis.__resetScrollBy();
   aside.scrollTop = 0;
   aside.scrollHeight = 500;
-  delete aside.style.paddingBottom;
+  aside.style.paddingBottom = undefined;
   aside.removeAttribute("data-dama-kb-pad");
   globalThis.__vv.height = 844;
   captureIdleVisualHeight();
@@ -330,66 +327,283 @@ async function main() {
   assert(!webHelper.includes("data-dama-kb-bound"), "web helper must not leave debug attrs");
   assert(!webHelper.includes("data-dama-kb-debug"), "web helper must not leave debug attrs");
   const maxLgHook = read("apps/web/src/hooks/useMaxLg.ts");
-  assert(maxLgHook.includes("requestAnimationFrame"), "useMaxLg must re-check after paint so SSR false does not stick on phone");
+  assert(
+    maxLgHook.includes("requestAnimationFrame"),
+    "useMaxLg must re-check after paint so SSR false does not stick on phone",
+  );
   assert(maxLgHook.includes("resize"), "useMaxLg must listen to resize for viewport emulation");
-  assert(/onStoreChange\(\);\s*\n\s*const raf/.test(maxLgHook) || maxLgHook.includes("onStoreChange();\n  const raf"), "useMaxLg must notify immediately on subscribe (not only on media change)");
+  assert(
+    /onStoreChange\(\);\s*\n\s*const raf/.test(maxLgHook) ||
+      maxLgHook.includes("onStoreChange();\n  const raf"),
+    "useMaxLg must notify immediately on subscribe (not only on media change)",
+  );
   const asideSrc = read("apps/web/src/components/play-rail/PlayRailAside.tsx");
   assert(asideSrc.includes("useTextInputKeyboardScroll"), "web PlayRailAside must bind helper");
-  assert(asideSrc.includes("setRailComposeSheet") || asideSrc.includes("railComposeSheet"), "web PlayRailAside must support compose sheet");
-  assert(asideSrc.includes("data-dama-rail-compose"), "web PlayRailAside must mark compose mode");
-  assert(asideSrc.includes("onPointerDown") && asideSrc.includes("tryOpenCompose"), "web compose must open on pointerdown backup");
-  assert(asideSrc.includes("flushSync"), "web must commit compose layout before focus in the same tap");
-  assert(asideSrc.includes("setSheetOpen") || asideSrc.includes("sheetOpen"), "web must use local React sheet state so flushSync commits layout");
   assert(
-    asideSrc.includes("stopImmediatePropagation") && asideSrc.includes('addEventListener("click"'),
-    "web must swallow the post-reflow click so Challenge Matchmaking Link does not navigate to /?view=match",
+    asideSrc.includes("setRailComposeSheet") || asideSrc.includes("railComposeSheet"),
+    "web PlayRailAside must support compose sheet",
+  );
+  assert(asideSrc.includes("data-dama-rail-compose"), "web PlayRailAside must mark compose mode");
+  assert(
+    asideSrc.includes("onPointerDown") && asideSrc.includes("tryOpenCompose"),
+    "web compose must open on pointerdown backup",
+  );
+  assert(
+    asideSrc.includes("flushSync"),
+    "web must commit compose layout before focus in the same tap",
+  );
+  assert(
+    asideSrc.includes("setSheetOpen") || asideSrc.includes("sheetOpen"),
+    "web must use local React sheet state so flushSync commits layout",
   );
   const newGameSrc = read("apps/web/src/components/play-rail/NewGamePanel.tsx");
-  assert(newGameSrc.includes("shouldBlockMatchmakingNav") && newGameSrc.includes('router.push("/?view=match")'), "Challenge Matchmaking must be a guarded button push, not bare Link href");
-  assert(!newGameSrc.includes('href="/?view=match"'), "Challenge Matchmaking must not use <a href=/؟view=match> (ghost click navigates)");
+  assert(
+    newGameSrc.includes("shouldBlockMatchmakingNav") &&
+      newGameSrc.includes('router.push("/?view=match")'),
+    "Challenge Matchmaking must be a guarded button push, not bare Link href",
+  );
+  assert(
+    !newGameSrc.includes('href="/?view=match"'),
+    "Challenge Matchmaking must not use <a href=/؟view=match> (ghost click navigates)",
+  );
+  assert(
+    newGameSrc.includes("shouldBlockMatchmakingNav") && newGameSrc.includes("railComposeSheet"),
+    "Matchmaking ghost nav must be blocked while compose is open (no document click-swallow / PE-none)",
+  );
   const flutterPanel = read("apps/mobile/lib/features/home/play_rail_panel.dart");
-  assert(flutterPanel.includes("_isComposeGhostTap") && flutterPanel.includes("onPlayMatch"), "Flutter Matchmaking must ignore compose ghost taps");
-  assert(!/if\s*\(\s*!storeCompose\s*\)\s*setSheetOpen\(false\)/.test(asideSrc), "must not auto-close local sheet from stale storeCompose=false");
-  assert(asideSrc.includes("onPointerDownCapture") || asideSrc.includes("tryOpenCompose"), "compose must open via React capture and/or document capture");
-  assert(asideSrc.includes('document.addEventListener("pointerdown"'), "compose must use document capture backup (native + ref-safe)");
-  assert(asideSrc.includes("playRailComposeInDialog"), "compose must work inside FAB / dialog sheet");
-  assert(asideSrc.includes("pendingFocusRef") || asideSrc.includes("restorePendingFocus"), "web compose must keep field focused after open");
+  assert(
+    flutterPanel.includes("_isComposeGhostTap") && flutterPanel.includes("onPlayMatch"),
+    "Flutter Matchmaking must ignore compose ghost taps",
+  );
+  assert(
+    !/if\s*\(\s*!storeCompose\s*\)\s*setSheetOpen\(false\)/.test(asideSrc),
+    "must not auto-close local sheet from stale storeCompose=false",
+  );
+  assert(
+    asideSrc.includes("onPointerDownCapture") || asideSrc.includes("tryOpenCompose"),
+    "compose must open via React capture and/or document capture",
+  );
+  assert(
+    asideSrc.includes('document.addEventListener("pointerdown"'),
+    "compose must use document capture backup (native + ref-safe)",
+  );
+  assert(
+    asideSrc.includes("playRailComposeInDialog"),
+    "compose must work inside FAB / dialog sheet",
+  );
+  assert(
+    asideSrc.includes("pendingFocusRef") || asideSrc.includes("restorePendingFocus"),
+    "web compose must keep field focused after open",
+  );
   assert(asideSrc.includes("tabIndex={-1}"), "compose chrome must not steal focus from the field");
-  assert(asideSrc.includes("resolveCharacterField") || asideSrc.includes('closest("input, textarea")'), "compose must resolve field from icon/wrapper clicks");
-  assert(/field\.focus\(/.test(asideSrc) || /target\.focus\(/.test(asideSrc), "web must focus the field inside the tap gesture");
-  assert(asideSrc.includes("invisible pointer-events-none") || asideSrc.includes("keep layout size"), "compose chrome must keep layout size (not display:none) so focus is not pushed");
-  assert(asideSrc.includes("Always mount backdrop") || asideSrc.includes(':"hidden pointer-events-none"') || asideSrc.includes('"hidden pointer-events-none"'), "compose backdrop must stay mounted so aside is not remounted");
+  assert(
+    asideSrc.includes("resolveCharacterField") || asideSrc.includes('closest("input, textarea")'),
+    "compose must resolve field from icon/wrapper clicks",
+  );
+  assert(
+    /field\.focus\(/.test(asideSrc) || /target\.focus\(/.test(asideSrc),
+    "web must focus the field inside the tap gesture",
+  );
+  assert(
+    asideSrc.includes("invisible pointer-events-none") || asideSrc.includes("keep layout size"),
+    "compose chrome must keep layout size (not display:none) so focus is not pushed",
+  );
+  assert(
+    asideSrc.includes("Always mount backdrop") ||
+      asideSrc.includes(':"hidden pointer-events-none"') ||
+      asideSrc.includes('"hidden pointer-events-none"'),
+    "compose backdrop must stay mounted so aside is not remounted",
+  );
   const kawSrc = read("apps/mobile/lib/core/ui/text_input_keyboard_scroll.dart");
-  assert(kawSrc.includes("_keepFocusAfterCompose") || kawSrc.includes("requestFocus"), "flutter fields must reclaim focus after compose");
-  assert(/onTap:\s*\(\)\s*\{[^}]*onComposeFocus\?\.call\(\);[^}]*requestFocus\(\)/s.test(kawSrc), "flutter must request compose before focus in onTap");
+  assert(
+    kawSrc.includes("_keepFocusAfterCompose") || kawSrc.includes("requestFocus"),
+    "flutter fields must reclaim focus after compose",
+  );
+  assert(
+    /onTap:\s*\(\)\s*\{[^}]*onComposeFocus\?\.call\(\);[^}]*requestFocus\(\)/s.test(kawSrc),
+    "flutter must request compose before focus in onTap",
+  );
   const shellUi = read("apps/web/src/lib/player-shell-ui.ts");
-  assert(shellUi.includes("z-[70]"), "compose sheet must sit above smart board pop (z-60)");
-  assert(shellUi.includes("playRailComposeBackdropClass") || shellUi.includes("fade-in"), "compose backdrop must fade in smoothly");
-  assert(!/playRailComposeSheetClass[\s\S]*?fade-in/.test(shellUi.replace(/\s+/g, " ")) || !shellUi.match(/export const playRailComposeSheetClass =\s*"[^"]*fade-in/), "compose sheet must not fade-in (opacity 0 drops mobile keyboard)");
+  assert(
+    shellUi.includes("z-[100]"),
+    "compose sheet must sit above header (z-50) and board pop (z-60)",
+  );
+  assert(
+    shellUi.includes("playRailComposeBackdropClass") || shellUi.includes("fade-in"),
+    "compose backdrop must fade in smoothly",
+  );
+  assert(
+    !/playRailComposeSheetClass[\s\S]*?fade-in/.test(shellUi.replace(/\s+/g, " ")) ||
+      !shellUi.match(/export const playRailComposeSheetClass =\s*"[^"]*fade-in/),
+    "compose sheet must not fade-in (opacity 0 drops mobile keyboard)",
+  );
+  assert(
+    /playRailComposeSheetClass\s*=\s*"[^"]*(?:!inset-0|top-0)/.test(shellUi),
+    "compose sheet must reach top of viewport (no header gap)",
+  );
+  assert(
+    !/playRailComposeSheetClass\s*=\s*"[^"]*mobile-header-height/.test(shellUi),
+    "compose must not sit below mobile header (that left a visible top gap)",
+  );
+  assert(
+    shellUi.includes("!fixed") && shellUi.includes("!inset-0"),
+    "compose must !fixed !inset-0 so aside relative/padding cannot leave gaps",
+  );
+  assert(shellUi.includes("!inset-0"), "compose class must use !inset-0 full viewport");
+  assert(
+    asideSrc.includes('position: "fixed"') &&
+      asideSrc.includes("top: 0") &&
+      asideSrc.includes("bottom: 0") &&
+      asideSrc.includes('height: "auto"'),
+    "compose must set inline fixed+inset (height auto) so 100dvh cannot fight bottom and leave gaps",
+  );
+  assert(
+    asideSrc.includes("setInterval(releaseBodyPointerEvents") ||
+      asideSrc.includes("releaseBodyPointerEvents, 500"),
+    "compose must keep clearing stuck body pointer-events while open (typeahead pick freeze)",
+  );
+  const typeaheadSrc = read("apps/web/src/components/play-rail/PlayerSearchTypeahead.tsx");
+  assert(
+    typeaheadSrc.includes("data-dama-typeahead-inline") ||
+      typeaheadSrc.includes("railComposeSheet"),
+    "compose typeahead must render inline below the field",
+  );
+  assert(
+    typeaheadSrc.includes('side="bottom"') && typeaheadSrc.includes("avoidCollisions={false}"),
+    "non-compose typeahead must prefer below and not flip above",
+  );
+  assert(
+    asideSrc.includes("!alreadyOpen"),
+    "compose open transition must not re-arm while already open",
+  );
+  assert(
+    !/root\.style\.pointerEvents\s*=\s*["']none["']/.test(asideSrc),
+    "compose must not set rail pointer-events:none (freezes sheet after typeahead pick)",
+  );
+  assert(
+    !asideSrc.includes("stopImmediatePropagation"),
+    "compose must not document-swallow clicks (ate typeahead picks / felt frozen)",
+  );
+  assert(
+    typeaheadSrc.includes("releaseBodyPointerEvents"),
+    "typeahead pick must clear stuck body pointer-events",
+  );
+  assert(
+    asideSrc.includes("releaseBodyPointerEvents"),
+    "closing compose must clear stuck body pointer-events",
+  );
+  assert(
+    typeaheadSrc.includes("useMaxLg") &&
+      typeaheadSrc.includes("composeInline") &&
+      typeaheadSrc.includes("liveCompact"),
+    "phone/tablet typeahead must render inline below the field (no portal flip above)",
+  );
+  const mobileChrome = read("apps/web/src/components/nav/PlayerMobileChrome.tsx");
+  assert(
+    mobileChrome.includes("railComposeSheet") && mobileChrome.includes("max-lg:!hidden"),
+    "mobile chrome must hide while compose is open (header band was the top gap)",
+  );
+  const shellHeader = read("apps/web/src/components/nav/PlayerShellHeader.tsx");
+  assert(
+    shellHeader.includes("railComposeSheet") && shellHeader.includes("max-lg:!hidden"),
+    "player shell header must hide while compose is open",
+  );
+  const releaseSrc = read("apps/web/src/hooks/use-deferred-dialog-selection.ts");
+  assert(
+    releaseSrc.includes('removeProperty("pointer-events")'),
+    "releaseBodyPointerEvents must clear stuck body pointer-events after typeahead pick",
+  );
+  const homeFlutterFull = read("apps/mobile/lib/features/home/home_page.dart");
+  assert(
+    /borderRadius:\s*BorderRadius\.zero/.test(homeFlutterFull) &&
+      homeFlutterFull.includes("dama-play-rail-compose"),
+    "flutter home compose must be full-bleed (BorderRadius.zero)",
+  );
+  assert(
+    /top:\s*_composeSheet\s*\?\s*_composeDrag/.test(homeFlutterFull),
+    "flutter home compose must stretch to top of stack",
+  );
+  assert(
+    homeFlutterFull.includes("_railComposeOpen") &&
+      homeFlutterFull.includes("onComposeChromeChanged") &&
+      /appBar:\s*_railComposeOpen\s*\?\s*null/.test(homeFlutterFull) &&
+      /top:\s*!_railComposeOpen/.test(homeFlutterFull),
+    "flutter home must hide AppBar + top SafeArea while compose so sheet reaches screen top",
+  );
+  const flutterFabFull = read("apps/mobile/lib/features/home/show_play_rail_sheet.dart");
+  assert(
+    flutterFabFull.includes("BorderRadius.zero") &&
+      flutterFabFull.includes("dama-fab-play-rail-compose"),
+    "flutter FAB compose must be full-bleed (BorderRadius.zero)",
+  );
+  assert(
+    /top:\s*!_compose/.test(flutterFabFull),
+    "flutter FAB compose must drop top SafeArea while open",
+  );
   const smartHost = read("apps/web/src/components/play/SmartBoardHost.tsx");
   assert(smartHost.includes("railComposeSheet"), "smart board must tuck when compose opens");
-  assert(smartHost.includes("suppressSmartBoardPop") || smartHost.includes("tuckBoard"), "smart board must tuck for FAB sheet too");
-  assert(/topped\s*=\s*Boolean\(live\s*&&\s*expanded\s*&&\s*!tuckBoard\)/.test(smartHost), "board pop must tuck on same render as compose (not only in useEffect)");
-  assert(smartHost.includes("PLAY_RAIL_MIN_PX") || smartHost.includes("dama-play-rail-min"), "popped board must reserve min rail height so fields stay tappable");
-  assert(shellUi.includes("dama-play-rail-min") || shellUi.includes("min-h-[var(--dama-play-rail-min"), "play rail must keep min height under popped board");
+  assert(
+    smartHost.includes("suppressSmartBoardPop") || smartHost.includes("tuckBoard"),
+    "smart board must tuck for FAB sheet too",
+  );
+  assert(
+    /topped\s*=\s*Boolean\(live\s*&&\s*expanded\s*&&\s*!tuckBoard\)/.test(smartHost),
+    "board pop must tuck on same render as compose (not only in useEffect)",
+  );
+  assert(
+    smartHost.includes("PLAY_RAIL_MIN_PX") || smartHost.includes("dama-play-rail-min"),
+    "popped board must reserve min rail height so fields stay tappable",
+  );
+  assert(
+    shellUi.includes("dama-play-rail-min") || shellUi.includes("min-h-[var(--dama-play-rail-min"),
+    "play rail must keep min height under popped board",
+  );
   const shellChrome = read("apps/web/src/store/shell-chrome.ts");
   assert(shellChrome.includes("railComposeSheet"), "shell chrome must expose railComposeSheet");
-  assert(shellChrome.includes("suppressSmartBoardPop"), "shell chrome must expose suppressSmartBoardPop");
+  assert(
+    shellChrome.includes("suppressSmartBoardPop"),
+    "shell chrome must expose suppressSmartBoardPop",
+  );
   const bottomNav = read("apps/web/src/components/nav/BottomNavBar.tsx");
-  assert(!/hideBottomNav\s*=\s*immersiveChat\s*\|\|\s*railComposeSheet/.test(bottomNav), "bottom nav must not unmount on compose (focus jump)");
-  assert(bottomNav.includes("hideBottomNav = immersiveChat"), "bottom nav hide only for immersive chat");
+  assert(
+    !/hideBottomNav\s*=\s*immersiveChat\s*\|\|\s*railComposeSheet/.test(bottomNav),
+    "bottom nav must not unmount on compose (focus jump)",
+  );
+  assert(
+    bottomNav.includes("hideBottomNav = immersiveChat"),
+    "bottom nav hide only for immersive chat",
+  );
   const homeHub = read("apps/web/src/components/home/HomePlayHub.tsx");
-  assert(homeHub.includes("setSuppressSmartBoardPop"), "home hub must suppress board pop when FAB sheet opens");
+  assert(
+    homeHub.includes("setSuppressSmartBoardPop"),
+    "home hub must suppress board pop when FAB sheet opens",
+  );
   assert(homeHub.includes("z-[75]"), "FAB play-rail Sheet must sit above board pop");
   const homeFlutter = read("apps/mobile/lib/features/home/home_page.dart");
-  assert(homeFlutter.includes("_composeSheet") || homeFlutter.includes("onComposeSheetChanged"), "flutter home must host compose sheet");
+  assert(
+    homeFlutter.includes("_composeSheet") || homeFlutter.includes("onComposeSheetChanged"),
+    "flutter home must host compose sheet",
+  );
   assert(homeFlutter.includes("suppressExpand"), "flutter home must tuck smart board on compose");
-  assert(homeFlutter.includes("Always mount backdrop") || homeFlutter.includes("dama-play-rail-compose"), "flutter home backdrop must stay mounted for focus");
+  assert(
+    homeFlutter.includes("Always mount backdrop") || homeFlutter.includes("dama-play-rail-compose"),
+    "flutter home backdrop must stay mounted for focus",
+  );
   const flutterShell = read("apps/mobile/lib/features/game/smart_board_shell.dart");
-  assert(flutterShell.includes("railMin") || flutterShell.includes("220.0"), "flutter popped board must leave rail min height for compose fields");
+  assert(
+    flutterShell.includes("railMin") || flutterShell.includes("220.0"),
+    "flutter popped board must leave rail min height for compose fields",
+  );
   const flutterFabSheet = read("apps/mobile/lib/features/home/show_play_rail_sheet.dart");
-  assert(flutterFabSheet.includes("onComposeSheetChanged"), "flutter FAB play rail sheet must support compose");
-  assert(flutterFabSheet.includes("Always mount backdrop") || flutterFabSheet.includes("dama-fab-play-rail-compose"), "flutter FAB backdrop must stay mounted for focus");
+  assert(
+    flutterFabSheet.includes("onComposeSheetChanged"),
+    "flutter FAB play rail sheet must support compose",
+  );
+  assert(
+    flutterFabSheet.includes("Always mount backdrop") ||
+      flutterFabSheet.includes("dama-fab-play-rail-compose"),
+    "flutter FAB backdrop must stay mounted for focus",
+  );
   for (const f of [
     "apps/web/src/components/play-rail/CreateChallengeForm.tsx",
     "apps/web/src/components/play-rail/GamesPanel.tsx",
@@ -402,8 +616,14 @@ async function main() {
   const kaw = (flutter.match(/KeyboardAwareTextField\(/g) || []).length;
   assert(kaw === 4, `flutter must have 4 KeyboardAwareTextField, got ${kaw}`);
   assert(flutter.includes("playRailScrollPadding"), "flutter must pad for viewInsets");
-  assert(flutter.includes("onComposeSheetChanged") || flutter.includes("onComposeFocus"), "flutter rail must request compose sheet");
-  assert(!/\bTextField\(/.test(flutter.replace(/KeyboardAwareTextField\(/g, "KAW(")), "no raw TextField left in play rail");
+  assert(
+    flutter.includes("onComposeSheetChanged") || flutter.includes("onComposeFocus"),
+    "flutter rail must request compose sheet",
+  );
+  assert(
+    !/\bTextField\(/.test(flutter.replace(/KeyboardAwareTextField\(/g, "KAW(")),
+    "no raw TextField left in play rail",
+  );
   const adminShell = read("apps/admin/src/components/console/AdminConsoleShell.tsx");
   assert(adminShell.includes("useTextInputKeyboardScroll"), "admin shell must bind helper");
 

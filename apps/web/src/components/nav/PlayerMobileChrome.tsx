@@ -14,6 +14,7 @@ import {
 } from "@/lib/player-shell-ui";
 import { cn } from "@/lib/utils";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import { useRef } from "react";
 
 /**
@@ -29,10 +30,12 @@ export function PlayerMobileChrome({ lockToViewport = false }: { lockToViewport?
   usePublishHeightCssVar(headerRef, DAMA_MOBILE_HEADER_HEIGHT_VAR, true);
   const hydrated = useAuthHydrated();
   const token = useAuthStore((s) => s.token);
+  // Play-rail compose is full-bleed; hide chrome + spacer so no header band remains above.
+  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
 
   return (
     <>
-      {lockToViewport ? (
+      {lockToViewport && !railComposeSheet ? (
         // Spacer matches max-lg:fixed so content does not slide under the chrome.
         <div
           className="shrink-0 max-lg:block lg:hidden"
@@ -48,9 +51,11 @@ export function PlayerMobileChrome({ lockToViewport = false }: { lockToViewport?
             ? // Fixed on phone/tablet only - never sticky there (sticky+scroll fights on iOS).
               "max-lg:!fixed max-lg:inset-x-0 max-lg:top-0 max-lg:z-[50] max-lg:bg-[var(--dama-card)] max-lg:[touch-action:none] max-lg:[overscroll-behavior:none] max-lg:[transform:translate3d(0,0,0)] lg:sticky lg:top-0 lg:z-50"
             : playerStickyHeaderClass,
+          railComposeSheet && "max-lg:!hidden",
         )}
         data-dama-shell-header=""
         data-skip-hide-on-scroll=""
+        aria-hidden={railComposeSheet || undefined}
       >
         <div className={playerHeaderInnerClass}>
           <div className="flex min-w-0 items-center gap-2 md:hidden">

@@ -574,8 +574,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                   math.min(constraints.maxWidth, constraints.maxHeight);
               final cell = side / size;
               final active = _active;
-              // Match resting FractionallySizedBox 0.98 of cell (pick→put size stable).
-              final piece = cell * 0.98;
+              // Match resting FractionallySizedBox 0.78 of cell (web DraughtsBoard2D).
+              final piece = cell * 0.78;
               // Fly overlay only - avoids rebuilding the full 10×10 grid every frame.
               final Widget? fly = active == null
                   ? null
@@ -683,12 +683,13 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                           : (isLast && !selected && !must && !isTarget
                               ? lastHi
                               : hi);
-                      // Quiet = web DraughtsBoard2D quietShade; cues stay flat hi/lastHi.
+                      // Quiet = web DraughtsBoard2D quietShade (160deg + inset rim).
                       final isQuiet = !squareHighlighted;
                       final base = dark ? tokens.boardDark : tokens.boardLight;
+                      // CSS linear-gradient(160deg) ≈ this axis (not pure 135° diagonal).
                       final quietGradient = LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                        begin: const Alignment(-0.34, -1.0),
+                        end: const Alignment(0.34, 1.0),
                         colors: dark
                             ? [
                                 Color.lerp(base, Colors.white, 0.18) ?? base,
@@ -727,6 +728,19 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
+                                // Web inset rim: inset 0 1px 0 white mix.
+                                if (isQuiet)
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    top: 0,
+                                    height: 1,
+                                    child: ColoredBox(
+                                      color: Colors.white.withValues(
+                                        alpha: dark ? 0.10 : 0.35,
+                                      ),
+                                    ),
+                                  ),
                                 ..._boardCoordLabels(
                                   row: row,
                                   col: col,
@@ -756,8 +770,9 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                                   ),
                                 if (player != null && !hidePiece)
                                   FractionallySizedBox(
-                                    widthFactor: 0.98,
-                                    heightFactor: 0.98,
+                                    // Web DraughtsBoard2D PieceDisc wrapper is 78% of cell.
+                                    widthFactor: 0.78,
+                                    heightFactor: 0.78,
                                     // Square fill is the movable cue - no under-piece ring.
                                     child: _PieceDisc(
                                       player: player,

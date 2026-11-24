@@ -1,23 +1,10 @@
 "use client";
 
-import { BoardSquareCoords } from "@/components/game/BoardSquareCoords";
+import DraughtsBoard2D from "@/components/game/DraughtsBoard2D";
 import { PalacePieceMark } from "@/components/game/PalacePieceMark";
+import { buildInitialBoard } from "@/lib/initial-board";
 import { cn } from "@/lib/utils";
-
-const SIZE = 10;
-
-/** Dark squares are playable (bottom-left dark for White). */
-function isDark(row: number, col: number): boolean {
-  return (row + col) % 2 === 1;
-}
-
-/** FMJD 10×10 starting men: dark on top rows, light on bottom rows. */
-function pieceAt(row: number, col: number): "dark" | "light" | null {
-  if (!isDark(row, col)) return null;
-  if (row < 4) return "dark";
-  if (row > 5) return "light";
-  return null;
-}
+import { useMemo } from "react";
 
 function SeatRow({
   label,
@@ -76,67 +63,66 @@ type HomePreviewBoardProps = {
   playerLabel?: string;
   clockLabel?: string;
   className?: string;
+  /** FMJD size (default 10). */
+  boardSize?: number;
+  /** Setup rows per side (default 4). */
+  setupRows?: number;
 };
 
 /**
- * Static marketing board - Neo court pieces on 10×10.
+ * Idle / marketing 2D board - same surface as live DraughtsBoard2D
+ * (quietShade gradients, underplane, Neo pieces, 78% scale). Non-interactive.
  */
 export function HomePreviewBoard({
   opponentLabel,
   playerLabel,
   clockLabel,
   className,
+  boardSize = 10,
+  setupRows = 4,
 }: HomePreviewBoardProps) {
   const top = (opponentLabel || "").trim();
   const bottom = (playerLabel || "").trim();
   const clock = (clockLabel || "").trim();
+  const board = useMemo(() => buildInitialBoard(boardSize, setupRows), [boardSize, setupRows]);
+
+  const plane =
+    board.length > 0 ? (
+      // Identical host + props shape to LivePlayHub idle/spectate 2D (no className overrides).
+      <div
+        className="relative h-full w-full overflow-hidden"
+        role="img"
+        aria-label={bottom || top || "board"}
+      >
+        <DraughtsBoard2D
+          board={board}
+          legalMoves={[]}
+          selected={null}
+          onSelectSquare={() => {}}
+          interactive={false}
+          mustContinue={null}
+          flipBoard={false}
+          moveHistory={[]}
+          yourPlayer={1}
+          replayMode
+        />
+      </div>
+    ) : null;
+
+  if (!top && !bottom) {
+    return <div className={cn("h-full min-h-0 w-full", className)}>{plane}</div>;
+  }
 
   return (
     <div className={cn("mx-auto flex h-full min-h-0 w-full max-w-full flex-col", className)}>
       {top ? (
-        <div className="mb-2.5">
+        <div className="mb-2.5 shrink-0">
           <SeatRow label={top} clock={clock || undefined} tone="muted" pieceSide="dark" />
         </div>
       ) : null}
-      <div
-        className="dama-home-board relative aspect-square max-h-full min-h-0 w-full max-w-full overflow-hidden"
-        role="img"
-        aria-label={bottom || top || "board"}
-      >
-        <div className="grid h-full w-full" style={{ gridTemplateColumns: `repeat(${SIZE}, 1fr)` }}>
-          {Array.from({ length: SIZE * SIZE }, (_, i) => {
-            const row = Math.floor(i / SIZE);
-            const col = i % SIZE;
-            const dark = isDark(row, col);
-            const piece = pieceAt(row, col);
-            return (
-              <div
-                key={`sq-${row}-${col}`}
-                className={cn(
-                  "relative flex items-center justify-center",
-                  dark ? "bg-[var(--dama-board-dark)]" : "bg-[var(--dama-board-light)]",
-                )}
-              >
-                <BoardSquareCoords row={row} col={col} boardSize={SIZE} isDark={dark} />
-                {piece ? (
-                  <span
-                    className="relative block h-[98%] w-[98%] drop-shadow-sm transition-transform duration-300 hover:scale-105"
-                    aria-hidden
-                  >
-                    <PalacePieceMark
-                      player={piece === "light" ? 1 : 2}
-                      isKing={false}
-                      className="inset-0"
-                    />
-                  </span>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <div className="min-h-0 flex-1">{plane}</div>
       {bottom ? (
-        <div className="mt-2.5">
+        <div className="mt-2.5 shrink-0">
           <SeatRow label={bottom} clock={clock || undefined} tone="strong" pieceSide="light" />
         </div>
       ) : null}

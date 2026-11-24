@@ -702,10 +702,12 @@ class _PlayRailPanelState extends State<PlayRailPanel>
     _playerSearchDebounce = Timer(Duration(milliseconds: ms), () {
       if (!mounted) return;
       setState(() => _playerSearch = v);
-      unawaited(_loadRailPlayerSuggest(v));
       if (_gamesSub == 0) {
+        // Watch: list + typeahead share GET /games/live?q= seats (not GET /players).
         unawaited(_loadLiveGames());
       } else {
+        // History: typeahead still from GET /players?q=; list from /matches/me?q=.
+        unawaited(_loadRailPlayerSuggest(v));
         unawaited(_loadHistory());
       }
     });
@@ -802,11 +804,45 @@ class _PlayRailPanelState extends State<PlayRailPanel>
     return ranked.map((e) => e.p).toList();
   }
 
+  /// Unique seated players from loaded Watch live rows (listable PvP only).
+  List<RailPlayer> _liveSeatPlayers() {
+    final seen = <String>{};
+    final out = <RailPlayer>[];
+    for (final g in _liveGames) {
+      for (final s in g.seats) {
+        final id = s.id.trim();
+        final username = s.username.trim();
+        if (id.isEmpty || username.isEmpty || seen.contains(id)) continue;
+        seen.add(id);
+        out.add(
+          RailPlayer(
+            id: id,
+            username: username,
+            rating: s.rating ?? 0,
+            wins: s.wins,
+            losses: s.losses,
+            avatarThumbUrl: s.avatarThumbUrl,
+            online: true,
+            playing: true,
+            playingGameId: g.id,
+            countryCode: s.countryCode,
+            hostTrustTier: s.hostTrustTier,
+            hostTrustBadge: s.hostTrustBadge,
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
   List<RailPlayer> _playerTypeaheadSuggestions() {
     final q = _playerSearch.trim();
     if (q.isEmpty) return const [];
-    // Games Watch/History: debounce panel from GET /players?q= only.
+    // Games Watch: seats from /games/live only. History: GET /players?q=.
     if (widget.tab == 1) {
+      if (_gamesSub == 0) {
+        return _rankUsernameMatches(_liveSeatPlayers(), q);
+      }
       return _railPlayerSuggest;
     }
     if (_playersSub == 2) {
@@ -1436,7 +1472,17 @@ class _PlayRailPanelState extends State<PlayRailPanel>
           _liveNextSkip = page.nextSkip;
           _liveHasMore = page.hasMore;
         });
-        if (_liveHasMore && list.isNotEmpty) _maybeFillActiveList();
+        if (_liveHasMore && list.isNotEmpty) {
+          if (_playerSearch.trim().isNotEmpty) {
+            // Drain every /games/live?q= page so Watch typeahead is not first-page-only.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _playerSearch.trim().isEmpty) return;
+              unawaited(_loadLiveGames(reset: false));
+            });
+          } else {
+            _maybeFillActiveList();
+          }
+        }
       }
     } catch (_) {
       if (mounted && reset) setState(() => _liveGames = const []);

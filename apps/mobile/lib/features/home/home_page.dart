@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:dama_mobile/core/board_square.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/cup_lifecycle.dart';
 import 'package:dama_mobile/core/errors/api_user_message.dart';
@@ -23,6 +22,7 @@ import 'package:dama_mobile/features/auth/practice_token.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
 import 'package:dama_mobile/features/events/events_shell.dart';
 import 'package:dama_mobile/features/game/cubit/feature_flags_cubit.dart';
+import 'package:dama_mobile/features/game/draughts_board_2d.dart';
 import 'package:dama_mobile/features/game/draughts_board_3d.dart';
 import 'package:dama_mobile/features/game/play_board_frame.dart';
 import 'package:dama_mobile/features/game/smart_board_shell.dart';
@@ -89,6 +89,9 @@ class _HomePageState extends State<HomePage> {
   List<MatchClockPreset> _timeControlPresets = const [];
   bool _timeControlsLoading = true;
   int _playTab = 0; // 0 = New Game, 1 = Games, 2 = Players
+  /// Phone/tablet compose: hide AppBar + top SafeArea so the sheet reaches screen top.
+  bool _railComposeOpen = false;
+
   /// Players sub: 0 friends, 1 requests, 2 all (notification deep-link).
   int _playersSub = 2;
   String? _dmDeepLinkRequestId;
@@ -1031,120 +1034,126 @@ class _HomePageState extends State<HomePage> {
     final signInLabel = (_authChrome?.navSignInLabel ?? '').trim();
     final signOutLabel = (_authChrome?.signOutActionLabel ?? '').trim();
     return Scaffold(
-      appBar: AppBar(
-        leading: PlayerRailMenuLeading.maybe(context),
-        title: DamaBrandTitle(title: _brandName),
-        actions: [
-          BlocBuilder<AuthCubit, AuthState>(
-            builder: (context, state) {
-              if (!state.isAuthenticated) {
-                if (signInLabel.isEmpty) return const SizedBox.shrink();
-                return TextButton(
-                  onPressed: () {
-                    unawaited(showSignInDialog(context));
-                  },
-                  child: Text(signInLabel),
-                );
-              }
-              final token = (state.token ?? '').trim();
-              // Google OAuth chrome only - never fall back to account username.
-              final displayName = (state.displayName ?? '').trim();
-              final avatarUrl = (state.avatarUrl ?? '').trim();
-              final mark = displayName;
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (token.isNotEmpty)
-                    NotificationBellButton(
-                      accessToken: token,
-                      onNavigateHref: (href) {
-                        unawaited(
-                          navigateNotificationHref(
-                            context,
-                            href: href,
+      appBar: _railComposeOpen
+          ? null
+          : AppBar(
+              leading: PlayerRailMenuLeading.maybe(context),
+              title: DamaBrandTitle(title: _brandName),
+              actions: [
+                BlocBuilder<AuthCubit, AuthState>(
+                  builder: (context, state) {
+                    if (!state.isAuthenticated) {
+                      if (signInLabel.isEmpty) return const SizedBox.shrink();
+                      return TextButton(
+                        onPressed: () {
+                          unawaited(showSignInDialog(context));
+                        },
+                        child: Text(signInLabel),
+                      );
+                    }
+                    final token = (state.token ?? '').trim();
+                    // Google OAuth chrome only - never fall back to account username.
+                    final displayName = (state.displayName ?? '').trim();
+                    final avatarUrl = (state.avatarUrl ?? '').trim();
+                    final mark = displayName;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (token.isNotEmpty)
+                          NotificationBellButton(
                             accessToken: token,
+                            onNavigateHref: (href) {
+                              unawaited(
+                                navigateNotificationHref(
+                                  context,
+                                  href: href,
+                                  accessToken: token,
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
-                    ),
-                  PopupMenuButton<String>(
-                    tooltip: mark.isNotEmpty ? mark : null,
-                    onSelected: (value) async {
-                      final nav = Navigator.of(context);
-                      final auth = context.read<AuthCubit>();
-                      if (value == 'profile') {
-                        final tok = await _ensureToken();
-                        if (!mounted || tok == null) return;
-                        await nav.push(
-                          MaterialPageRoute(
-                            builder: (_) => ProfilePage(accessToken: tok),
-                          ),
-                        );
-                        return;
-                      }
-                      if (value == 'wallet') {
-                        final tok = await _ensureToken();
-                        if (!mounted || tok == null) return;
-                        await nav.push(
-                          MaterialPageRoute(
-                            builder: (_) => WalletPage(token: tok),
-                          ),
-                        );
-                        return;
-                      }
-                      if (value == 'logout') {
-                        await auth.logout();
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      if (_profileNavTitle.isNotEmpty)
-                        PopupMenuItem(
-                          value: 'profile',
-                          child: Text(_profileNavTitle),
-                        ),
-                      if (_dashboardNavTitle.isNotEmpty)
-                        PopupMenuItem(
-                          value: 'wallet',
-                          child: Text(_dashboardNavTitle),
-                        ),
-                      if (signOutLabel.isNotEmpty)
-                        PopupMenuItem(
-                          value: 'logout',
-                          child: Text(signOutLabel),
-                        ),
-                    ],
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          DamaUserAvatar(
-                            imageUrl: avatarUrl.isNotEmpty ? avatarUrl : null,
-                            radius: 14,
-                          ),
-                          if (displayName.isNotEmpty) ...[
-                            const SizedBox(width: 6),
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 96),
-                              child: Text(
-                                displayName,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelLarge,
+                        PopupMenuButton<String>(
+                          tooltip: mark.isNotEmpty ? mark : null,
+                          onSelected: (value) async {
+                            final nav = Navigator.of(context);
+                            final auth = context.read<AuthCubit>();
+                            if (value == 'profile') {
+                              final tok = await _ensureToken();
+                              if (!mounted || tok == null) return;
+                              await nav.push(
+                                MaterialPageRoute(
+                                  builder: (_) => ProfilePage(accessToken: tok),
+                                ),
+                              );
+                              return;
+                            }
+                            if (value == 'wallet') {
+                              final tok = await _ensureToken();
+                              if (!mounted || tok == null) return;
+                              await nav.push(
+                                MaterialPageRoute(
+                                  builder: (_) => WalletPage(token: tok),
+                                ),
+                              );
+                              return;
+                            }
+                            if (value == 'logout') {
+                              await auth.logout();
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            if (_profileNavTitle.isNotEmpty)
+                              PopupMenuItem(
+                                value: 'profile',
+                                child: Text(_profileNavTitle),
                               ),
-                            ),
+                            if (_dashboardNavTitle.isNotEmpty)
+                              PopupMenuItem(
+                                value: 'wallet',
+                                child: Text(_dashboardNavTitle),
+                              ),
+                            if (signOutLabel.isNotEmpty)
+                              PopupMenuItem(
+                                value: 'logout',
+                                child: Text(signOutLabel),
+                              ),
                           ],
-                          const Icon(Icons.arrow_drop_down, size: 20),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          const ThemeToggleButton(),
-        ],
-      ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                DamaUserAvatar(
+                                  imageUrl:
+                                      avatarUrl.isNotEmpty ? avatarUrl : null,
+                                  radius: 14,
+                                ),
+                                if (displayName.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  ConstrainedBox(
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 96),
+                                    child: Text(
+                                      displayName,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelLarge,
+                                    ),
+                                  ),
+                                ],
+                                const Icon(Icons.arrow_drop_down, size: 20),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const ThemeToggleButton(),
+              ],
+            ),
       body: _liveAiToken != null &&
               _liveAiDepth != null &&
               _liveAiTimeControlSeconds != null
@@ -1159,6 +1168,7 @@ class _HomePageState extends State<HomePage> {
               }),
             )
           : SafeArea(
+              top: !_railComposeOpen,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   Widget hubBody() {
@@ -1194,6 +1204,10 @@ class _HomePageState extends State<HomePage> {
                           initialDmRequestId: _dmDeepLinkRequestId,
                           initialDmThreadId: _dmDeepLinkThreadId,
                           aiDepth: _aiDepth,
+                          onComposeChromeChanged: (open) {
+                            if (_railComposeOpen == open) return;
+                            setState(() => _railComposeOpen = open);
+                          },
                           onTab: (i) => setState(() => _playTab = i),
                           onDepth: (d) => setState(() => _aiDepth = d),
                           onPlayAi: (timeControlSeconds) async {
@@ -1369,6 +1383,7 @@ class _HomePlayHub extends StatefulWidget {
     this.initialDmRequestId,
     this.initialDmThreadId,
     required this.aiDepth,
+    this.onComposeChromeChanged,
     required this.onTab,
     required this.onDepth,
     required this.onPlayAi,
@@ -1401,6 +1416,9 @@ class _HomePlayHub extends StatefulWidget {
   final String? initialDmRequestId;
   final String? initialDmThreadId;
   final int? aiDepth;
+
+  /// Notify scaffold host so AppBar/SafeArea can yield full-bleed compose.
+  final ValueChanged<bool>? onComposeChromeChanged;
   final ValueChanged<int> onTab;
   final ValueChanged<int?> onDepth;
   final Future<void> Function(int timeControlSeconds) onPlayAi;
@@ -1434,6 +1452,7 @@ class _HomePlayHubState extends State<_HomePlayHub> {
       _composeSheet = open;
       _composeDrag = 0;
     });
+    widget.onComposeChromeChanged?.call(open);
     // Tuck SmartBoardShell pop so compose sits above the board (web parity).
     SmartBoardShell.suppressExpand.value = open;
     if (!open) {
@@ -1574,13 +1593,14 @@ class _HomePlayHubState extends State<_HomePlayHub> {
               // Keep rail compact so the board can use full width on phone/tablet.
               final railH = (basis * 0.30).clamp(200.0, 340.0);
               final tokens = Theme.of(context).colorScheme;
+              // Full-bleed when compose (no top radius gap showing the board).
+              final topInset =
+                  _composeSheet ? MediaQuery.viewPaddingOf(context).top : 0.0;
               final railShell = Material(
                 color: tokens.surface,
                 elevation: _composeSheet ? 10 : 0,
                 clipBehavior: Clip.antiAlias,
-                borderRadius: _composeSheet
-                    ? const BorderRadius.vertical(top: Radius.circular(16))
-                    : BorderRadius.zero,
+                borderRadius: BorderRadius.zero,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1591,7 +1611,7 @@ class _HomePlayHubState extends State<_HomePlayHub> {
                       child: Opacity(
                         opacity: _composeSheet ? 1 : 0,
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 6, 4, 4),
+                          padding: EdgeInsets.fromLTRB(8, 6 + topInset, 4, 4),
                           child: Row(
                             children: [
                               Expanded(
@@ -1677,6 +1697,7 @@ class _HomePlayHubState extends State<_HomePlayHub> {
                     curve: Curves.easeOutCubic,
                     left: 0,
                     right: 0,
+                    // Full stack height to the top (web compose top-0 parity).
                     bottom: _composeSheet ? -_composeDrag : 0,
                     top: _composeSheet ? _composeDrag : null,
                     height: _composeSheet ? null : railH,
@@ -1936,19 +1957,34 @@ class _HomePreviewBoard extends StatelessWidget {
   final String vsLabel;
 
   static const _size = 10;
+  static const _setupRows = 4;
 
-  bool _isDark(int row, int col) => (row + col).isOdd;
-
-  String? _piece(int row, int col) {
-    if (!_isDark(row, col)) return null;
-    if (row < 4) return 'dark';
-    if (row > 5) return 'light';
-    return null;
+  /// FMJD dark-square start - same contract as web `buildInitialBoard`.
+  static List<List<dynamic>> _initialBoard() {
+    final board = <List<dynamic>>[];
+    for (var row = 0; row < _size; row++) {
+      final line = <dynamic>[];
+      for (var col = 0; col < _size; col++) {
+        final playable = (row + col).isOdd;
+        if (!playable) {
+          line.add(null);
+          continue;
+        }
+        if (row < _setupRows) {
+          line.add(<String, dynamic>{'p': 2, 'k': false});
+        } else if (row >= _size - _setupRows) {
+          line.add(<String, dynamic>{'p': 1, 'k': false});
+        } else {
+          line.add(null);
+        }
+      }
+      board.add(line);
+    }
+    return board;
   }
 
   @override
   Widget build(BuildContext context) {
-    final tokens = damaColorsOf(context);
     final frame = PlayBoardFrame(
       vsLabel: vsLabel,
       topSeat: opponentLabel.trim().isNotEmpty
@@ -1969,75 +2005,19 @@ class _HomePreviewBoard extends StatelessWidget {
               clockActive: true,
             )
           : const SizedBox.shrink(),
-      board: GridView.builder(
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: _size,
-        ),
-        itemCount: _size * _size,
-        itemBuilder: (context, i) {
-          final row = i ~/ _size;
-          final col = i % _size;
-          final dark = _isDark(row, col);
-          final piece = _piece(row, col);
-          final ink = boardCoordUsesLightInk(dark)
-              ? tokens.boardLight
-              : tokens.boardDark;
-          final showRank = isVisualLeftFile(col, _size, false);
-          final showFile = isVisualBottomRank(row, _size, false);
-          const coordStyle = TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            height: 1,
-          );
-          return ColoredBox(
-            color: dark ? tokens.boardDark : tokens.boardLight,
-            child: Stack(
-              children: [
-                if (showRank)
-                  Positioned(
-                    left: 3,
-                    top: 2,
-                    child: Text(
-                      '${boardRankNumber(row, _size)}',
-                      style: coordStyle.copyWith(color: ink),
-                    ),
-                  ),
-                if (showFile)
-                  Positioned(
-                    right: 3,
-                    bottom: 2,
-                    child: Text(
-                      boardFileLetter(col),
-                      style: coordStyle.copyWith(color: ink),
-                    ),
-                  ),
-                if (piece != null)
-                  Center(
-                    child: FractionallySizedBox(
-                      widthFactor: 0.78,
-                      heightFactor: 0.78,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: piece == 'light'
-                              ? tokens.pieceLight
-                              : tokens.pieceDark,
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x33000000),
-                              blurRadius: 2,
-                              offset: Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
+      // Live DraughtsBoard2D surface (quietShade + Neo pieces) - not flat circles.
+      board: DraughtsBoard2D(
+        board: _initialBoard(),
+        boardSize: _size,
+        legalMoves: const [],
+        selectedRow: null,
+        selectedCol: null,
+        onSelectSquare: (_, __) {},
+        interactive: false,
+        flipBoard: false,
+        yourPlayer: 1,
+        moveHistory: const [],
+        replayMode: true,
       ),
     );
     // Same smart maximize / FAB / pop flow as live boards (web parity).

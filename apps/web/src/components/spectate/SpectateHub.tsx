@@ -885,7 +885,15 @@ export default function SpectateHub({
   } else if (showBoardSkeleton) {
     boardInner = <BoardAreaSkeleton />;
   } else if (boardView === "2d") {
-    boardInner = <HomePreviewBoard opponentLabel="" playerLabel="" clockLabel="" />;
+    boardInner = (
+      <HomePreviewBoard
+        opponentLabel=""
+        playerLabel=""
+        clockLabel=""
+        boardSize={boardRulesQuery.data?.size ?? 10}
+        setupRows={boardRulesQuery.data?.setup_rows ?? 4}
+      />
+    );
   } else if (previewBoard.length > 0) {
     boardInner = (
       <DraughtsScene3D

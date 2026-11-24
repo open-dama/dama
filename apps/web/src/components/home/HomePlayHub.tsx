@@ -1411,7 +1411,13 @@ export function HomePlayHub({
                   liveActive && live ? (
                     live.boardNode
                   ) : boardView === "2d" ? (
-                    <HomePreviewBoard opponentLabel="" playerLabel="" clockLabel="" />
+                    <HomePreviewBoard
+                      opponentLabel=""
+                      playerLabel=""
+                      clockLabel=""
+                      boardSize={rulesQuery.data?.size ?? 10}
+                      setupRows={rulesQuery.data?.setup_rows ?? 4}
+                    />
                   ) : previewBoard.length > 0 ? (
                     <DraughtsScene3D
                       board={previewBoard}

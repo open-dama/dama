@@ -54,11 +54,13 @@ export const playRailAsideClass =
 
 /**
  * max-lg compose sheet: expand the same rail over the board (Colors-style front layer).
- * z-[70] sits above SmartBoardHost pop (z-60) and below the maximize FAB (z-80).
+ * Full viewport (`!inset-0`) - covers mobile header; no gap above the sheet.
+ * `!` beats playRailAsideClass `relative` / bottom-nav padding via twMerge.
+ * z-[100] sits above shell header (z-50), board pop (z-60), and maximize FAB (z-80).
  * Keeps `data-dama-rail-scroll` / keyboard pad behavior on the same node.
  */
 export const playRailComposeSheetClass =
-  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[var(--dama-mobile-header-height,3.5rem)] max-lg:z-[70] max-lg:max-h-none max-lg:flex-none max-lg:rounded-t-2xl max-lg:border-t max-lg:border-[var(--dama-border)] max-lg:pb-[env(safe-area-inset-bottom,0px)] max-lg:shadow-[var(--dama-float-shadow)]";
+  "max-lg:!fixed max-lg:!inset-0 max-lg:!z-[100] max-lg:!h-auto max-lg:!max-h-none max-lg:!min-h-0 max-lg:!w-full max-lg:!flex-none max-lg:!rounded-none max-lg:!border-0 max-lg:!pt-[env(safe-area-inset-top,0px)] max-lg:!pb-[env(safe-area-inset-bottom,0px)] max-md:!pb-[env(safe-area-inset-bottom,0px)] max-lg:shadow-[var(--dama-float-shadow)]";
 
 /**
  * Compact tournaments FAB Sheet: fill the Radix dialog (fixed is trapped by its transform).
@@ -68,7 +70,7 @@ export const playRailComposeInDialogClass =
 
 /** Dimmed board layer under the compose sheet (max-lg only). Above board pop, below sheet. */
 export const playRailComposeBackdropClass =
-  "fixed inset-0 z-[69] bg-[var(--dama-overlay)] max-lg:block lg:hidden animate-in fade-in duration-300 ease-out";
+  "fixed inset-0 z-[99] bg-[var(--dama-overlay)] max-lg:block lg:hidden animate-in fade-in duration-300 ease-out";
 
 /** In-dialog dimmer (relative to SheetContent). */
 export const playRailComposeInDialogBackdropClass =

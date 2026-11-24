@@ -10,13 +10,23 @@ import {
   type PlayersSearchRow,
   usePlayersSearchInfinite,
 } from "@/hooks/query/usePlayersSearchQuery";
+import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useMaxLg } from "@/hooks/useMaxLg";
 import { CountryFlag } from "@/lib/country-flag";
 import { formatPlayerNameDisplay, parseSearchDebounceMs } from "@/lib/play-rail-display";
 import { cn } from "@/lib/utils";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import type { PlayRailChromeReady } from "@/types/play-rail-chrome";
 import { Search } from "lucide-react";
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 export type PlayerSearchSuggestion = {
   id: string;
@@ -107,6 +117,25 @@ export function PlayerSearchTypeahead({
   const [highlight, setHighlight] = useState(0);
   const listRef = useRef<HTMLUListElement | null>(null);
   const sentinelRef = useRef<HTMLLIElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  /** Phone/tablet + compose: in-flow list below the field (Radix portal flips above). */
+  const maxLg = useMaxLg();
+  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
+  const [domCompose, setDomCompose] = useState(false);
+  // Re-check ancestor after compose attribute is stamped on the rail.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when store compose flips
+  useLayoutEffect(() => {
+    const sync = () => setDomCompose(Boolean(wrapRef.current?.closest("[data-dama-rail-compose]")));
+    sync();
+    const id = requestAnimationFrame(sync);
+    return () => cancelAnimationFrame(id);
+  }, [railComposeSheet]);
+  // Live mq (not only SSR-stuck useMaxLg=false) so phone never mounts Popover above the field.
+  const liveCompact =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 1023px)").matches;
+  const composeInline = liveCompact || maxLg || railComposeSheet || domCompose;
 
   const serverEnabled =
     enabled && !disabled && !useLocal && serverSearch && open && q.length > 0 && pageSize > 0;
@@ -216,6 +245,9 @@ export function PlayerSearchTypeahead({
   const pick = (player: PlayerSearchSuggestion) => {
     onSelect(player);
     setOpen(false);
+    // Popover/DismissableLayer can leave body { pointer-events: none } after pick.
+    releaseBodyPointerEvents();
+    window.setTimeout(releaseBodyPointerEvents, 0);
   };
 
   /** Keep input focus so the first pointer press activates (blur would cancel click). */
@@ -223,160 +255,188 @@ export function PlayerSearchTypeahead({
     e.preventDefault();
   };
 
-  return (
-    <Popover open={showPanel} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <div className="relative min-w-0 flex-1">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--dama-muted)]"
-            aria-hidden
-          />
-          <Input
-            id={id}
-            value={value}
-            disabled={disabled}
-            autoComplete={autoComplete}
-            aria-invalid={invalid || undefined}
-            placeholder={placeholder}
-            aria-autocomplete="list"
-            aria-expanded={showPanel}
-            aria-controls={showPanel ? `${id ?? "player-typeahead"}-list` : undefined}
-            className={cn("h-9 pl-8 text-sm", inputClassName)}
-            onChange={(e) => {
-              onValueChange(e.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => setOpen(true)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setOpen(false);
-                return;
-              }
-              if (!showPanel) {
-                if (e.key === "Enter") onEnterWithoutSelection?.();
-                return;
-              }
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setHighlight((i) =>
-                  suggestions.length === 0 ? 0 : Math.min(i + 1, suggestions.length - 1),
-                );
-                return;
-              }
-              if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setHighlight((i) => Math.max(i - 1, 0));
-                return;
-              }
-              if (e.key === "Enter") {
-                e.preventDefault();
-                const row = suggestions[highlight];
-                if (row) {
-                  pick(row);
-                } else {
-                  onEnterWithoutSelection?.();
-                }
-              }
-            }}
-          />
-        </div>
-      </PopoverAnchor>
-      <PopoverContent
-        align="start"
-        sideOffset={4}
-        className="w-[var(--radix-popover-trigger-width)] p-1"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        onCloseAutoFocus={(e) => e.preventDefault()}
-        onInteractOutside={(e) => {
-          // Pointer on a suggestion is inside the portal; only dismiss true outsides.
-          setOpen(false);
-          e.preventDefault();
-        }}
+  const listId = `${id ?? "player-typeahead"}-list`;
+
+  const resultsBody =
+    loading && suggestions.length === 0 ? (
+      <div className="space-y-1.5 p-2" aria-busy="true" aria-label={chrome.loading_players}>
+        <ShimmerBlock className="h-10 w-full rounded-md" />
+        <ShimmerBlock className="h-10 w-full rounded-md" />
+        <ShimmerBlock className="h-10 w-full rounded-md" />
+      </div>
+    ) : suggestions.length === 0 ? (
+      <p className="px-2 py-3 text-center text-xs text-[var(--dama-muted)]">
+        {chrome.empty_players}
+      </p>
+    ) : (
+      <ul
+        ref={listRef}
+        id={listId}
+        className="max-h-56 list-none overflow-y-auto"
+        onMouseDown={retainInputFocus}
       >
-        {loading && suggestions.length === 0 ? (
-          <div className="space-y-1.5 p-2" aria-busy="true" aria-label={chrome.loading_players}>
-            <ShimmerBlock className="h-10 w-full rounded-md" />
-            <ShimmerBlock className="h-10 w-full rounded-md" />
-            <ShimmerBlock className="h-10 w-full rounded-md" />
-          </div>
-        ) : suggestions.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs text-[var(--dama-muted)]">
-            {chrome.empty_players}
-          </p>
-        ) : (
-          <ul
-            ref={listRef}
-            id={`${id ?? "player-typeahead"}-list`}
-            className="max-h-56 list-none overflow-y-auto"
-            onMouseDown={retainInputFocus}
+        {suggestions.map((p, i) => {
+          const status = presenceStatusLabel(p.online, p.playing, {
+            online: chrome.online_label,
+            playing: chrome.playing_label,
+            offline: chrome.offline_label,
+          });
+          const active = i === highlight;
+          return (
+            <li key={p.id}>
+              <button
+                type="button"
+                tabIndex={-1}
+                data-typeahead-index={i}
+                aria-selected={active}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
+                  active ? "bg-[var(--dama-hover)]" : "hover:bg-[var(--dama-hover)]",
+                )}
+                onMouseEnter={() => setHighlight(i)}
+                onMouseDown={retainInputFocus}
+                onClick={() => pick(p)}
+              >
+                <span className="relative h-8 w-8 shrink-0 rounded-md">
+                  <DamaUserAvatar src={p.avatar_thumb_url} className="h-8 w-8 rounded-md" />
+                  <OnlineStatusDot online={p.online} playing={p.playing} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate font-medium">
+                      {formatPlayerNameDisplay(
+                        p.username,
+                        chrome.live_player_name_max_chars,
+                        chrome.name_truncate_suffix,
+                      )}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-[var(--dama-muted)]">
+                      {chrome.rating_paren_open}
+                      {p.rating}
+                      {chrome.rating_paren_close}
+                    </span>
+                    <CountryFlag
+                      code={p.country_code}
+                      imageUrlTemplate={chrome.country_flag_image_url_template}
+                    />
+                  </span>
+                  <HostTrustBadge
+                    label={p.host_trust_badge}
+                    tier={p.host_trust_tier}
+                    className="mt-0.5 text-[9px]"
+                  />
+                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--dama-muted)]">
+                    {status}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+        {!useLocal ? <li ref={sentinelRef} className="h-1 w-full" aria-hidden /> : null}
+        {loadingMore ? (
+          <li className="px-2 py-2 text-center text-[10px] text-[var(--dama-muted)]">
+            {chrome.loading_more}
+          </li>
+        ) : null}
+      </ul>
+    );
+
+  const input = (
+    <div className="relative min-w-0 flex-1">
+      <Search
+        className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--dama-muted)]"
+        aria-hidden
+      />
+      <Input
+        id={id}
+        value={value}
+        disabled={disabled}
+        autoComplete={autoComplete}
+        aria-invalid={invalid || undefined}
+        placeholder={placeholder}
+        aria-autocomplete="list"
+        aria-expanded={showPanel}
+        aria-controls={showPanel ? listId : undefined}
+        className={cn("h-9 pl-8 text-sm", inputClassName)}
+        onChange={(e) => {
+          onValueChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            setOpen(false);
+            return;
+          }
+          if (!showPanel) {
+            if (e.key === "Enter") onEnterWithoutSelection?.();
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlight((i) =>
+              suggestions.length === 0 ? 0 : Math.min(i + 1, suggestions.length - 1),
+            );
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((i) => Math.max(i - 1, 0));
+            return;
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const row = suggestions[highlight];
+            if (row) {
+              pick(row);
+            } else {
+              onEnterWithoutSelection?.();
+            }
+          }
+        }}
+      />
+    </div>
+  );
+
+  // Compose: in-flow list BELOW the field (portal collision flipped it above and
+  // outside-click / pointer-events races froze the sheet after pick).
+  if (composeInline) {
+    return (
+      <div ref={wrapRef} className="flex min-w-0 flex-1 flex-col gap-1">
+        {input}
+        {showPanel ? (
+          <div
+            className="overflow-hidden rounded-md border border-[var(--dama-border-strong)] bg-[var(--dama-panel)] p-1 shadow-[var(--dama-float-shadow)]"
+            data-dama-typeahead-inline=""
           >
-            {suggestions.map((p, i) => {
-              const status = presenceStatusLabel(p.online, p.playing, {
-                online: chrome.online_label,
-                playing: chrome.playing_label,
-                offline: chrome.offline_label,
-              });
-              const active = i === highlight;
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    data-typeahead-index={i}
-                    aria-selected={active}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-                      active ? "bg-[var(--dama-hover)]" : "hover:bg-[var(--dama-hover)]",
-                    )}
-                    onMouseEnter={() => setHighlight(i)}
-                    onMouseDown={retainInputFocus}
-                    onClick={() => pick(p)}
-                  >
-                    <span className="relative h-8 w-8 shrink-0 rounded-md">
-                      <DamaUserAvatar src={p.avatar_thumb_url} className="h-8 w-8 rounded-md" />
-                      <OnlineStatusDot online={p.online} playing={p.playing} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate font-medium">
-                          {formatPlayerNameDisplay(
-                            p.username,
-                            chrome.live_player_name_max_chars,
-                            chrome.name_truncate_suffix,
-                          )}
-                        </span>
-                        <span className="shrink-0 text-xs tabular-nums text-[var(--dama-muted)]">
-                          {chrome.rating_paren_open}
-                          {p.rating}
-                          {chrome.rating_paren_close}
-                        </span>
-                        <CountryFlag
-                          code={p.country_code}
-                          imageUrlTemplate={chrome.country_flag_image_url_template}
-                        />
-                      </span>
-                      <HostTrustBadge
-                        label={p.host_trust_badge}
-                        tier={p.host_trust_tier}
-                        className="mt-0.5 text-[9px]"
-                      />
-                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--dama-muted)]">
-                        {status}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-            {!useLocal ? <li ref={sentinelRef} className="h-1 w-full" aria-hidden /> : null}
-            {loadingMore ? (
-              <li className="px-2 py-2 text-center text-[10px] text-[var(--dama-muted)]">
-                {chrome.loading_more}
-              </li>
-            ) : null}
-          </ul>
-        )}
-      </PopoverContent>
-    </Popover>
+            {resultsBody}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} className="min-w-0 flex-1">
+      <Popover open={showPanel} onOpenChange={setOpen}>
+        <PopoverAnchor asChild>{input}</PopoverAnchor>
+        <PopoverContent
+          align="start"
+          side="bottom"
+          sideOffset={4}
+          avoidCollisions={false}
+          className="w-[var(--radix-popover-trigger-width)] p-1"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => {
+            setOpen(false);
+            e.preventDefault();
+          }}
+        >
+          {resultsBody}
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }

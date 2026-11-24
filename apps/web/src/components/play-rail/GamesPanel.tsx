@@ -7,7 +7,10 @@ import { LiveViewersPanel } from "@/components/play-rail/LiveViewersPanel";
 import { PlayRailScrollPort } from "@/components/play-rail/PlayRailScrollPort";
 import { PlayerHoverCard } from "@/components/play-rail/PlayerHoverCard";
 import type { RailPlayer } from "@/components/play-rail/PlayerListRow";
-import { PlayerSearchTypeahead } from "@/components/play-rail/PlayerSearchTypeahead";
+import {
+  type PlayerSearchSuggestion,
+  PlayerSearchTypeahead,
+} from "@/components/play-rail/PlayerSearchTypeahead";
 import type { StackHoverPlayer } from "@/components/play-rail/StackPlayerHover";
 import { HostTrustBadge } from "@/components/trust/HostTrustBadge";
 import { InfiniteListEnd } from "@/components/ui/InfiniteListEnd";
@@ -491,10 +494,63 @@ export function GamesPanel({
     return out;
   }, [historyQuery.data?.pages]);
 
+  /** Watch typeahead = seats in listable live games only (not GET /players). */
+  const watchTypeaheadLocal = useMemo((): PlayerSearchSuggestion[] => {
+    const out: PlayerSearchSuggestion[] = [];
+    const seen = new Set<string>();
+    for (const g of live) {
+      for (const seat of seatPlayers(g)) {
+        const id = (seat.id || "").trim();
+        const username = (seat.username || "").trim();
+        if (!id || !username || seen.has(id)) continue;
+        seen.add(id);
+        out.push({
+          id,
+          username,
+          rating: typeof seat.rating === "number" ? seat.rating : 0,
+          country_code: seat.countryCode ?? null,
+          avatar_thumb_url: seat.avatarThumbUrl ?? null,
+          online: true,
+          playing: true,
+          host_trust_badge: seat.hostTrustBadge ?? null,
+          host_trust_tier: seat.hostTrustTier ?? null,
+        });
+      }
+    }
+    return out;
+  }, [live]);
+
   const activeInfinite = sub === "watch" ? liveQuery : historyQuery;
   const fetchNextPage = useCallback(() => {
     void activeInfinite.fetchNextPage();
   }, [activeInfinite.fetchNextPage]);
+
+  // Watch: drain every /games/live?q= page while searching so typeahead is not first-page-only
+  // (LiveViewersPanel parity - suggestions come from the same live set as the list).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pages.length retriggers drain after each fetch
+  useEffect(() => {
+    if (!active || sub !== "watch" || viewersGameId || !debouncedQ.trim()) return;
+    if (
+      !liveQuery.hasNextPage ||
+      liveQuery.isFetchingNextPage ||
+      liveQuery.isPending ||
+      liveQuery.isError
+    ) {
+      return;
+    }
+    void liveQuery.fetchNextPage();
+  }, [
+    active,
+    sub,
+    viewersGameId,
+    debouncedQ,
+    liveQuery.hasNextPage,
+    liveQuery.isFetchingNextPage,
+    liveQuery.isPending,
+    liveQuery.isError,
+    liveQuery.data?.pages.length,
+    liveQuery.fetchNextPage,
+  ]);
 
   useInfinitePanelScroll({
     enabled:
@@ -596,8 +652,8 @@ export function GamesPanel({
 
         <div className="flex items-center gap-2 border-b border-[var(--dama-border)] px-3 py-2">
           {/*
-            Debounce panel must hit GET /players?q= (relevance-ranked), never the already-loaded
-            live-game page. Selecting a username drives list q on /games/live or /matches/me.
+            Watch: typeahead ranks seats from GET /games/live?q= (same universe as the list).
+            History: typeahead still uses GET /players?q=; pick drives /matches/me?q=.
           */}
           <PlayerSearchTypeahead
             chrome={chrome}
@@ -609,7 +665,8 @@ export function GamesPanel({
                 : chrome.search_opponent_placeholder || chrome.search_username_placeholder || ""
             }
             enabled={sub === "watch" || signedIn}
-            serverSearch
+            serverSearch={sub !== "watch"}
+            localSuggestions={sub === "watch" ? watchTypeaheadLocal : null}
             onSelect={(p) => setQ(p.username)}
           />
         </div>

@@ -98,6 +98,28 @@ assert(hub.includes('role="tablist"'), "web hub: tablist rail");
 assert(landing.includes("HomePlayHub"), "web /: hub mounted");
 const preview = read("apps/web/src/components/home/HomePreviewBoard.tsx");
 assert(!preview.includes("border-4"), "web preview board: no frame border");
+assert(
+  preview.includes("DraughtsBoard2D") && preview.includes("buildInitialBoard"),
+  "web idle 2D must reuse live DraughtsBoard2D (quietShade/Neo/78% scale) not a flat marketing grid",
+);
+assert(
+  !preview.includes("bg-[var(--dama-board-dark)]") && !preview.includes("hover:scale-105"),
+  "web idle 2D must not use flat square fills or hover-scale pieces",
+);
+const flutterHomePreview = read("apps/mobile/lib/features/home/home_page.dart");
+assert(
+  /class _HomePreviewBoard[\s\S]*DraughtsBoard2D\(/.test(flutterHomePreview),
+  "flutter idle 2D must reuse live DraughtsBoard2D (not flat circle discs)",
+);
+assert(
+  !/class _HomePreviewBoard[\s\S]*BoxShape\.circle/.test(flutterHomePreview),
+  "flutter idle 2D must not paint flat circle pieces",
+);
+const flutterBoard2d = read("apps/mobile/lib/features/game/draughts_board_2d.dart");
+assert(
+  flutterBoard2d.includes("quietGradient") && flutterBoard2d.includes("widthFactor: 0.78"),
+  "flutter live 2D must keep quietShade + 78% piece scale (web DraughtsBoard2D parity)",
+);
 const flagsCubit = read("apps/mobile/lib/features/game/cubit/feature_flags_cubit.dart");
 assert(flagsCubit.includes("/feature-flags"), "flutter flags: REST /feature-flags");
 assert(!flagsCubit.includes("GraphqlClient"), "flutter flags: not GraphQL-only");

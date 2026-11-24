@@ -14,6 +14,7 @@ import {
 } from "@/lib/player-shell-ui";
 import { cn } from "@/lib/utils";
 import { useAuthHydrated, useAuthStore } from "@/store/auth";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import { useRef } from "react";
 
 /** Sticky player header: hamburger (mobile) + brand + theme + identity menu. */
@@ -22,13 +23,19 @@ export function PlayerShellHeader() {
   usePublishHeightCssVar(headerRef, DAMA_MOBILE_HEADER_HEIGHT_VAR, true);
   const hydrated = useAuthHydrated();
   const token = useAuthStore((s) => s.token);
+  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
 
   return (
     <header
       ref={headerRef}
-      className={cn(playerStickyHeaderClass, "shrink-0 overscroll-none")}
+      className={cn(
+        playerStickyHeaderClass,
+        "shrink-0 overscroll-none",
+        railComposeSheet && "max-lg:!hidden",
+      )}
       data-dama-shell-header=""
       data-skip-hide-on-scroll=""
+      aria-hidden={railComposeSheet || undefined}
     >
       <div className={playerHeaderInnerClass}>
         <div className="flex min-w-0 items-center gap-2 md:hidden">

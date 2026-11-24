@@ -107,7 +107,9 @@ export function useDeferredDialogValue<T>(clearMs = DIALOG_CLEAR_MS) {
 
 export function releaseBodyPointerEvents() {
   if (typeof document === "undefined") return;
-  document.body.style.pointerEvents = "";
+  // removeProperty clears Radix dismissable-layer locks; "" alone can leave stale none.
+  document.body.style.removeProperty("pointer-events");
+  document.documentElement.style.removeProperty("pointer-events");
 }
 
 /**
@@ -159,7 +161,9 @@ export function useReleaseStuckBodyPointerEvents() {
   useEffect(() => {
     const clearIfIdle = () => {
       if (typeof document === "undefined") return;
-      if (document.body.style.pointerEvents !== "none") return;
+      const pe =
+        document.body.style.pointerEvents || window.getComputedStyle(document.body).pointerEvents;
+      if (pe !== "none") return;
       // Only keep the body lock while a visible overlay layer is actually open.
       const candidates = document.querySelectorAll(
         [

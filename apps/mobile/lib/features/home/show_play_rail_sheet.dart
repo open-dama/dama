@@ -80,7 +80,10 @@ class _PlayRailSheetHostState extends State<_PlayRailSheetHost> {
     final sheetW = size.width < 440 ? size.width : 440.0;
     final tokens = Theme.of(context).colorScheme;
 
+    final topInset = _compose ? MediaQuery.viewPaddingOf(context).top : 0.0;
+    // Drop top SafeArea while compose so the sheet reaches the screen top.
     return SafeArea(
+      top: !_compose,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -113,9 +116,8 @@ class _PlayRailSheetHostState extends State<_PlayRailSheetHost> {
             child: Material(
               elevation: _compose ? 12 : 8,
               color: tokens.surface,
-              borderRadius: _compose
-                  ? const BorderRadius.vertical(top: Radius.circular(16))
-                  : BorderRadius.zero,
+              // Full-bleed compose - no top radius gap (web top-0 parity).
+              borderRadius: BorderRadius.zero,
               clipBehavior: Clip.antiAlias,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -127,7 +129,7 @@ class _PlayRailSheetHostState extends State<_PlayRailSheetHost> {
                     child: Opacity(
                       opacity: _compose ? 1 : 0,
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 6, 4, 4),
+                        padding: EdgeInsets.fromLTRB(8, 6 + topInset, 4, 4),
                         child: Row(
                           children: [
                             Expanded(

@@ -1,5 +1,6 @@
 "use client";
 
+import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import { useMaxLg } from "@/hooks/useMaxLg";
 import { useTextInputKeyboardScroll } from "@/hooks/useTextInputKeyboardScroll";
 import {
@@ -103,6 +104,7 @@ export function PlayRailAside({ children, className, "aria-label": ariaLabel }: 
     setStoreCompose(false);
     setDragOffset(0);
     dragStartY.current = null;
+    releaseBodyPointerEvents();
     const ae = document.activeElement;
     if (ae instanceof HTMLElement && isCharacterTextField(ae)) {
       ae.blur();
@@ -135,24 +137,8 @@ export function PlayRailAside({ children, className, "aria-label": ariaLabel }: 
       if (!field) return;
       pendingFocusRef.current = field;
       const alreadyOpen = sheetOpenRef.current || useShellChromeStore.getState().railComposeSheet;
-      // Always arm before layout: trailing click can hit Challenge Matchmaking
-      // (or other controls that moved under the finger) and route to /?view=match.
-      const swallowClick = (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        cleanup();
-      };
-      const cleanup = () => {
-        document.removeEventListener("click", swallowClick, true);
-        root.style.removeProperty("pointer-events");
-        field.style.removeProperty("pointer-events");
-        window.clearTimeout(tid);
-      };
-      document.addEventListener("click", swallowClick, true);
-      root.style.pointerEvents = "none";
-      field.style.pointerEvents = "auto";
-      const tid = window.setTimeout(cleanup, 700);
+      // Open once. Do not set pointer-events:none or document click-swallow here -
+      // those froze the sheet / ate typeahead picks. Matchmaking uses shouldBlockMatchmakingNav.
       if (!alreadyOpen) {
         flushSync(() => {
           setSheetOpen(true);
@@ -248,6 +234,21 @@ export function PlayRailAside({ children, className, "aria-label": ariaLabel }: 
     };
   }, [composeActive, restorePendingFocus]);
 
+  // While compose is open, clear any leftover body pointer-events lock (typeahead/popover teardown).
+  useEffect(() => {
+    if (!composeActive) return;
+    releaseBodyPointerEvents();
+    const root = railRootRef.current;
+    const onPtr = () => releaseBodyPointerEvents();
+    root?.addEventListener("pointerdown", onPtr, true);
+    const id = window.setInterval(releaseBodyPointerEvents, 500);
+    return () => {
+      root?.removeEventListener("pointerdown", onPtr, true);
+      window.clearInterval(id);
+      releaseBodyPointerEvents();
+    };
+  }, [composeActive]);
+
   const onHandlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!compose) return;
     dragStartY.current = e.clientY;
@@ -313,12 +314,28 @@ export function PlayRailAside({ children, className, "aria-label": ariaLabel }: 
         onPointerDownCapture={onRailPointerDownCapture}
         onFocusCapture={onRailFocusCapture}
         style={
-          sheetTransform
+          composeActive && !inDialog
             ? {
-                transform: sheetTransform,
-                transitionDuration: "0ms",
+                // Inset-only full bleed (no explicit height - 100dvh+bottom can fight and leave gaps).
+                position: "fixed",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                left: 0,
+                zIndex: 100,
+                width: "100%",
+                height: "auto",
+                maxHeight: "none",
+                minHeight: 0,
+                borderRadius: 0,
+                ...(sheetTransform ? { transform: sheetTransform, transitionDuration: "0ms" } : {}),
               }
-            : undefined
+            : sheetTransform
+              ? {
+                  transform: sheetTransform,
+                  transitionDuration: "0ms",
+                }
+              : undefined
         }
         {...(maxLg || sheetOpen ? { "data-dama-rail-scroll": "" } : {})}
       >
