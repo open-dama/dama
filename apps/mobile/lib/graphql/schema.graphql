@@ -47,6 +47,7 @@ type FeatureFlags {
   prizePoolDisplayEnabled: Boolean!
   prizePoolGuaranteeEnabled: Boolean!
   kycAutoApprove: Boolean!
+  geoPreferDeviceGps: Boolean!
   aiDepths: [Int!]!
 }
 
@@ -64,6 +65,7 @@ type ConsoleFeatureFlags {
   prizePoolDisplayEnabled: Boolean!
   prizePoolGuaranteeEnabled: Boolean!
   kycAutoApprove: Boolean!
+  geoPreferDeviceGps: Boolean!
   aiDepths: [Int!]!
 }
 
