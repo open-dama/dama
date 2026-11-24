@@ -245,7 +245,12 @@ export function PlayerProfileModal({ open, onOpenChange, player, onChallenge }: 
                       playing={Boolean(data?.player?.playing ?? data?.playing ?? player?.playing)}
                     />
                     <div className="min-w-0 flex-1 space-y-4">
-                      {token && view.id !== myId ? (
+                      {/*
+                        Hover card parity (PlayerHoverCard): for non-self, always show CTAs.
+                        Signed out → Add Friend + Challenge disabled; Message hidden; Watch ok.
+                        Signed in → full actions (Message included).
+                      */}
+                      {view.id !== myId ? (
                         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                           {view.playing && (view.playingGameId || "").trim() ? (
                             <Button
@@ -264,7 +269,20 @@ export function PlayerProfileModal({ open, onOpenChange, player, onChallenge }: 
                               </span>
                             </Button>
                           ) : null}
-                          {friendsQuery.isSuccess && !outgoingPendingIds.has(view.id) ? (
+                          {!token ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-10 w-full min-w-0 gap-2 sm:w-auto sm:min-w-[9rem] sm:flex-1"
+                              aria-label={railChrome.send_friend_request_action}
+                              disabled
+                            >
+                              <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
+                              <span className="min-w-0 truncate">
+                                {railChrome.send_friend_request_action}
+                              </span>
+                            </Button>
+                          ) : friendsQuery.isSuccess && !outgoingPendingIds.has(view.id) ? (
                             <Button
                               type="button"
                               variant="outline"
@@ -329,27 +347,31 @@ export function PlayerProfileModal({ open, onOpenChange, player, onChallenge }: 
                               {railChrome.friend_request_outgoing_label}
                             </span>
                           ) : null}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-10 w-full min-w-0 gap-2 sm:w-auto sm:min-w-[9rem] sm:flex-1"
-                            onClick={() =>
-                              setMessageTarget({
-                                id: view.id,
-                                username: view.username,
-                                avatarThumbUrl: view.avatarThumbUrl,
-                                avatarFullUrl: view.avatarFullUrl,
-                              })
-                            }
-                          >
-                            <Mail className="h-4 w-4 shrink-0" aria-hidden />
-                            <span className="min-w-0 truncate">{railChrome.message_action}</span>
-                          </Button>
+                          {token ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-10 w-full min-w-0 gap-2 sm:w-auto sm:min-w-[9rem] sm:flex-1"
+                              onClick={() =>
+                                setMessageTarget({
+                                  id: view.id,
+                                  username: view.username,
+                                  avatarThumbUrl: view.avatarThumbUrl,
+                                  avatarFullUrl: view.avatarFullUrl,
+                                })
+                              }
+                            >
+                              <Mail className="h-4 w-4 shrink-0" aria-hidden />
+                              <span className="min-w-0 truncate">{railChrome.message_action}</span>
+                            </Button>
+                          ) : null}
                           <Button
                             type="button"
                             variant="play"
                             className="h-10 w-full min-w-0 gap-2 sm:w-auto sm:min-w-[9rem] sm:flex-1"
+                            disabled={!token}
                             onClick={() => {
+                              if (!token) return;
                               onOpenChange(false);
                               if (onChallenge) {
                                 onChallenge(view);

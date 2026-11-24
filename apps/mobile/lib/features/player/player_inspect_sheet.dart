@@ -509,106 +509,131 @@ class _PlayerInspectBodyState extends State<_PlayerInspectBody> {
                     },
                   ),
                 ],
+                // Web PlayerProfileModal / hover parity: show CTAs for non-self
+                // even when signed out (Challenge disabled; Message only when signed in).
                 if (_railChrome != null &&
-                    context.read<AuthCubit>().state.isAuthenticated &&
                     context.read<AuthCubit>().state.userId != p.id) ...[
-                  const SizedBox(height: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (p.playing &&
-                          (p.playingGameId ?? '').trim().isNotEmpty) ...[
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            final gid = (p.playingGameId ?? '').trim();
-                            if (gid.isEmpty) return;
-                            final token = context.read<AuthCubit>().state.token;
-                            final nav = Navigator.of(context);
-                            nav.pop();
-                            nav.push(
-                              MaterialPageRoute(
-                                builder: (_) => SpectatePage(
-                                  accessToken: token,
-                                  initialGameId: gid,
-                                ),
+                  Builder(
+                    builder: (ctx) {
+                      final signedIn =
+                          ctx.read<AuthCubit>().state.isAuthenticated;
+                      final rail = _railChrome!;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SizedBox(height: 12),
+                          if (p.playing &&
+                              (p.playingGameId ?? '').trim().isNotEmpty) ...[
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                final gid = (p.playingGameId ?? '').trim();
+                                if (gid.isEmpty) return;
+                                final token = ctx.read<AuthCubit>().state.token;
+                                final nav = Navigator.of(ctx);
+                                nav.pop();
+                                nav.push(
+                                  MaterialPageRoute(
+                                    builder: (_) => SpectatePage(
+                                      accessToken: token,
+                                      initialGameId: gid,
+                                    ),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.visibility_outlined,
+                                  size: 18),
+                              label: Text(
+                                rail.watchGameAction,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            );
-                          },
-                          icon: const Icon(Icons.visibility_outlined, size: 18),
-                          label: Text(
-                            _railChrome!.watchGameAction,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      if (_railChrome!.messageAction.isNotEmpty) ...[
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            final rail = _railChrome!;
-                            final token =
-                                context.read<AuthCubit>().state.token?.trim() ??
-                                    '';
-                            if (token.isEmpty) return;
-                            final messenger = ScaffoldMessenger.of(context);
-                            final navContext = context;
-                            unawaited(() async {
-                              final composed = await showComposeMessageSheet(
-                                navContext,
-                                chrome: rail,
-                                accessToken: token,
-                                toUserId: p.id,
-                                username: p.username,
-                                avatarThumbUrl: p.avatarThumbUrl,
-                                hostTrustBadge: p.hostTrustBadge,
-                                hostTrustTier: p.hostTrustTier,
-                              );
-                              if (composed == null || !mounted) return;
-                              await followComposeMessageResult(
-                                navContext,
-                                chrome: rail,
-                                accessToken: token,
-                                userId: context
-                                        .read<AuthCubit>()
-                                        .state
-                                        .userId
-                                        ?.trim() ??
-                                    '',
-                                composed: composed,
-                                messenger: messenger,
-                              );
-                            }());
-                          },
-                          icon: const Icon(Icons.mail_outline, size: 18),
-                          label: Text(
-                            _railChrome!.messageAction,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      FilledButton.icon(
-                        onPressed: () {
-                          Navigator.of(context).pop(
-                            PlayerChallengeRequest(
-                              id: p.id,
-                              username: p.username,
-                              rating: p.rating,
-                              countryCode: p.countryCode,
-                              avatarThumbUrl: p.avatarThumbUrl,
-                              hostTrustTier: p.hostTrustTier,
-                              hostTrustBadge: p.hostTrustBadge,
                             ),
-                          );
-                        },
-                        icon: const Icon(Icons.sports_martial_arts_outlined,
-                            size: 18),
-                        label: Text(
-                          _railChrome!.challengeAction,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                            const SizedBox(height: 8),
+                          ],
+                          // Hover/web modal parity: show disabled Add Friend when signed out.
+                          if (!signedIn &&
+                              rail.sendFriendRequestAction.isNotEmpty) ...[
+                            OutlinedButton.icon(
+                              onPressed: null,
+                              icon: const Icon(Icons.person_add_alt_1_outlined,
+                                  size: 18),
+                              label: Text(
+                                rail.sendFriendRequestAction,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          if (signedIn && rail.messageAction.isNotEmpty) ...[
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                final token =
+                                    ctx.read<AuthCubit>().state.token?.trim() ??
+                                        '';
+                                if (token.isEmpty) return;
+                                final messenger = ScaffoldMessenger.of(ctx);
+                                final navContext = ctx;
+                                unawaited(() async {
+                                  final composed =
+                                      await showComposeMessageSheet(
+                                    navContext,
+                                    chrome: rail,
+                                    accessToken: token,
+                                    toUserId: p.id,
+                                    username: p.username,
+                                    avatarThumbUrl: p.avatarThumbUrl,
+                                    hostTrustBadge: p.hostTrustBadge,
+                                    hostTrustTier: p.hostTrustTier,
+                                  );
+                                  if (composed == null || !mounted) return;
+                                  await followComposeMessageResult(
+                                    navContext,
+                                    chrome: rail,
+                                    accessToken: token,
+                                    userId: ctx
+                                            .read<AuthCubit>()
+                                            .state
+                                            .userId
+                                            ?.trim() ??
+                                        '',
+                                    composed: composed,
+                                    messenger: messenger,
+                                  );
+                                }());
+                              },
+                              icon: const Icon(Icons.mail_outline, size: 18),
+                              label: Text(
+                                rail.messageAction,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          FilledButton.icon(
+                            onPressed: signedIn
+                                ? () {
+                                    Navigator.of(ctx).pop(
+                                      PlayerChallengeRequest(
+                                        id: p.id,
+                                        username: p.username,
+                                        rating: p.rating,
+                                        countryCode: p.countryCode,
+                                        avatarThumbUrl: p.avatarThumbUrl,
+                                        hostTrustTier: p.hostTrustTier,
+                                        hostTrustBadge: p.hostTrustBadge,
+                                      ),
+                                    );
+                                  }
+                                : null,
+                            icon: const Icon(Icons.sports_martial_arts_outlined,
+                                size: 18),
+                            label: Text(
+                              rail.challengeAction,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
                 const SizedBox(height: 16),

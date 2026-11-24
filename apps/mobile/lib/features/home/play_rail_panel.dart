@@ -4939,147 +4939,160 @@ class _PlayRailPanelState extends State<PlayRailPanel>
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Web PlayerHoverCard parity: stacked full-width CTAs (no clipped labels).
-                if (signedIn)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (c.viewProfileAction.isNotEmpty)
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(ctx).pop();
-                            unawaited(showPlayerInspectSheet(context, p.id));
-                          },
-                          icon: const Icon(Icons.person_outline, size: 18),
-                          label: Text(
-                            c.viewProfileAction,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      if (c.viewProfileAction.isNotEmpty &&
-                          p.playing &&
-                          playingGid.isNotEmpty)
-                        const SizedBox(height: 8),
-                      if (p.playing && playingGid.isNotEmpty)
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(ctx).pop();
-                            _watchGame(playingGid);
-                          },
-                          icon: const Icon(Icons.visibility_outlined, size: 18),
-                          label: Text(
-                            c.watchGameAction,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      if (_friendIdsReady) ...[
-                        if (c.viewProfileAction.isNotEmpty ||
-                            (p.playing && playingGid.isNotEmpty))
-                          const SizedBox(height: 8),
-                        Builder(
-                          builder: (_) {
-                            final isFriend = _friendIds.contains(p.id);
-                            final pending = !isFriend &&
-                                _outgoingPendingUserIds.contains(p.id);
-                            if (pending) {
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
-                                child: Text(
-                                  c.friendRequestOutgoingLabel,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: tokens.onSurfaceMuted,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              );
-                            }
-                            return OutlinedButton.icon(
-                              onPressed: _addingFriend
-                                  ? null
-                                  : () {
-                                      Navigator.of(ctx).pop();
-                                      if (isFriend) {
-                                        _removeFriend(p.id);
-                                      } else {
-                                        _addFriend(p.id);
-                                      }
-                                    },
-                              icon: Icon(
-                                isFriend
-                                    ? Icons.person_remove_outlined
-                                    : Icons.person_add_alt_1_outlined,
-                                size: 18,
-                              ),
-                              label: Text(
-                                isFriend
-                                    ? (_addingFriend
-                                        ? c.removingFriend
-                                        : c.removeFriendAction)
-                                    : (_addingFriend
-                                        ? c.sendingFriendRequest
-                                        : c.sendFriendRequestAction),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                      if (c.messageAction.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            final auth = context.read<AuthCubit>().state;
-                            final token = auth.token?.trim() ?? '';
-                            Navigator.of(ctx).pop();
-                            if (token.isEmpty) return;
-                            final messenger = ScaffoldMessenger.of(context);
-                            final navContext = context;
-                            unawaited(() async {
-                              final composed = await showComposeMessageSheet(
-                                navContext,
-                                chrome: c,
-                                accessToken: token,
-                                toUserId: p.id,
-                                username: p.username,
-                                avatarThumbUrl: p.avatarThumbUrl,
-                                hostTrustBadge: p.hostTrustBadge,
-                                hostTrustTier: p.hostTrustTier,
-                              );
-                              if (composed == null || !mounted) return;
-                              await followComposeMessageResult(
-                                navContext,
-                                chrome: c,
-                                accessToken: token,
-                                userId: auth.userId?.trim() ?? '',
-                                composed: composed,
-                                messenger: messenger,
-                              );
-                            }());
-                          },
-                          icon: const Icon(Icons.mail_outline, size: 18),
-                          label: Text(
-                            c.messageAction,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      FilledButton.icon(
+                // Web PlayerHoverCard parity: show CTAs always; signed-out disables
+                // Add Friend + Challenge; Message only when signed in; View/Watch work.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (c.viewProfileAction.isNotEmpty)
+                      OutlinedButton.icon(
                         onPressed: () {
                           Navigator.of(ctx).pop();
-                          _openChallengeFor(p);
+                          unawaited(showPlayerInspectSheet(context, p.id));
                         },
-                        icon:
-                            const Icon(Icons.sports_esports_outlined, size: 18),
+                        icon: const Icon(Icons.person_outline, size: 18),
                         label: Text(
-                          c.challengeAction,
+                          c.viewProfileAction,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    if (c.viewProfileAction.isNotEmpty &&
+                        p.playing &&
+                        playingGid.isNotEmpty)
+                      const SizedBox(height: 8),
+                    if (p.playing && playingGid.isNotEmpty)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          _watchGame(playingGid);
+                        },
+                        icon: const Icon(Icons.visibility_outlined, size: 18),
+                        label: Text(
+                          c.watchGameAction,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    if (!signedIn) ...[
+                      if (c.viewProfileAction.isNotEmpty ||
+                          (p.playing && playingGid.isNotEmpty))
+                        const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.person_add_alt_1_outlined,
+                            size: 18),
+                        label: Text(
+                          c.sendFriendRequestAction,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ] else if (_friendIdsReady) ...[
+                      if (c.viewProfileAction.isNotEmpty ||
+                          (p.playing && playingGid.isNotEmpty))
+                        const SizedBox(height: 8),
+                      Builder(
+                        builder: (_) {
+                          final isFriend = _friendIds.contains(p.id);
+                          final pending = !isFriend &&
+                              _outgoingPendingUserIds.contains(p.id);
+                          if (pending) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Text(
+                                c.friendRequestOutgoingLabel,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: tokens.onSurfaceMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            );
+                          }
+                          return OutlinedButton.icon(
+                            onPressed: _addingFriend
+                                ? null
+                                : () {
+                                    Navigator.of(ctx).pop();
+                                    if (isFriend) {
+                                      _removeFriend(p.id);
+                                    } else {
+                                      _addFriend(p.id);
+                                    }
+                                  },
+                            icon: Icon(
+                              isFriend
+                                  ? Icons.person_remove_outlined
+                                  : Icons.person_add_alt_1_outlined,
+                              size: 18,
+                            ),
+                            label: Text(
+                              isFriend
+                                  ? (_addingFriend
+                                      ? c.removingFriend
+                                      : c.removeFriendAction)
+                                  : (_addingFriend
+                                      ? c.sendingFriendRequest
+                                      : c.sendFriendRequestAction),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                    if (signedIn && c.messageAction.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          final auth = context.read<AuthCubit>().state;
+                          final token = auth.token?.trim() ?? '';
+                          Navigator.of(ctx).pop();
+                          if (token.isEmpty) return;
+                          final messenger = ScaffoldMessenger.of(context);
+                          final navContext = context;
+                          unawaited(() async {
+                            final composed = await showComposeMessageSheet(
+                              navContext,
+                              chrome: c,
+                              accessToken: token,
+                              toUserId: p.id,
+                              username: p.username,
+                              avatarThumbUrl: p.avatarThumbUrl,
+                              hostTrustBadge: p.hostTrustBadge,
+                              hostTrustTier: p.hostTrustTier,
+                            );
+                            if (composed == null || !mounted) return;
+                            await followComposeMessageResult(
+                              navContext,
+                              chrome: c,
+                              accessToken: token,
+                              userId: auth.userId?.trim() ?? '',
+                              composed: composed,
+                              messenger: messenger,
+                            );
+                          }());
+                        },
+                        icon: const Icon(Icons.mail_outline, size: 18),
+                        label: Text(
+                          c.messageAction,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: signedIn
+                          ? () {
+                              Navigator.of(ctx).pop();
+                              _openChallengeFor(p);
+                            }
+                          : null,
+                      icon: const Icon(Icons.sports_esports_outlined, size: 18),
+                      label: Text(
+                        c.challengeAction,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
