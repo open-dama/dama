@@ -141,7 +141,10 @@ func clientKey(r *http.Request) string {
 
 func (rl *RateLimit) allow(ctx context.Context, key string) (bool, error) {
 	if rl.Redis != nil && rl.Redis.Ready() {
-		rctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		// Remote Redis (e.g. Upstash) routinely needs >500ms RTT under load; a tight
+		// budget returned 503 "rate limiter unavailable" on every route and froze
+		// live boards mid-ply (moves/auth never reached handlers).
+		rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		pipeKey := "dama:rl:lb:" + key
 		capacity := float64(rl.PerMinute)

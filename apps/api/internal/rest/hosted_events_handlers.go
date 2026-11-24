@@ -53,7 +53,7 @@ func (a *HostedEventsAPI) resolvePayerCountry(r *http.Request) string {
 
 // resolvePayerCountryAt optionally uses lat/lng (ads Pricing catalog parity for host-fee preview).
 func (a *HostedEventsAPI) resolvePayerCountryAt(r *http.Request, lat, lng float64) string {
-	return resolvePayerCountryFromRequest(r, a.Locate, a.Settings, lat, lng)
+	return resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, lat, lng)
 }
 
 func (a *HostedEventsAPI) eventsEnabled(ctx context.Context) bool {
@@ -1696,7 +1696,7 @@ func (a *HostedEventsAPI) ListPublic(w http.ResponseWriter, r *http.Request) {
 	}
 	// Open discovery only: hide paid cash events outside allowlisted GeoIP region.
 	if !mine && lifecycle == "open" {
-		cashOK := viewerCashRegionOK(r, a.Cash, a.Locate, a.Settings)
+		cashOK := viewerCashRegionOK(r, a.Cash, a.Locate, a.Settings, a.Flags)
 		if !forceFreeEntryFilter(&entryFilter.IsFreeEntry, cashOK) {
 			meta := pagination.BuildMeta(params, 0, skipCap, labels)
 			writeJSON(w, http.StatusOK, map[string]any{"events": []any{}, "meta": meta})

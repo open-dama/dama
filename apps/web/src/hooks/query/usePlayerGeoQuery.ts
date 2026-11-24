@@ -1,11 +1,22 @@
+import { restClient } from "@/lib/api";
 import { locateGeo } from "@/lib/geo-locate";
 import { QueryStale } from "@/lib/query-policy";
 import { useAuthStore } from "@/store/auth";
 import type { AdServeGeoQuery } from "@/types/ads";
+import type { FeatureFlags } from "@/types/platform";
 import { useQuery } from "@tanstack/react-query";
 
 export function playerGeoQueryKey(token?: string | null) {
   return ["player-geo", token ? "auth" : "anon"] as const;
+}
+
+async function preferDeviceGps(): Promise<boolean> {
+  try {
+    const { data } = await restClient.get<FeatureFlags>("/feature-flags");
+    return data.geo_prefer_device_gps !== false;
+  } catch {
+    return true;
+  }
 }
 
 async function resolvePlayerGeo(token?: string | null): Promise<AdServeGeoQuery> {
@@ -28,7 +39,8 @@ async function resolvePlayerGeo(token?: string | null): Promise<AdServeGeoQuery>
     }
   };
 
-  if (!navigator.geolocation) {
+  const useGps = await preferDeviceGps();
+  if (!useGps || !navigator.geolocation) {
     return fromLocate();
   }
 

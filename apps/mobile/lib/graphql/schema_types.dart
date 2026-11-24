@@ -122,6 +122,7 @@ class GFeatureFlags {
     required this.prizePoolDisplayEnabled,
     required this.prizePoolGuaranteeEnabled,
     required this.kycAutoApprove,
+    required this.geoPreferDeviceGps,
     required this.aiDepths,
   });
 
@@ -137,6 +138,7 @@ class GFeatureFlags {
   final bool prizePoolDisplayEnabled;
   final bool prizePoolGuaranteeEnabled;
   final bool kycAutoApprove;
+  final bool geoPreferDeviceGps;
   final List<int> aiDepths;
 
   factory GFeatureFlags.fromJson(Map<String, dynamic> json) => GFeatureFlags(
@@ -155,6 +157,7 @@ class GFeatureFlags {
         prizePoolDisplayEnabled: json['prizePoolDisplayEnabled'] == true,
         prizePoolGuaranteeEnabled: json['prizePoolGuaranteeEnabled'] == true,
         kycAutoApprove: json['kycAutoApprove'] == true,
+        geoPreferDeviceGps: json['geoPreferDeviceGps'] != false,
         aiDepths: (json['aiDepths'] as List<dynamic>? ?? [])
             .map((e) => (e as num).toInt())
             .toList(),

@@ -24,6 +24,7 @@ import 'package:dama_mobile/features/chat/match_result_overlay.dart';
 import 'package:dama_mobile/features/notifications/notification_app_bar_actions.dart';
 import 'package:dama_mobile/features/auth/otp_session.dart';
 import 'package:dama_mobile/features/game/apply_optimistic_draughts_move.dart';
+import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:dama_mobile/features/game/draughts_board_2d.dart';
 import 'package:dama_mobile/features/game/draughts_board_3d.dart';
 import 'package:dama_mobile/features/game/game_move_history.dart';
@@ -102,6 +103,15 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   /// null = follow seat orientation; otherwise override (manual flip).
   bool? _manualFlip;
+  /// Painted orientation - sticky while pick→put (seatFlip/auth must not remap mid-fly).
+  bool _paintedFlip = false;
+  bool _flipFlushScheduled = false;
+  bool _manualFlipTapScheduled = false;
+  bool _replaySelectScheduled = false;
+  int? _pendingReplayIdx;
+  bool _liveSelectScheduled = false;
+  /// Rematch/id clear: drop stale dispose land (web suppressPlyLandRef parity).
+  int _plyLandEpoch = 0;
   bool _shareCopied = false;
   bool _matchIntroVisible = false;
   bool _matchResultVisible = false;
@@ -172,6 +182,9 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   bool _gameEndFxPlayed = false;
   Timer? _gameOverGrace;
 
+  /// Force-sync board if land commit never reaches parent (web 2.5s freeze safety).
+  Timer? _plySyncWatch;
+
   int? get _yourPlayer {
     final uid = context.read<AuthCubit>().state.userId;
     if (uid == null || uid.isEmpty) return null;
@@ -195,6 +208,93 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   /// Hide legal/must-continue until the piece lands (same predicate as clocks).
   bool get _showMoveHighlights => _isYourTurn && _boardPlySynced && !_paused;
+
+  void _armPlySyncSafety() {
+    if (_boardPlySynced || _replayIndex != null) {
+      _plySyncWatch?.cancel();
+      _plySyncWatch = null;
+      return;
+    }
+    if (_plySyncWatch?.isActive == true) return;
+    final after = _moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null;
+    if (after == null || after.isEmpty) return;
+    // Align with BoardPlyFlight.idleTimeout - a 2.5s snap mid multi-capture
+    // remounted pieces under the fly (web PLY_IDLE_FAIL_OPEN_MS parity).
+    final armedAt = DateTime.now();
+    void arm() {
+      _plySyncWatch = Timer(BoardPlyFlight.idleTimeout, () {
+        if (!mounted || _boardPlySynced || _replayIndex != null) return;
+        // Still airborne (long capture chain) - wait; hard-cap so a stuck gate
+        // cannot delay forever.
+        if (BoardPlyFlight.isActive &&
+            DateTime.now().difference(armedAt) <
+                BoardPlyFlight.idleTimeout * 2) {
+          arm();
+          return;
+        }
+        final snap =
+            _moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null;
+        if (snap == null || snap.isEmpty) return;
+        setState(() {
+          _board = snap;
+          _liveBoard = snap;
+        });
+        _cachePaintedBoard(snap);
+      });
+    }
+
+    arm();
+  }
+
+  /// Persist painted board so leave→back / remount does not re-freeze until safety.
+  void _cachePaintedBoard(List<List<dynamic>> board) {
+    final gid = (_gameId ?? '').trim();
+    if (gid.isEmpty) return;
+    final prior = QueryCache.read<GameStatePayload>(
+      CacheKeys.gameState(gid),
+      maxAge: QueryCache.sessionTtl,
+      allowStale: true,
+    );
+    if (prior == null) return;
+    QueryCache.write(
+      CacheKeys.gameState(gid),
+      prior.copyWith(board: board),
+    );
+  }
+
+  /// Land commit from 2D/3D boards. Skip rebuild when content already matches
+  /// (finish/empty-queue may re-notify after LAND_PHASE already synced).
+  void _handlePlyAnimated(List<List<dynamic>> boardAfter) {
+    // Stale land after rematch/id clear must not paint onto the new session.
+    if (_gameId == null) return;
+    final epoch = _plyLandEpoch;
+    if (_boardsMatch(_board, boardAfter)) {
+      if (epoch != _plyLandEpoch) return;
+      final clockOwned =
+          _endReason == 'clock_flag' || _endReason == 'clock_draw';
+      if (_outcome == null && !_draw && !clockOwned) {
+        final wipe = winnerFromBoard(boardAfter);
+        if (wipe != null) {
+          setState(() => _outcome = wipe);
+          _scheduleGameOverIfNeeded();
+        }
+      }
+      return;
+    }
+    if (epoch != _plyLandEpoch || _gameId == null) return;
+    setState(() {
+      _board = boardAfter;
+      _liveBoard = boardAfter;
+      final clockOwned =
+          _endReason == 'clock_flag' || _endReason == 'clock_draw';
+      if (_outcome == null && !_draw && !clockOwned) {
+        final wipe = winnerFromBoard(boardAfter);
+        if (wipe != null) _outcome = wipe;
+      }
+    });
+    _cachePaintedBoard(boardAfter);
+    _scheduleGameOverIfNeeded();
+  }
 
   /// Seat clock follows animating ply (board behind board_after), then side-to-move.
   /// Prevents AI/server turn flips from lighting your clock mid-slide.
@@ -229,10 +329,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       for (var c = 0; c < a[r].length; c++) {
         final ac = a[r][c];
         final bc = b[r][c];
-        final ap = ac is Map ? ac['p'] : null;
-        final bp = bc is Map ? bc['p'] : null;
-        final ak = ac is Map ? ac['k'] == true : false;
-        final bk = bc is Map ? bc['k'] == true : false;
+        if (ac == null && bc == null) continue;
+        if (ac is! Map || bc is! Map) return false;
+        final ap = ac['p'] is num ? (ac['p'] as num).toInt() : null;
+        final bp = bc['p'] is num ? (bc['p'] as num).toInt() : null;
+        final ak = ac['k'] == true || ac['k'] == 1;
+        final bk = bc['k'] == true || bc['k'] == 1;
         if (ap != bp || ak != bk) return false;
       }
     }
@@ -521,6 +623,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
             _boardsMatch(_board, lastAfter)) {
           _board = payload.board;
         }
+      } else if (!histGrew || _board == null) {
+        // Cold attach / resume with existing history: seed paint board. Leaving
+        // _board null while histGrew left the scene blank (forever boardPending).
+        _board = payload.board;
       }
     }
     if (_replayIndex == null) {
@@ -662,7 +768,11 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       _selectedCol = null;
     }
     if (gid.isNotEmpty) {
-      QueryCache.write(CacheKeys.gameState(gid), payload);
+      // Cache painted board while history is ahead (server payload has board_after).
+      QueryCache.write(
+        CacheKeys.gameState(gid),
+        payload.copyWith(board: _board ?? payload.board),
+      );
     }
     _syncStoredSession();
     _flushAutoResumeToast();
@@ -1187,20 +1297,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (_moveHistory.isEmpty) return true;
     final after = _moveHistory.last.boardAfter;
     if (after == null || after.isEmpty || _board == null) return true;
-    if (after.length != _board!.length) return false;
-    for (var r = 0; r < after.length; r++) {
-      if (after[r].length != _board![r].length) return false;
-      for (var c = 0; c < after[r].length; c++) {
-        final a = after[r][c];
-        final b = _board![r][c];
-        final ap = a is Map ? a['p'] : null;
-        final bp = b is Map ? b['p'] : null;
-        final ak = a is Map ? a['k'] == true : false;
-        final bk = b is Map ? b['k'] == true : false;
-        if (ap != bp || ak != bk) return false;
-      }
-    }
-    return true;
+    return _boardsMatch(_board, after);
   }
 
   void _scheduleGameOverIfNeeded() {
@@ -1213,18 +1310,34 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       });
       return;
     }
-    _gameOverGrace = Timer(const Duration(milliseconds: 2200), () {
-      if (!mounted) return;
-      if (_moveHistory.isNotEmpty &&
-          _moveHistory.last.boardAfter != null &&
-          _moveHistory.last.boardAfter!.isNotEmpty) {
-        setState(() {
-          _board = _moveHistory.last.boardAfter;
-          _liveBoard = _board;
-        });
-      }
-      _revealGameOver();
-    });
+    // Align with BoardPlyFlight.idleTimeout - 2200ms snapped tip under multi-capture
+    // fly (web PLY_IDLE_FAIL_OPEN_MS / sticky ply-safety parity).
+    final armedAt = DateTime.now();
+    void arm() {
+      _gameOverGrace = Timer(BoardPlyFlight.idleTimeout, () {
+        if (!mounted) return;
+        if (BoardPlyFlight.isActive &&
+            DateTime.now().difference(armedAt) <
+                BoardPlyFlight.idleTimeout * 2) {
+          arm();
+          return;
+        }
+        if (_moveHistory.isNotEmpty &&
+            _moveHistory.last.boardAfter != null &&
+            _moveHistory.last.boardAfter!.isNotEmpty) {
+          final snap = _moveHistory.last.boardAfter!;
+          setState(() {
+            _board = snap;
+            _liveBoard = snap;
+          });
+          // Persist painted terminal board so remount is not stuck behind board_after.
+          _cachePaintedBoard(snap);
+        }
+        _revealGameOver();
+      });
+    }
+
+    arm();
   }
 
   void _revealGameOver() {
@@ -1239,10 +1352,31 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       _selectedRow = null;
       _selectedCol = null;
       _matchIntroVisible = false;
-      // 1-based last ply so the board shows the final snapshot.
-      _replayIndex = _moveHistory.isEmpty ? null : _moveHistory.length;
+      // Defer replay latch until pick→put lands (LAND_PHASE can fire before put-down).
     });
+    unawaited(_latchTerminalReplayWhenIdle());
     _playGameEndFxOnce();
+  }
+
+  bool _latchReplayScheduled = false;
+
+  /// Defer terminal replay until pick→put lands. Stuck BoardPlyFlight must not
+  /// poll forever (mid-game freeze / never latch final board).
+  Future<void> _latchTerminalReplayWhenIdle() async {
+    if (!mounted || _moveHistory.isEmpty) return;
+    if (_latchReplayScheduled) return;
+    _latchReplayScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      if (_replayIndex != null) return;
+      setState(() {
+        // 1-based last ply so the board shows the final snapshot.
+        _replayIndex = _moveHistory.length;
+      });
+    } finally {
+      _latchReplayScheduled = false;
+    }
   }
 
   void _playGameEndFxOnce() {
@@ -1403,6 +1537,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         // Keep `_board` frozen; scene commits board_after on put-down.
       }
     });
+    // Persist freeze-painted board so remount mid pick→put cannot seed board_after.
+    if (optimistic != null && _board != null) {
+      _cachePaintedBoard(_board!);
+    }
     if (optimistic?.outcome != null) _scheduleGameOverIfNeeded();
     _ws.sendMove({
       'game_id': _gameId,
@@ -1414,6 +1552,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   @override
   void initState() {
     super.initState();
+    // Reset process-wide ply gate (hot reload / prior route missed leave).
+    BoardPlyFlight.clear();
     WidgetsBinding.instance.addObserver(this);
     final seeded = (widget.gameId ?? '').trim();
     if (seeded.isNotEmpty) _bindActiveBoard(seeded);
@@ -1462,10 +1602,19 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   Future<void> _loadBoardView() async {
     final mode = await readBoardViewMode();
     if (!mounted) return;
+    // Prefs hydrate remounts 2D↔3D - defer like web useBoardViewMode plyInflight.
+    await BoardPlyFlight.waitUntilIdle();
+    if (!mounted) return;
+    if (_boardView == mode) return;
     setState(() => _boardView = mode);
   }
 
   Future<void> _setBoardView(BoardViewMode mode) async {
+    // 2D↔3D remounts the plane; never mid pick→put (ticker dies → flicker/freeze).
+    // Stuck gate must not drop the tap forever - waitUntilIdle fail-opens at 5.5s.
+    await BoardPlyFlight.waitUntilIdle();
+    if (!mounted) return;
+    if (_boardView == mode) return;
     setState(() => _boardView = mode);
     await writeBoardViewMode(mode);
   }
@@ -1567,7 +1716,89 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     return uid != null && _player2Id != null && uid == _player2Id;
   }
 
-  bool get _flipBoard => _manualFlip ?? _seatFlip;
+  bool get _flipDesired => _manualFlip ?? _seatFlip;
+
+  /// Sticky while airborne - same gate idea as web LivePlayHub flipBoard effect.
+  bool get _flipBoard {
+    final desired = _flipDesired;
+    if (!BoardPlyFlight.isActive) {
+      _paintedFlip = desired;
+      return desired;
+    }
+    if (_paintedFlip != desired) {
+      unawaited(_flushFlipWhenIdle());
+    }
+    return _paintedFlip;
+  }
+
+  Future<void> _flushFlipWhenIdle() async {
+    if (_flipFlushScheduled) return;
+    _flipFlushScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      final next = _flipDesired;
+      if (_paintedFlip != next) {
+        setState(() => _paintedFlip = next);
+      }
+    } finally {
+      _flipFlushScheduled = false;
+    }
+  }
+
+  /// Manual flip chrome: coalesce taps so stacked waitUntilIdle cannot double-flip.
+  /// Same gate as 2D↔3D - flip remaps screen coords mid-flight → flicker.
+  Future<void> _manualFlipWhenIdle() async {
+    if (_manualFlipTapScheduled) return;
+    _manualFlipTapScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      setState(() => _manualFlip = !(_manualFlip ?? _seatFlip));
+    } finally {
+      _manualFlipTapScheduled = false;
+    }
+  }
+
+  /// Replay scrub: latest idx wins (stacked waits must not apply stale plies).
+  Future<void> _selectReplayWhenIdle(int idx) async {
+    _pendingReplayIdx = idx;
+    if (_replaySelectScheduled) return;
+    _replaySelectScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      final next = _pendingReplayIdx;
+      if (next == null) return;
+      setState(() {
+        _replayIndex = next;
+        _selectedRow = null;
+        _selectedCol = null;
+      });
+    } finally {
+      _replaySelectScheduled = false;
+      _pendingReplayIdx = null;
+    }
+  }
+
+  /// Live chip: never snap `_board` to tip while a ply is airborne (freeze paint
+  /// under the fly → pick→put flicker / early `_boardPlySynced`).
+  Future<void> _selectLiveWhenIdle() async {
+    if (_liveSelectScheduled) return;
+    _liveSelectScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      setState(() {
+        _replayIndex = null;
+        _board = _liveBoard ?? _board;
+        _selectedRow = null;
+        _selectedCol = null;
+      });
+    } finally {
+      _liveSelectScheduled = false;
+    }
+  }
 
   Future<void> _shareGameUrl() async {
     final id = (_gameId ?? widget.gameId ?? '').trim();
@@ -1815,7 +2046,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       final payload = GameStatePayload.fromJson(
         jsonDecode(res.body) as Map<String, dynamic>,
       );
-      QueryCache.write(CacheKeys.gameState(id), payload);
+      // Do not raw-write board_after here; _applyBoardPayload caches painted board.
       setState(() {
         _applyBoardPayload(payload);
         if (_boardSize <= 0) {
@@ -2167,6 +2398,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     _chatLiveSub?.cancel();
     _clockTimer?.cancel();
     _gameOverGrace?.cancel();
+    _plySyncWatch?.cancel();
     _sub?.cancel();
     _ws.dispose();
     super.dispose();
@@ -2174,6 +2406,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   @override
   Widget build(BuildContext context) {
+    _armPlySyncSafety();
     final chrome = _chrome;
     final boardPending = _displayBoard == null || _boardSize <= 0;
     // Single full-column BoardGridSkeleton for chrome+board wait - never a second,
@@ -2239,9 +2472,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                 _gameId!.isNotEmpty) ...[
               IconButton(
                 tooltip: _railChrome!.flipBoardAria,
-                onPressed: () {
-                  setState(() => _manualFlip = !(_manualFlip ?? _seatFlip));
-                },
+                onPressed: () => unawaited(_manualFlipWhenIdle()),
                 icon: const Icon(Icons.flip_camera_android_outlined),
               ),
               IconButton(
@@ -2352,28 +2583,34 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                             onPressed: _busy
                                 ? null
                                 : () {
-                                    setState(() {
-                                      _outcome = null;
-                                      _draw = false;
-                                      _gameOverVisible = false;
-                                      _gameEndFxPlayed = false;
-                                      _replayIndex = null;
-                                      _board = null;
-                                      _matchResultVisible = false;
-                                      _matchIntroVisible = false;
-                                      _matchIntroSeenGameId = null;
-                                      _matchIntroPendingGameId = null;
-                                      _moveHistory = const [];
-                                      _gameId = null;
-                                      _bindActiveBoard(null);
-                                      _paused = false;
-                                      _pauseKind = '';
-                                      _pauseReasonLabel = '';
-                                      _pauseNote = '';
-                                      _pauseActorRole = '';
-                                      _pauseActorDisplayName = '';
-                                    });
-                                    unawaited(_startAiGame());
+                                    // Wait out pick→put, then bump epoch so dispose land is dropped.
+                                    unawaited(() async {
+                                      await BoardPlyFlight.waitUntilIdle();
+                                      if (!mounted) return;
+                                      _plyLandEpoch++;
+                                      setState(() {
+                                        _outcome = null;
+                                        _draw = false;
+                                        _gameOverVisible = false;
+                                        _gameEndFxPlayed = false;
+                                        _replayIndex = null;
+                                        _board = null;
+                                        _matchResultVisible = false;
+                                        _matchIntroVisible = false;
+                                        _matchIntroSeenGameId = null;
+                                        _matchIntroPendingGameId = null;
+                                        _moveHistory = const [];
+                                        _gameId = null;
+                                        _bindActiveBoard(null);
+                                        _paused = false;
+                                        _pauseKind = '';
+                                        _pauseReasonLabel = '';
+                                        _pauseNote = '';
+                                        _pauseActorRole = '';
+                                        _pauseActorDisplayName = '';
+                                      });
+                                      await _startAiGame();
+                                    }());
                                   },
                             child: Text(chrome.restartAction),
                           ),
@@ -2550,7 +2787,9 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                           board: BoardPaletteScope(
                             board: boardPaletteById(_boardPaletteId),
                             piece: piecePaletteById(_piecePaletteId),
-                            child: _boardView == BoardViewMode.flat2d
+                            child: KeyedSubtree(
+                              key: ValueKey(_gameId ?? 'idle'),
+                              child: _boardView == BoardViewMode.flat2d
                                 ? DraughtsBoard2D(
                                     board: _displayBoard!,
                                     boardSize: _boardSize,
@@ -2594,26 +2833,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                                         : _moveHistory,
                                     replayMode: _replayIndex != null,
                                     illegalShakeKey: _illegalShakeKey,
-                                    onPlyAnimated: _replayIndex == null &&
-                                            !_gameOverVisible
-                                        ? (boardAfter) {
-                                            setState(() {
-                                              _board = boardAfter;
-                                              final clockOwned = _endReason ==
-                                                      'clock_flag' ||
-                                                  _endReason == 'clock_draw';
-                                              if (_outcome == null &&
-                                                  !_draw &&
-                                                  !clockOwned) {
-                                                final wipe =
-                                                    winnerFromBoard(boardAfter);
-                                                if (wipe != null)
-                                                  _outcome = wipe;
-                                              }
-                                            });
-                                            _scheduleGameOverIfNeeded();
-                                          }
-                                        : null,
+                                    // Keep land sync even after game-over UI / during
+                                    // replay scrub - displayBoard is historical; tip
+                                    // must still land in `_board`/`_liveBoard`.
+                                    onPlyAnimated: _handlePlyAnimated,
                                   )
                                 : DraughtsBoard3D(
                                     board: _displayBoard!,
@@ -2658,27 +2881,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                                         : _moveHistory,
                                     replayMode: _replayIndex != null,
                                     illegalShakeKey: _illegalShakeKey,
-                                    onPlyAnimated: _replayIndex == null &&
-                                            !_gameOverVisible
-                                        ? (boardAfter) {
-                                            setState(() {
-                                              _board = boardAfter;
-                                              final clockOwned = _endReason ==
-                                                      'clock_flag' ||
-                                                  _endReason == 'clock_draw';
-                                              if (_outcome == null &&
-                                                  !_draw &&
-                                                  !clockOwned) {
-                                                final wipe =
-                                                    winnerFromBoard(boardAfter);
-                                                if (wipe != null)
-                                                  _outcome = wipe;
-                                              }
-                                            });
-                                            _scheduleGameOverIfNeeded();
-                                          }
-                                        : null,
+                                    // Keep land sync even after game-over UI / during
+                                    // replay scrub - displayBoard is historical; tip
+                                    // must still land in `_board`/`_liveBoard`.
+                                    onPlyAnimated: _handlePlyAnimated,
                                   ),
+                            ),
                           ),
                           coverOverlay: _boardCoverOverlay(chrome),
                         ),
@@ -2704,19 +2912,11 @@ class _MatchBoardPageState extends State<MatchBoardPage>
                         pageOfFmt: chrome.historySkipPageOf,
                       ),
                       onSelectLive: () {
-                        setState(() {
-                          _replayIndex = null;
-                          _board = _liveBoard ?? _board;
-                          _selectedRow = null;
-                          _selectedCol = null;
-                        });
+                        unawaited(_selectLiveWhenIdle());
                       },
                       onSelectMove: (idx) {
-                        setState(() {
-                          _replayIndex = idx;
-                          _selectedRow = null;
-                          _selectedCol = null;
-                        });
+                        // Replay remounts the plane; defer mid pick→put (fail-open).
+                        unawaited(_selectReplayWhenIdle(idx));
                       },
                     ),
                   ],

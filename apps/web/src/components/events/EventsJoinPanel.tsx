@@ -35,6 +35,7 @@ import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery
 import { useWalletQuery } from "@/hooks/query/useWalletQuery";
 import { useDeferredDialogValue } from "@/hooks/use-deferred-dialog-selection";
 import { chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { cashJurisdictionLockMessage, isCashJurisdictionLocked } from "@/lib/cash-jurisdiction";
 import { chromeSeparator } from "@/lib/chrome-separator";
 import {
@@ -68,7 +69,6 @@ import {
   softTournamentsPlayersLabel,
 } from "@/lib/community-player-chrome-soft";
 import { shouldOpenEventCupLobby } from "@/lib/event-cup-lobby";
-import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
 import { bracketChromeFrom } from "@/lib/events-bracket-chrome";
 import { buildBracketSections } from "@/lib/events-bracket-sections";

@@ -15,6 +15,8 @@ export type FeatureFlags = {
   prize_pool_guarantee_enabled?: boolean;
   /** Admin document-KYC auto-approve (server-enforced; exposed for console/WS parity). */
   kyc_auto_approve?: boolean;
+  /** Default true: HTML5 GPS may enrich /geo/locate. When false, clients skip GPS (IP-only). */
+  geo_prefer_device_gps?: boolean;
   ai_depths?: number[];
 };
 

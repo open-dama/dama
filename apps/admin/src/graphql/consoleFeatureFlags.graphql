@@ -14,5 +14,6 @@ query ConsoleFeatureFlags {
     prizePoolDisplayEnabled
     prizePoolGuaranteeEnabled
     kycAutoApprove
+    geoPreferDeviceGps
   }
 }

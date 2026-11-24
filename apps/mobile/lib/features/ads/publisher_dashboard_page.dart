@@ -78,6 +78,7 @@ class _PublisherDashboardPageState extends State<PublisherDashboardPage> {
         headers: {
           'Authorization': 'Bearer ${widget.accessToken}',
         },
+        preferDeviceGps: FeatureFlagsWire.preferDeviceGpsCached(),
       );
       final country = (located?.countryCode ?? '').trim().toUpperCase();
       if (country.isEmpty) {

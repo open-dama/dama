@@ -118,7 +118,7 @@ func (a *TournamentAPI) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// Open discovery only: hide paid cash cups outside allowlisted GeoIP region.
 	if !mine && lifecycle == "open" {
-		cashOK := viewerCashRegionOK(r, a.Cash, a.Locate, a.Settings)
+		cashOK := viewerCashRegionOK(r, a.Cash, a.Locate, a.Settings, a.Flags)
 		if !forceFreeEntryFilter(&filter.IsFree, cashOK) {
 			meta := pagination.BuildMeta(params, 0, skipCap, labels)
 			writeJSON(w, http.StatusOK, map[string]any{"tournaments": []any{}, "meta": meta})
@@ -885,7 +885,7 @@ func (a *TournamentAPI) Enroll(w http.ResponseWriter, r *http.Request) {
 
 	// Paid enroll requires cash/RMG compliance (age, jurisdiction, locate, phone KYC).
 	if !t.IsFree {
-		payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, 0, 0)
+		payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, 0, 0)
 		if payerCC == "" {
 			writeWalletChromeError(w, a.Settings, r.Context(), http.StatusBadRequest, "country_required_checkout")
 			return

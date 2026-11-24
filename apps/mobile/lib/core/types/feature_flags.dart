@@ -1,3 +1,4 @@
+import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/graphql/schema_types.dart';
 
 export 'package:dama_mobile/graphql/schema_types.dart' show GFeatureFlags;
@@ -17,6 +18,7 @@ class FeatureFlagsWire {
     required this.prizePoolDisplayEnabled,
     required this.prizePoolGuaranteeEnabled,
     required this.kycAutoApprove,
+    required this.geoPreferDeviceGps,
     required this.aiDepths,
   });
 
@@ -34,9 +36,21 @@ class FeatureFlagsWire {
   final bool prizePoolDisplayEnabled;
   final bool prizePoolGuaranteeEnabled;
   final bool kycAutoApprove;
+
+  /// Default ON: device GPS may enrich /geo/locate. When false, skip GPS (IP-only).
+  final bool geoPreferDeviceGps;
   final List<int> aiDepths;
 
   bool get hasPracticeDepths => aiDepths.isNotEmpty;
+
+  /// Cached Prefer device GPS (default ON when cache miss).
+  static bool preferDeviceGpsCached() {
+    final cached = QueryCache.read<FeatureFlagsWire>(
+      CacheKeys.featureFlags,
+      allowStale: true,
+    );
+    return cached?.geoPreferDeviceGps ?? true;
+  }
 
   /// Fail-closed: paid cash requires enable + allowlist + not on disabled list.
   bool cashAllowedForCountry(
@@ -62,6 +76,8 @@ class FeatureFlagsWire {
         const [];
     final otpRaw =
         json['cashPhoneOtpRequired'] ?? json['cash_phone_otp_required'];
+    final geoGpsRaw =
+        json['geoPreferDeviceGps'] ?? json['geo_prefer_device_gps'];
     return FeatureFlagsWire(
       vsAiEnabled: json['vsAiEnabled'] == true || json['vs_ai_enabled'] == true,
       otpRequired: json['otpRequired'] == true || json['otp_required'] == true,
@@ -83,6 +99,8 @@ class FeatureFlagsWire {
           json['prize_pool_guarantee_enabled'] == true,
       kycAutoApprove:
           json['kycAutoApprove'] == true || json['kyc_auto_approve'] == true,
+      // Default ON when omitted (protect jurisdiction).
+      geoPreferDeviceGps: geoGpsRaw != false,
       aiDepths: rawDepths.map((e) => (e as num).toInt()).toList(),
     );
   }
@@ -100,6 +118,7 @@ class FeatureFlagsWire {
         prizePoolDisplayEnabled: prizePoolDisplayEnabled,
         prizePoolGuaranteeEnabled: prizePoolGuaranteeEnabled,
         kycAutoApprove: kycAutoApprove,
+        geoPreferDeviceGps: geoPreferDeviceGps,
         aiDepths: aiDepths,
       );
 }

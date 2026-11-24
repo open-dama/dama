@@ -147,6 +147,7 @@ const String featureFlagsQuery = r'''
       prizePoolDisplayEnabled
       prizePoolGuaranteeEnabled
       kycAutoApprove
+      geoPreferDeviceGps
       aiDepths
     }
   }

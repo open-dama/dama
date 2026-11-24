@@ -7,12 +7,12 @@ import { useClientNavFullQuery } from "@/hooks/query/useClientNavFullQuery";
 import { useHomeChromeQuery } from "@/hooks/query/useHomeChromeQuery";
 import { usePaymentModalChromeQuery } from "@/hooks/query/usePaymentModalChromeQuery";
 import { chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { softCommunityJoinStatusMessage } from "@/lib/community-player-chrome-soft";
 import { cupLifecyclePhase } from "@/lib/cupLifecycle";
 import { isHomeViewportLocked } from "@/lib/home-shell";
 import { invalidateTournamentCup, invalidateTournaments } from "@/lib/invalidate";
 import { prizePoolCardLabelsFromHome } from "@/lib/prize-pool-lines";
-import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import {
   freeJoinPlayHref,
   isAlreadyEnrolledError,

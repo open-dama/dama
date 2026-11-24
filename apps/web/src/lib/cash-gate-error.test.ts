@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
+import type { CashRmgChrome } from "../types/cash-rmg";
 import { ApiClientError } from "./api-client-error";
+import { isRawApiJsonEnvelope } from "./api-toast-message";
 import {
   cashGateChromeMessage,
   cashGateErrorKey,
   isAgeRequiredError,
   isPhoneKycRequiredError,
 } from "./cash-gate-error";
-import { isRawApiJsonEnvelope } from "./api-toast-message";
 import { eventJoinErrorChrome } from "./event-join-error";
 import { tournamentEnrollErrorChrome } from "./tournament-free-join";
-import type { CashRmgChrome } from "../types/cash-rmg";
 
 const cashChrome = {
   age_required_error: "Verify your age to use cash wallet features",

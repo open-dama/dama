@@ -14,6 +14,7 @@ import (
 type InvoiceAPI struct {
 	Ads      *store.AdStore
 	Settings *store.SettingsStore
+	Flags    *store.FlagStore
 	Locate   *geo.Resolver
 }
 
@@ -71,7 +72,7 @@ func (a *InvoiceAPI) PublisherPDF(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_invoice_currency_unavailable")
 		return
 	}
-	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, 0, 0)
+	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, 0, 0)
 	currency := a.Settings.CurrencyForCountry(payerCC)
 	if payerCC == "" || currency == "" {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_invoice_currency_unavailable")

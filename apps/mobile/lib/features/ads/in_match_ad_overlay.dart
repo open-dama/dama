@@ -7,7 +7,9 @@ import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/ads/resolve_viewport_creative.dart';
 import 'package:dama_mobile/core/types/ads.dart';
+import 'package:dama_mobile/core/types/feature_flags.dart';
 import 'package:dama_mobile/features/ads/viewport_ad_creative.dart';
+import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -113,6 +115,7 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
       }
       final located = await locateWithDeviceGps(
         locateUrl: '${ApiConfig.baseUrl}/api/v1/geo/locate',
+        preferDeviceGps: FeatureFlagsWire.preferDeviceGpsCached(),
       );
       if (located == null) return;
       _geo = <String, dynamic>{
@@ -245,6 +248,10 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
           }
           return;
         }
+        // Wait for pick→put to land (web runWhenPlyIdle parity). Opening a
+        // full-screen ad mid-flight covers the board and reads as freeze/flicker.
+        await BoardPlyFlight.waitUntilIdle();
+        if (!mounted || !widget.active) return;
         setState(() {
           _open = true;
           _campaign = campaign;

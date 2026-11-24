@@ -68,6 +68,7 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
       }
       final located = await locateWithDeviceGps(
         locateUrl: '${ApiConfig.baseUrl}/api/v1/geo/locate',
+        preferDeviceGps: FeatureFlagsWire.preferDeviceGpsCached(),
       );
       if (located == null || located.countryCode.isEmpty) {
         if (mounted) setState(() => _loading = false);

@@ -63,7 +63,7 @@ import {
 } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { pieceSeatNames, usePiecePalette } from "@/lib/board-palette";
-import { useBoardViewMode } from "@/lib/board-view";
+import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle, useBoardViewMode } from "@/lib/board-view";
 import { notifyIncomingChatMessage } from "@/lib/chat-message-notify";
 import { CountryFlag } from "@/lib/country-flag";
 import { formatDmUnreadBadge } from "@/lib/dm-unread-badge";
@@ -72,8 +72,10 @@ import { fireGameDefeatPulse, fireGameVictoryCelebration } from "@/lib/game-vict
 import { mergeBoardStateAfterPlayerMove, mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
 import {
   activeClockPlayer,
+  boardsEqual,
   isBoardPlySynced,
   isTerminalBoardSynced,
+  lastBoardAfter,
   syncTerminalBoard,
   withResolvedOutcome,
 } from "@/lib/gameOutcome";
@@ -439,6 +441,8 @@ export function LivePlayHub({
   const [boardPlaneReady, setBoardPlaneReady] = useState(boardView === "2d");
   /** Manual flip overrides seat-based orientation (Chess.com flip control). */
   const [flipManual, setFlipManual] = useState<boolean | null>(null);
+  /** Painted orientation - sticky while pick→put (seatFlip/auth must not remap mid-fly). */
+  const [flipBoard, setFlipBoard] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [resumeBanner, setResumeBanner] = useState("");
   const [watchTab, setWatchTab] = useState<"moves" | "chat" | "info">("moves");
@@ -512,6 +516,10 @@ export function LivePlayHub({
   const [illegalShakeKey, setIllegalShakeKey] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const gameRef = useRef<GamePayload | null>(null);
+  /** Sticky arm: do not clear/recreate the 2.5s timer on every game identity churn (freeze hole). */
+  const plySyncSafetyTimerRef = useRef<number | null>(null);
+  /** Keep-alive id swap: drop stale land from the previous board's unmount forceRecover. */
+  const suppressPlyLandRef = useRef(false);
   const initialBoardRef = useRef<BoardCell[][] | null>(null);
   const initialBoardGameIdRef = useRef<string | null>(null);
   const autoStartedRef = useRef(false);
@@ -530,6 +538,30 @@ export function LivePlayHub({
   useEffect(() => {
     gameRef.current = game;
   }, [game]);
+
+  // Sticky orientation: never remapping mid pick→put (teleports the flying piece).
+  const flipDesired = flipManual ?? Boolean(userId && game?.player2_id === userId);
+  useEffect(() => {
+    if (flipBoard === flipDesired) return;
+    if (!document.querySelector("[data-dama-ply-inflight]")) {
+      setFlipBoard(flipDesired);
+      return;
+    }
+    // Stuck ply attr must not defer flip forever (wrong seat + feels frozen).
+    // Cap covers multi-capture chains (3s remounted mid-chain → pick→put flicker).
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      if (
+        document.querySelector("[data-dama-ply-inflight]") &&
+        Date.now() - startedAt < PLY_IDLE_FAIL_OPEN_MS
+      ) {
+        return;
+      }
+      window.clearInterval(id);
+      setFlipBoard(flipDesired);
+    }, 32);
+    return () => window.clearInterval(id);
+  }, [flipDesired, flipBoard]);
 
   useEffect(() => {
     if (!game?.id || !game.board?.length) return;
@@ -566,20 +598,46 @@ export function LivePlayHub({
       ? progressionQuery.data.match_clock.initial_seconds
       : 0;
 
-  // Enter finished only after the last ply board is visible (or after a short grace).
+  // Enter finished only after the last ply board is visible (or after a chain-safe grace).
   // Avoids killing the land animation / hiding the result card on a stale grid.
+  // 2200ms snapped tip under multi-capture fly (~0.82s×5) → pick→put flicker.
   useEffect(() => {
     if (!game || (game.outcome == null && !game.draw)) return;
     if (isTerminalBoardSynced(game)) {
       setPhase("finished");
       return;
     }
-    const grace = window.setTimeout(() => {
-      setGame((prev) => (prev ? syncTerminalBoard(withResolvedOutcome(prev)) : prev));
-      setPhase("finished");
-    }, 2200);
-    return () => window.clearTimeout(grace);
-  }, [game]);
+    const armedAt = Date.now();
+    let grace: number | null = null;
+    const arm = () => {
+      grace = window.setTimeout(() => {
+        grace = null;
+        // Still airborne (long capture chain) - wait; hard-cap so stuck gate cannot
+        // delay game-over forever (sticky ply-safety parity).
+        if (
+          typeof document !== "undefined" &&
+          document.querySelector("[data-dama-ply-inflight]") &&
+          Date.now() - armedAt < PLY_IDLE_FAIL_OPEN_MS * 2
+        ) {
+          arm();
+          return;
+        }
+        setGame((prev) => {
+          if (!prev) return prev;
+          const next = syncTerminalBoard(withResolvedOutcome(prev));
+          gameRef.current = next;
+          // Persist painted terminal board so remount is not stuck behind board_after.
+          if (next.id) qc.setQueryData(gameStateQueryKey(next.id), next);
+          return next;
+        });
+        setPhase("finished");
+      }, PLY_IDLE_FAIL_OPEN_MS);
+    };
+    arm();
+    return () => {
+      if (grace != null) window.clearTimeout(grace);
+    };
+  }, [game, qc]);
 
   const clockFlagToastGameRef = useRef<string | null>(null);
 
@@ -767,7 +825,16 @@ export function LivePlayHub({
     }
     pauseGameMutation.mutate(id, {
       onSuccess: (payload) => {
-        setGame(payload);
+        // Merge so pause mid pick→put cannot snap board_after under a flying piece.
+        setGame((prev) => {
+          const merged = pendingLocalMoveRef.current
+            ? mergeBoardStateAfterPlayerMove(prev, payload)
+            : mergeRemoteBoardState(prev, payload);
+          gameRef.current = merged;
+          // Keep RQ on the same freeze-merged paint (mutation alone can diverge).
+          if (merged?.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+          return merged;
+        });
         const expires = Number(payload.pause_expires_at_unix_ms) || 0;
         patchStoredPlayPaused(
           true,
@@ -783,7 +850,7 @@ export function LivePlayHub({
         if (msg) toast.error(msg);
       },
     });
-  }, [chrome, game, pauseGameMutation]);
+  }, [chrome, game, pauseGameMutation, qc]);
 
   const handleResumeGame = useCallback(() => {
     const id = (game?.id || "").trim();
@@ -796,7 +863,15 @@ export function LivePlayHub({
     markManualResume();
     resumeGameMutation.mutate(id, {
       onSuccess: (payload) => {
-        setGame(payload);
+        // Merge so resume cannot snap board under an in-flight ply.
+        setGame((prev) => {
+          const merged = pendingLocalMoveRef.current
+            ? mergeBoardStateAfterPlayerMove(prev, payload)
+            : mergeRemoteBoardState(prev, payload);
+          gameRef.current = merged;
+          if (merged?.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+          return merged;
+        });
         patchStoredPlayPaused(false);
         const msg = (chrome.toast_resumed || "").trim();
         if (msg) toast.success(msg);
@@ -808,7 +883,7 @@ export function LivePlayHub({
         if (msg) toast.error(msg);
       },
     });
-  }, [chrome, game, resumeGameMutation]);
+  }, [chrome, game, resumeGameMutation, qc]);
 
   useEffect(() => {
     if (phase === "playing" && gameStartedAtMs == null) {
@@ -858,7 +933,26 @@ export function LivePlayHub({
     if (!gameIdParam) return;
     if (resumeQuery.data) {
       const next = resumeQuery.data;
-      setGame((prev) => (prev?.id === next.id && prev === next ? prev : next));
+      // Never raw-replace same-match state from RQ. WS setQueryData + refetch used to
+      // overwrite the freeze merge (board snapped to board_after mid pick→put and
+      // boardPlySynced flipped early → flicker / interactive desync).
+      setGame((prev) => {
+        if (!prev || prev.id !== next.id) {
+          // Remount keyed board will forceRecover old fly - ignore that land.
+          suppressPlyLandRef.current = true;
+          gameRef.current = next;
+          return next;
+        }
+        if (prev === next) return prev;
+        const merged = pendingLocalMoveRef.current
+          ? mergeBoardStateAfterPlayerMove(prev, next)
+          : mergeRemoteBoardState(prev, next);
+        gameRef.current = merged;
+        // Refetch stores raw board_after in RQ - write freeze-merged back so
+        // leave→back mid pick→put cannot seed a snap from cache.
+        if (merged.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+        return merged;
+      });
       setSelected(null);
       setPhase(next.outcome != null || next.draw ? "finished" : "playing");
       setBusy(false);
@@ -875,7 +969,7 @@ export function LivePlayHub({
         resumeQuery.error instanceof Error ? resumeQuery.error.message : chrome.toast_load_failed,
       );
     }
-  }, [chrome, game, gameIdParam, resumeQuery.data, resumeQuery.isLoading, resumeQuery.error]);
+  }, [chrome, game, gameIdParam, qc, resumeQuery.data, resumeQuery.isLoading, resumeQuery.error]);
 
   useEffect(() => {
     if (!chrome) return;
@@ -1066,7 +1160,11 @@ export function LivePlayHub({
               moveWaitRef.current = null;
             }
             pendingLocalMoveRef.current = false;
-            qc.setQueryData(gameStateQueryKey(incoming.id), incoming);
+            // Store freeze-merged state (not raw board_after) so leave→back /
+            // RQ hydrate cannot seed a mid pick→put snap from cache.
+            if (gameRef.current?.id) {
+              qc.setQueryData(gameStateQueryKey(gameRef.current.id), gameRef.current);
+            }
             setSelected(null);
           }
         } catch {
@@ -1172,14 +1270,30 @@ export function LivePlayHub({
     if (!embedded) router.replace("/");
   }, [resetSessionState, router, onExitToLobby, embedded]);
 
-  const handlePlyAnimated = useCallback((boardAfter: BoardCell[][]) => {
-    if (!boardAfter?.length) return;
-    setGame((prev) => {
-      if (!prev) return prev;
-      const next = withResolvedOutcome({ ...prev, board: boardAfter });
-      return next;
-    });
-  }, []);
+  // After keep-alive game-id swap, allow land again once the new board session is mounted.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-arm land gate on game-id swap
+  useEffect(() => {
+    suppressPlyLandRef.current = false;
+  }, [game?.id]);
+
+  const handlePlyAnimated = useCallback(
+    (boardAfter: BoardCell[][]) => {
+      if (!boardAfter?.length) return;
+      // Stale land from previous keep-alive match must not paint onto the new game id.
+      if (suppressPlyLandRef.current) return;
+      setGame((prev) => {
+        if (!prev) return prev;
+        // Skip identity churn when land already synced (finish/empty-queue may re-notify).
+        if (boardsEqual(prev.board, boardAfter)) return withResolvedOutcome(prev);
+        const next = withResolvedOutcome({ ...prev, board: boardAfter });
+        gameRef.current = next;
+        // Persist painted board so leave→back / remount does not re-freeze until 2.5s safety.
+        qc.setQueryData(gameStateQueryKey(next.id), next);
+        return next;
+      });
+    },
+    [qc],
+  );
 
   const statusText = useMemo(() => {
     if (!chrome) return "";
@@ -1274,6 +1388,72 @@ export function LivePlayHub({
   // Otherwise server turn/legals flash onto a still-frozen pre-ply board.
   const boardPlySynced = useMemo(() => isBoardPlySynced(game), [game]);
   const showMoveHighlights = Boolean(isYourTurn && boardPlySynced);
+
+  // Safety net: if land commit never reaches the parent (hitch / stall recover),
+  // force-sync board to latest board_after so interactive play cannot freeze forever.
+  // Aligned with PLY_IDLE_FAIL_OPEN_MS - a 2.5s snap mid multi-capture remounted
+  // pieces under the fly (pick→put flicker). Sticky like Flutter `_plySyncWatch`.
+  useEffect(() => {
+    // Also arm during finished: wipe plies may still be landing after phase flip.
+    if (!game || boardPlySynced || replayIndex != null) {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+      return;
+    }
+    if (phase !== "playing" && phase !== "finished") {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+      return;
+    }
+    const after = lastBoardAfter(game.move_history);
+    if (!after?.length) {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+      return;
+    }
+    if (plySyncSafetyTimerRef.current != null) return;
+    const armedAt = Date.now();
+    const arm = () => {
+      plySyncSafetyTimerRef.current = window.setTimeout(() => {
+        plySyncSafetyTimerRef.current = null;
+        // Still airborne (long capture chain) - wait; hard-cap so orphan attr cannot
+        // delay forever.
+        if (
+          document.querySelector("[data-dama-ply-inflight]") &&
+          Date.now() - armedAt < PLY_IDLE_FAIL_OPEN_MS * 2
+        ) {
+          arm();
+          return;
+        }
+        setGame((prev) => {
+          if (!prev || isBoardPlySynced(prev)) return prev;
+          const snap = lastBoardAfter(prev.move_history);
+          if (!snap?.length) return prev;
+          const next = withResolvedOutcome({ ...prev, board: snap });
+          gameRef.current = next;
+          // Persist so remount does not re-enter unsynced freeze.
+          qc.setQueryData(gameStateQueryKey(next.id), next);
+          return next;
+        });
+      }, PLY_IDLE_FAIL_OPEN_MS);
+    };
+    arm();
+  }, [game, boardPlySynced, phase, replayIndex, qc]);
+
+  useEffect(() => {
+    return () => {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Clock color follows animating ply (not raw server turn) so AI/opponent slides
   // don't flash your timer white before the piece lands.
@@ -1404,6 +1584,8 @@ export function LivePlayHub({
         ai_search_depth: depth,
         time_control_seconds: clockSeconds,
       });
+      // New match id while keep-alive board may still hold a fly - suppress stale land.
+      suppressPlyLandRef.current = true;
       setGame(session);
       setSelected(null);
       setPhase("playing");
@@ -1560,6 +1742,8 @@ export function LivePlayHub({
         // Keep gameRef in sync immediately so a fast move_ack cannot merge against pre-optimistic state.
         gameRef.current = optimistic;
         setGame(optimistic);
+        // Persist freeze-merged optimistic so remount mid pick→put cannot seed board_after.
+        if (optimistic.id) qc.setQueryData(gameStateQueryKey(optimistic.id), optimistic);
         setSelected(null);
         // Place SFX on board land phase only (not when the piece starts moving).
       } else {
@@ -1610,7 +1794,7 @@ export function LivePlayHub({
         toast.error(raw || chrome.toast_move_failed);
       });
     },
-    [busy, chrome, game, selected, userId, yourPlayer],
+    [busy, chrome, game, selected, userId, yourPlayer, qc],
   );
 
   // Honor URL mode and live game.mode - AI resume must not stay stuck as PvP.
@@ -1679,8 +1863,17 @@ export function LivePlayHub({
       .then((res) => {
         const payload = res.data as GamePayload | undefined;
         if (!payload?.id) return;
-        qc.setQueryData(gameStateQueryKey(payload.id), payload);
-        setGame(payload);
+        // Merge terminal clock-flag so an in-flight ply is not snapped away.
+        setGame((prev) => {
+          const merged = pendingLocalMoveRef.current
+            ? mergeBoardStateAfterPlayerMove(prev, payload)
+            : mergeRemoteBoardState(prev, payload);
+          gameRef.current = merged;
+          return merged;
+        });
+        if (gameRef.current?.id) {
+          qc.setQueryData(gameStateQueryKey(gameRef.current.id), gameRef.current);
+        }
       })
       .catch(() => {
         /* fail closed; next tick / hydrate retries */
@@ -1874,7 +2067,6 @@ export function LivePlayHub({
       : null;
 
   const seatFlip = Boolean(userId && game?.player2_id === userId);
-  const flipBoard = flipManual ?? seatFlip;
 
   const shareGameUrl = async () => {
     const id = (game?.id || gameIdParam || "").trim();
@@ -1899,7 +2091,15 @@ export function LivePlayHub({
         type="button"
         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--dama-border)] bg-[var(--dama-panel)] text-[var(--dama-muted)] hover:text-[var(--dama-text)]"
         aria-label={railChrome.flip_board_aria}
-        onClick={() => setFlipManual((v) => !(v ?? seatFlip))}
+        onClick={() => {
+          // Same gate as 2D↔3D - flip remaps screen coords mid-flight → flicker.
+          // Stuck attr must not drop the click forever (chain-safe fail-open).
+          runWhenPlyIdle(
+            () => setFlipManual((v) => !(v ?? seatFlip)),
+            PLY_IDLE_FAIL_OPEN_MS,
+            "live-flip",
+          );
+        }}
       >
         <RefreshCw className="h-3.5 w-3.5" aria-hidden />
       </button>
@@ -1930,7 +2130,10 @@ export function LivePlayHub({
               : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]",
           )}
           aria-pressed={boardView === "2d"}
-          onClick={() => setBoardView("2d")}
+          onClick={() => {
+            // 2D↔3D remounts the plane; useBoardViewMode defers mid pick→put (chain-safe fail-open).
+            setBoardView("2d");
+          }}
         >
           <Box className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {railChrome.board_view_2d}
@@ -1944,7 +2147,9 @@ export function LivePlayHub({
               : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]",
           )}
           aria-pressed={boardView === "3d"}
-          onClick={() => setBoardView("3d")}
+          onClick={() => {
+            setBoardView("3d");
+          }}
         >
           <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {railChrome.board_view_3d}
@@ -2050,6 +2255,7 @@ export function LivePlayHub({
   const boardNode =
     game && displayBoard && displayBoard.length > 0 ? (
       <div
+        key={game.id}
         className={cn(
           "relative h-full w-full overflow-hidden",
           replayIndex != null ? "opacity-90" : busy ? "pointer-events-none opacity-60" : undefined,
@@ -2086,9 +2292,9 @@ export function LivePlayHub({
             yourPlayer={yourPlayer}
             replayMode={replayIndex != null}
             illegalShakeKey={illegalShakeKey}
-            onPlyAnimated={
-              replayIndex == null && phase === "playing" ? handlePlyAnimated : undefined
-            }
+            // Keep land sync across replay scrub + finished - forceRecover on
+            // replay enter must still tip-sync parent (displayBoard is historical).
+            onPlyAnimated={handlePlyAnimated}
           />
         ) : (
           <DraughtsScene3D
@@ -2121,9 +2327,8 @@ export function LivePlayHub({
             yourPlayer={yourPlayer}
             replayMode={replayIndex != null}
             illegalShakeKey={illegalShakeKey}
-            onPlyAnimated={
-              replayIndex == null && phase === "playing" ? handlePlyAnimated : undefined
-            }
+            // Keep land sync across playing→finished + replay scrub (wipe / forceRecover).
+            onPlyAnimated={handlePlyAnimated}
             onPaintReady={onBoardPlanePaintReady}
           />
         )}
@@ -2234,8 +2439,14 @@ export function LivePlayHub({
         moves={history}
         boardSize={game.size}
         replayIndex={replayIndex}
-        onSelectLive={() => setReplayIndex(null)}
-        onSelectMove={(idx) => setReplayIndex(idx)}
+        onSelectLive={() => {
+          // Live chip remounts out of replayMode; defer mid pick→put.
+          runWhenPlyIdle(() => setReplayIndex(null), PLY_IDLE_FAIL_OPEN_MS, "live-live");
+        }}
+        onSelectMove={(idx) => {
+          // Replay remounts the plane; defer mid pick→put (chain-safe fail-open).
+          runWhenPlyIdle(() => setReplayIndex(idx), PLY_IDLE_FAIL_OPEN_MS, "live-replay");
+        }}
         liveLabel={(chrome.live_label || "").trim()}
         historyLabel={(chrome.history_label || chrome.label_moves || "").trim()}
         skipLabels={{
@@ -2384,7 +2595,15 @@ export function LivePlayHub({
           }
           abandonGameMutation.mutate(id, {
             onSuccess: (payload) => {
-              setGame(payload);
+              // Merge so stop during an in-flight ply does not snap resting pieces.
+              setGame((prev) => {
+                const merged = pendingLocalMoveRef.current
+                  ? mergeBoardStateAfterPlayerMove(prev, payload)
+                  : mergeRemoteBoardState(prev, payload);
+                gameRef.current = merged;
+                if (merged?.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+                return merged;
+              });
               setPhase("finished");
               setStopConfirmOpen(false);
               clearStoredPlaySession();

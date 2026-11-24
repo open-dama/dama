@@ -23,6 +23,7 @@ type PaymentsAPI struct {
 	Payments *payments.Service
 	Users    *store.UserStore
 	Settings *store.SettingsStore
+	Flags    *store.FlagStore
 	Cash     *store.CashRmgStore
 	Locate   *geo.Resolver
 	DB       *db.Handle
@@ -32,7 +33,7 @@ type PaymentsAPI struct {
 }
 
 func (a *PaymentsAPI) payerCountry(r *http.Request) string {
-	return resolvePayerCountryFromRequest(r, a.Locate, a.Settings, 0, 0)
+	return resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, 0, 0)
 }
 
 type checkoutBody struct {

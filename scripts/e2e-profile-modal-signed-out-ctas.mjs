@@ -3,8 +3,8 @@
  * disabled (Message hidden); signed-in keeps full CTAs. Mirrors PlayerHoverCard.
  * Admin has no play-rail profile inspect UI (N/A).
  */
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");

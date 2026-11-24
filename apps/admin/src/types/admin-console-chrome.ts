@@ -534,6 +534,7 @@ const SECTION_KEYS: Record<
     "cash_allowed_countries_saved",
     "cash_allowed_countries_failed",
     "cash_allowed_countries_empty",
+    "geo_ip_only_mode_warn",
   ],
   avatars: [
     "page_title",

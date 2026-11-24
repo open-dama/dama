@@ -11,6 +11,7 @@ import { useInMatchEligibilityMutation } from "@/hooks/mutation/useInMatchEligib
 import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { usePlayerGeoQuery } from "@/hooks/query/usePlayerGeoQuery";
 import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
+import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle } from "@/lib/board-view";
 import {
   parseViewportBreakpoints,
   pickCampaignCreative,
@@ -152,18 +153,34 @@ export function InMatchAdOverlay({ active, gameStartedAtMs }: Props) {
           if (res.interval_seconds > 0) scheduleAfter(res.interval_seconds);
           return;
         }
+        // Claim the slot now so eligibility does not re-fire; open after pick→put
+        // lands so the full-screen dialog does not cover a mid-flight piece
+        // (reads as freeze / flicker while the board still animates underneath).
         openRef.current = true;
         videoCompletedRef.current = false;
-        setCampaign(res.campaign);
-        setNonSkippable(res.non_skippable_seconds);
-        setRemaining(res.non_skippable_seconds);
-        setOpen(true);
-        lastShownAtMs.current = Date.now();
-        impressionMutateRef.current({
-          campaignId: res.campaign.id,
-          viewerKey: viewerKey(),
-          placement: pb.player_chrome.placement_in_match,
-        });
+        const campaign = res.campaign;
+        const nonSkip = res.non_skippable_seconds;
+        const placement = pb.player_chrome.placement_in_match;
+        runWhenPlyIdle(
+          () => {
+            if (!activeRef.current || !openRef.current) {
+              openRef.current = false;
+              return;
+            }
+            setCampaign(campaign);
+            setNonSkippable(nonSkip);
+            setRemaining(nonSkip);
+            setOpen(true);
+            lastShownAtMs.current = Date.now();
+            impressionMutateRef.current({
+              campaignId: campaign.id,
+              viewerKey: viewerKey(),
+              placement,
+            });
+          },
+          PLY_IDLE_FAIL_OPEN_MS,
+          "in-match-ad",
+        );
         return;
       }
       const wait = res.next_check_after_seconds;

@@ -12,6 +12,7 @@ query FeatureFlags {
     prizePoolDisplayEnabled
     prizePoolGuaranteeEnabled
     kycAutoApprove
+    geoPreferDeviceGps
     aiDepths
   }
 }

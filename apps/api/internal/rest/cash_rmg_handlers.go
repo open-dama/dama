@@ -91,7 +91,7 @@ func (a *CashRmgAPI) Eligibility(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Server geo only (reference pay chain; ignore client country_code query).
-	country := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, 0, 0)
+	country := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, 0, 0)
 	u, err := a.Users.GetByID(r.Context(), userID)
 	if err != nil {
 		writeWalletChromeError(w, a.Settings, r.Context(), http.StatusUnauthorized, "err_unauthorized")
@@ -506,11 +506,11 @@ func (a *CashRmgAPI) ConsoleDeleteAllowedCountry(w http.ResponseWriter, r *http.
 }
 
 // viewerCashRegionOK is true when request IP/GPS country may see paid cash discovery.
-func viewerCashRegionOK(r *http.Request, cash *store.CashRmgStore, locate *geo.Resolver, settings *store.SettingsStore) bool {
+func viewerCashRegionOK(r *http.Request, cash *store.CashRmgStore, locate *geo.Resolver, settings *store.SettingsStore, flags *store.FlagStore) bool {
 	if cash == nil || !cash.Ready() {
 		return false
 	}
-	cc := resolvePayerCountryFromRequest(r, locate, settings, 0, 0)
+	cc := resolvePayerCountryFromRequest(r, locate, settings, flags, 0, 0)
 	return cash.CountryEligibleForCash(r.Context(), cc)
 }
 

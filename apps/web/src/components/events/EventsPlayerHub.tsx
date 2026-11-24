@@ -27,6 +27,8 @@ import { useJoinedEventsQuery } from "@/hooks/query/useJoinedEventsQuery";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
 import { useUrlSkip } from "@/hooks/useUrlSkip";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import {
   softCommunityCarouselAria,
   softCommunityChromeUnavailable,
@@ -58,8 +60,6 @@ import {
   cupLifecycleStatusLabel,
   resolveCupCardCta,
 } from "@/lib/cupLifecycle";
-import { chromeOnlyToastError } from "@/lib/api-toast-message";
-import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { shouldOpenEventCupLobby } from "@/lib/event-cup-lobby";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
 import { catalogHostedFeatureOff } from "@/lib/events-catalog-gate";

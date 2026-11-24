@@ -19,6 +19,7 @@ type GeoAPI struct {
 	Presence *presence.Service
 	Users    *store.UserStore
 	Settings *store.SettingsStore
+	Flags    *store.FlagStore
 	DB       *db.Handle
 	Activity *ActivityAPI
 }
@@ -33,6 +34,8 @@ func (a *GeoAPI) Locate(w http.ResponseWriter, r *http.Request) {
 	var body locateBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
+	lat, lng := applyPreferDeviceGpsCoords(r, a.Flags, body.Latitude, body.Longitude)
+
 	clientIP := geo.ClientIP(r)
 	// Never honor client country hints (even when DAMA_ALLOW_E2E_AUTH=1).
 	// E2E geo uses X-Forwarded-For / CF-Connecting-IP instead.
@@ -40,8 +43,8 @@ func (a *GeoAPI) Locate(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		"",
 		false,
-		body.Latitude,
-		body.Longitude,
+		lat,
+		lng,
 		clientIP,
 		privateDefaultFromSettings(a.Settings),
 	)

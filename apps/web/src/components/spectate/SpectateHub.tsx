@@ -40,7 +40,7 @@ import { playGameNotify } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { pieceSeatNames, usePiecePalette } from "@/lib/board-palette";
 import { formatMoveAlgebraic } from "@/lib/board-square";
-import { useBoardViewMode } from "@/lib/board-view";
+import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle, useBoardViewMode } from "@/lib/board-view";
 import { notifyIncomingChatMessage } from "@/lib/chat-message-notify";
 import {
   softSpectateEventLogTitle,
@@ -51,7 +51,12 @@ import { formatDmUnreadBadge } from "@/lib/dm-unread-badge";
 import { apiWsUrl } from "@/lib/env";
 import { getMatchCaptureScores } from "@/lib/game-board-stats";
 import { mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
-import { activeClockPlayer } from "@/lib/gameOutcome";
+import {
+  activeClockPlayer,
+  boardsEqual,
+  isBoardPlySynced,
+  lastBoardAfter,
+} from "@/lib/gameOutcome";
 import { buildInitialBoard } from "@/lib/initial-board";
 import { invalidateAvatarSurfaces } from "@/lib/invalidate";
 import {
@@ -308,6 +313,10 @@ export default function SpectateHub({
   const [resumeBanner, setResumeBanner] = useState("");
   const lastOfficialActorRef = useRef<{ role: string; name: string } | null>(null);
   const wasOfficiallyPausedRef = useRef(false);
+  /** Sticky arm: do not clear/recreate the 2.5s timer on every game identity churn (freeze hole). */
+  const plySyncSafetyTimerRef = useRef<number | null>(null);
+  /** Game-id swap: drop stale land from the previous board's unmount forceRecover. */
+  const suppressPlyLandRef = useRef(false);
 
   const initialSpectateGameId = (
     searchParams.get("gameId") ||
@@ -393,13 +402,85 @@ export default function SpectateHub({
     return getMatchCaptureScores(game, 1, replayIndex, boardRulesQuery.data?.pieces_per_side ?? 20);
   }, [boardRulesQuery.data?.pieces_per_side, game, replayIndex]);
 
+  // After game-id swap, allow land again once the new board session is mounted.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-arm land gate on game-id swap
+  useEffect(() => {
+    suppressPlyLandRef.current = false;
+  }, [game?.id]);
+
   const handlePlyAnimated = useCallback(
     (boardAfter: BoardCell[][]) => {
-      if (!boardAfter?.length || replayIndex != null) return;
-      setGame((prev) => (prev ? { ...prev, board: boardAfter } : prev));
+      if (!boardAfter?.length) return;
+      // Stale land from previous watch target must not paint onto the new game id.
+      if (suppressPlyLandRef.current) return;
+      // Always accept land - even while scrubbing. displayBoard uses replay index;
+      // dropping onPlyAnimated mid replay enter left game.board freeze-painted and
+      // forceRecoverStall could not sync tip (exit-live freeze until sticky).
+      setGame((prev) => {
+        if (!prev) return prev;
+        // Skip identity churn when land already synced (finish/empty-queue may re-notify).
+        if (boardsEqual(prev.board, boardAfter)) return prev;
+        const next = { ...prev, board: boardAfter };
+        // Persist painted board so leave→back / remount does not re-freeze until safety.
+        queryClient.setQueryData(gameStateQueryKey(next.id), next);
+        return next;
+      });
     },
-    [replayIndex],
+    [queryClient],
   );
+
+  // Safety net: force-sync board if land commit never reaches parent (freeze recovery).
+  // Aligned with PLY_IDLE_FAIL_OPEN_MS - a 2.5s snap mid multi-capture remounted
+  // pieces under the fly. Sticky like Flutter `_plySyncWatch?.isActive`.
+  useEffect(() => {
+    if (!game || replayIndex != null || isBoardPlySynced(game)) {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+      return;
+    }
+    const after = lastBoardAfter(game.move_history);
+    if (!after?.length) {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+      return;
+    }
+    if (plySyncSafetyTimerRef.current != null) return;
+    const armedAt = Date.now();
+    const arm = () => {
+      plySyncSafetyTimerRef.current = window.setTimeout(() => {
+        plySyncSafetyTimerRef.current = null;
+        if (
+          document.querySelector("[data-dama-ply-inflight]") &&
+          Date.now() - armedAt < PLY_IDLE_FAIL_OPEN_MS * 2
+        ) {
+          arm();
+          return;
+        }
+        setGame((prev) => {
+          if (!prev || isBoardPlySynced(prev)) return prev;
+          const snap = lastBoardAfter(prev.move_history);
+          if (!snap?.length) return prev;
+          const next = { ...prev, board: snap };
+          queryClient.setQueryData(gameStateQueryKey(next.id), next);
+          return next;
+        });
+      }, PLY_IDLE_FAIL_OPEN_MS);
+    };
+    arm();
+  }, [game, replayIndex, queryClient]);
+
+  useEffect(() => {
+    return () => {
+      if (plySyncSafetyTimerRef.current != null) {
+        window.clearTimeout(plySyncSafetyTimerRef.current);
+        plySyncSafetyTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const pauseOverlayCopy = useMemo(
     () => buildPauseOverlayCopy(game, playChrome, officialPauseChrome),
@@ -502,7 +583,24 @@ export default function SpectateHub({
   useEffect(() => {
     if (!connected) return;
     if (hydrateQuery.data) {
-      setGame(hydrateQuery.data);
+      const next = hydrateQuery.data;
+      // Never raw-replace same-match state from RQ/refetch - that undid WS freeze merge
+      // and snapped pieces mid pick→put (LivePlayHub parity).
+      setGame((prev) => {
+        if (!prev || prev.id !== next.id) {
+          // Remount keyed board will forceRecover old fly - ignore that land.
+          suppressPlyLandRef.current = true;
+          return next;
+        }
+        if (prev === next) return prev;
+        const merged = mergeRemoteBoardState(prev, next);
+        // Refetch stores raw board_after in RQ - write freeze-merged back so
+        // leave→back mid pick→put cannot seed a snap from cache (LivePlayHub parity).
+        if (merged.id) {
+          queryClient.setQueryData(gameStateQueryKey(merged.id), merged);
+        }
+        return merged;
+      });
       setError(null);
       return;
     }
@@ -511,7 +609,7 @@ export default function SpectateHub({
         hydrateQuery.error instanceof Error ? hydrateQuery.error.message : chrome.load_game_failed,
       );
     }
-  }, [connected, hydrateQuery.data, hydrateQuery.error, chrome]);
+  }, [connected, hydrateQuery.data, hydrateQuery.error, chrome, queryClient]);
 
   useEffect(() => {
     if (!hydrated || !connected || !gameId) return;
@@ -579,7 +677,15 @@ export default function SpectateHub({
             lastOfficialActorRef.current = null;
           }
           // Freeze board while history grows so ply anim + seat clock stay in sync.
-          setGame((prev) => mergeRemoteBoardState(prev, incoming));
+          setGame((prev) => {
+            const merged = mergeRemoteBoardState(prev, incoming);
+            // Store freeze-merged state (not raw board_after) so leave→back /
+            // RQ hydrate cannot seed a mid pick→put snap from cache (LivePlayHub parity).
+            if (merged.id) {
+              queryClient.setQueryData(gameStateQueryKey(merged.id), merged);
+            }
+            return merged;
+          });
           setError(null);
         }
         if (msg.type === "vote_update" && "votes" in msg && msg.votes && gameId) {
@@ -685,8 +791,20 @@ export default function SpectateHub({
     setError(null);
     setReplayIndex(null);
     // Keep painting session cache while reconnecting (nav-back / lists parity).
+    // Never raw-replace same-match cache mid pick→put - RQ often holds board_after
+    // while React state is still frozen for ply anim (LivePlayHub hydrate parity).
     const cached = queryClient.getQueryData<GamePayload>(gameStateQueryKey(id));
-    if (cached) setGame(cached);
+    if (cached) {
+      setGame((prev) => {
+        if (!prev || prev.id !== cached.id) return cached;
+        const merged = mergeRemoteBoardState(prev, cached);
+        // Keep RQ on freeze-merged paint (reconnect mid pick→put).
+        if (merged.id) {
+          queryClient.setQueryData(gameStateQueryKey(merged.id), merged);
+        }
+        return merged;
+      });
+    }
     setConnected(true);
     // Soft refetch - do not wipe local board; WS remains the live source.
     void queryClient.refetchQueries({ queryKey: gameStateQueryKey(id) });
@@ -765,7 +883,11 @@ export default function SpectateHub({
         type="button"
         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--dama-border)] bg-[var(--dama-panel)] text-[var(--dama-muted)] hover:text-[var(--dama-text)]"
         aria-label={railChrome.flip_board_aria}
-        onClick={() => setFlipBoard((v) => !v)}
+        onClick={() => {
+          // Same gate as 2D↔3D - flip remaps screen coords mid-flight → flicker.
+          // Stuck attr must not drop the click forever (chain-safe fail-open).
+          runWhenPlyIdle(() => setFlipBoard((v) => !v), PLY_IDLE_FAIL_OPEN_MS, "spectate-flip");
+        }}
       >
         <RefreshCw className="h-3.5 w-3.5" aria-hidden />
       </button>
@@ -797,7 +919,10 @@ export default function SpectateHub({
               : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]",
           )}
           aria-pressed={boardView === "2d"}
-          onClick={() => setBoardView("2d")}
+          onClick={() => {
+            // 2D↔3D remounts the plane; useBoardViewMode defers mid pick→put (chain-safe fail-open).
+            setBoardView("2d");
+          }}
         >
           <Box className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {railChrome.board_view_2d}
@@ -811,7 +936,9 @@ export default function SpectateHub({
               : "text-[var(--dama-muted)] hover:text-[var(--dama-text)]",
           )}
           aria-pressed={boardView === "3d"}
-          onClick={() => setBoardView("3d")}
+          onClick={() => {
+            setBoardView("3d");
+          }}
         >
           <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {railChrome.board_view_3d}
@@ -850,38 +977,41 @@ export default function SpectateHub({
   // Fill PlayBoardColumn’s square host (LivePlayHub parity) - never stack extra chrome
   // under the board inside the square (that reads as L/R/T/B padding).
   let boardInner: ReactNode;
-  if (showLiveBoard && displayBoard) {
-    boardInner =
-      boardView === "2d" ? (
-        <DraughtsBoard2D
-          board={displayBoard}
-          legalMoves={[]}
-          selected={null}
-          onSelectSquare={() => undefined}
-          interactive={false}
-          mustContinue={null}
-          flipBoard={flipBoard}
-          moveHistory={replayIndex != null ? [] : history}
-          yourPlayer={1}
-          replayMode={replayIndex != null}
-          onPlyAnimated={replayIndex == null ? handlePlyAnimated : undefined}
-        />
-      ) : (
-        <DraughtsScene3D
-          board={displayBoard}
-          legalMoves={[]}
-          selected={null}
-          onSelectSquare={() => undefined}
-          interactive={false}
-          mustContinue={null}
-          flipBoard={flipBoard}
-          moveHistory={replayIndex != null ? [] : history}
-          yourPlayer={1}
-          replayMode={replayIndex != null}
-          onPlyAnimated={replayIndex == null ? handlePlyAnimated : undefined}
-          onPaintReady={onBoardPlanePaintReady}
-        />
-      );
+  if (showLiveBoard && displayBoard && game) {
+    boardInner = (
+      <div key={game.id} className="relative h-full w-full">
+        {boardView === "2d" ? (
+          <DraughtsBoard2D
+            board={displayBoard}
+            legalMoves={[]}
+            selected={null}
+            onSelectSquare={() => undefined}
+            interactive={false}
+            mustContinue={null}
+            flipBoard={flipBoard}
+            moveHistory={replayIndex != null ? [] : history}
+            yourPlayer={1}
+            replayMode={replayIndex != null}
+            onPlyAnimated={handlePlyAnimated}
+          />
+        ) : (
+          <DraughtsScene3D
+            board={displayBoard}
+            legalMoves={[]}
+            selected={null}
+            onSelectSquare={() => undefined}
+            interactive={false}
+            mustContinue={null}
+            flipBoard={flipBoard}
+            moveHistory={replayIndex != null ? [] : history}
+            yourPlayer={1}
+            replayMode={replayIndex != null}
+            onPlyAnimated={handlePlyAnimated}
+            onPaintReady={onBoardPlanePaintReady}
+          />
+        )}
+      </div>
+    );
   } else if (showBoardSkeleton) {
     boardInner = <BoardAreaSkeleton />;
   } else if (boardView === "2d") {
@@ -1404,8 +1534,20 @@ export default function SpectateHub({
                   moves={history}
                   boardSize={game?.size ?? 0}
                   replayIndex={replayIndex}
-                  onSelectLive={() => setReplayIndex(null)}
-                  onSelectMove={(idx) => setReplayIndex(idx)}
+                  onSelectLive={() => {
+                    runWhenPlyIdle(
+                      () => setReplayIndex(null),
+                      PLY_IDLE_FAIL_OPEN_MS,
+                      "spectate-live",
+                    );
+                  }}
+                  onSelectMove={(idx) => {
+                    runWhenPlyIdle(
+                      () => setReplayIndex(idx),
+                      PLY_IDLE_FAIL_OPEN_MS,
+                      "spectate-replay",
+                    );
+                  }}
                   liveLabel={(chrome.live_label || "").trim()}
                   historyLabel={(chrome.history_label || "").trim()}
                   skipLabels={
@@ -1505,8 +1647,20 @@ export default function SpectateHub({
                     moves={history}
                     boardSize={game?.size ?? 0}
                     replayIndex={replayIndex}
-                    onSelectLive={() => setReplayIndex(null)}
-                    onSelectMove={(idx) => setReplayIndex(idx)}
+                    onSelectLive={() => {
+                      runWhenPlyIdle(
+                        () => setReplayIndex(null),
+                        PLY_IDLE_FAIL_OPEN_MS,
+                        "spectate-live",
+                      );
+                    }}
+                    onSelectMove={(idx) => {
+                      runWhenPlyIdle(
+                        () => setReplayIndex(idx),
+                        PLY_IDLE_FAIL_OPEN_MS,
+                        "spectate-replay",
+                      );
+                    }}
                     liveLabel={(chrome.live_label || "").trim()}
                     historyLabel={(chrome.history_label || "").trim()}
                     skipLabels={

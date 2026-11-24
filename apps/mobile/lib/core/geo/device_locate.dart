@@ -84,10 +84,15 @@ Future<DeviceLocateResult?> postGeoLocate({
 }
 
 /// Read device GPS then locate (web player-geo parity).
+/// When [preferDeviceGps] is false (admin IP-only mode), skip GPS and locate by IP.
 Future<DeviceLocateResult?> locateWithDeviceGps({
   required String locateUrl,
   Map<String, String>? headers,
+  bool preferDeviceGps = true,
 }) async {
+  if (!preferDeviceGps) {
+    return postGeoLocate(locateUrl: locateUrl, headers: headers);
+  }
   final (lat, lng) = await readDeviceCoordinates();
   return postGeoLocate(
     locateUrl: locateUrl,

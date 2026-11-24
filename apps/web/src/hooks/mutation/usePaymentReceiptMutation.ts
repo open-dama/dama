@@ -1,7 +1,7 @@
 import { cashRmgChromeQueryKey } from "@/hooks/query/useCashRmgChromeQuery";
 import { walletChromeQueryKey } from "@/hooks/query/useWalletChromeQuery";
 import { authHeaders, restClient } from "@/lib/api";
-import { chromeOnlyToastError, apiToastMessage } from "@/lib/api-toast-message";
+import { apiToastMessage, chromeOnlyToastError } from "@/lib/api-toast-message";
 import {
   cashGateChromeMessage,
   isAgeRequiredError,

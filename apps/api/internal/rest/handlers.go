@@ -41,6 +41,7 @@ type API struct {
 	Payments          *payments.Service
 	RBAC              *store.RBACStore
 	OfficialPause     *store.OfficialPauseStore
+	Audit             *store.AuditStore
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -1006,6 +1007,7 @@ func (a *API) FeatureFlags(w http.ResponseWriter, r *http.Request) {
 		"prize_pool_display_enabled":   f.PrizePoolDisplayEnabled,
 		"prize_pool_guarantee_enabled": f.PrizePoolGuaranteeEnabled,
 		"kyc_auto_approve":             f.KycAutoApprove,
+		"geo_prefer_device_gps":        f.GeoPreferDeviceGps,
 		"ai_depths":                    f.AIDepths,
 	})
 }
@@ -1097,6 +1099,17 @@ func (a *API) SetFeatureFlag(w http.ResponseWriter, r *http.Request) {
 		writeClientError(w, http.StatusInternalServerError, "unable to update flag")
 		return
 	}
+	if a.Audit != nil {
+		actor := auth.UserIDFromContext(r.Context())
+		var actorPtr *string
+		if actor != "" {
+			actorPtr = &actor
+		}
+		a.Audit.Log(r.Context(), actorPtr, "feature_flag.set", "feature_flag", req.Key, map[string]any{
+			"enabled": req.Enabled,
+			"key":     req.Key,
+		})
+	}
 	f := a.Flags.Get(r.Context())
 	if a.Hub != nil {
 		// Public WS payload only (same fields as GET /feature-flags).
@@ -1115,6 +1128,7 @@ func (a *API) SetFeatureFlag(w http.ResponseWriter, r *http.Request) {
 				"prize_pool_display_enabled":   f.PrizePoolDisplayEnabled,
 				"prize_pool_guarantee_enabled": f.PrizePoolGuaranteeEnabled,
 				"kyc_auto_approve":             f.KycAutoApprove,
+				"geo_prefer_device_gps":        f.GeoPreferDeviceGps,
 				"ai_depths":                    f.AIDepths,
 			},
 		})

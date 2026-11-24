@@ -1,10 +1,10 @@
 import { ApiClientError } from "../src/lib/api-client-error";
+import { isCashGateApiEnglish, isRawApiJsonEnvelope } from "../src/lib/api-toast-message";
 import {
   cashGateChromeMessage,
   cashGateErrorKey,
   isPhoneKycRequiredError,
 } from "../src/lib/cash-gate-error";
-import { isCashGateApiEnglish, isRawApiJsonEnvelope } from "../src/lib/api-toast-message";
 import { cupLobbyPlayerErrMsg } from "../src/lib/cup-lobby-player-err";
 import { eventJoinErrorChrome } from "../src/lib/event-join-error";
 import { tournamentEnrollErrorChrome } from "../src/lib/tournament-free-join";

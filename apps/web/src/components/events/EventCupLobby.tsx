@@ -23,13 +23,13 @@ import { useEventEntriesPagedQuery } from "@/hooks/query/useEventEntriesPagedQue
 import { useEventQuery } from "@/hooks/query/useEventQuery";
 import { useEventStandingsQuery } from "@/hooks/query/useEventStandingsQuery";
 import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
-import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
-import { parseListPageSize } from "@/lib/parse-list-page-size";
 import {
   isRadixSelectPortalTarget,
   releaseBodyPointerEvents,
 } from "@/hooks/use-deferred-dialog-selection";
+import { useResetSkipOnChange } from "@/hooks/useResetSkipOnChange";
 import { isApiClientError } from "@/lib/api-client-error";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
 import { chromeSeparator, chromeSeparatorPresent } from "@/lib/chrome-separator";
 import {
   softCommunityArenaLobbyBlurb,
@@ -49,7 +49,6 @@ import {
   softCommunitySpectateAction,
 } from "@/lib/community-player-chrome-soft";
 import { arenaClockActive } from "@/lib/competition-arena";
-import { chromeOnlyToastError } from "@/lib/api-toast-message";
 import { cupLobbyPlayerErrMsg } from "@/lib/cup-lobby-player-err";
 import { cupLifecycleStatusLabel } from "@/lib/cupLifecycle";
 import { computeEstPrizeShare, formatEstPrizeShareAmount } from "@/lib/est-prize-share";
@@ -60,6 +59,7 @@ import {
   tournamentFormatIsArena,
 } from "@/lib/event-cup-lobby";
 import { softHostingReportAction } from "@/lib/hosting-organizer-chrome-soft";
+import { parseListPageSize } from "@/lib/parse-list-page-size";
 import { hostedEventPrizePoolLines, prizePoolCardLabelsFromPlayer } from "@/lib/prize-pool-lines";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";

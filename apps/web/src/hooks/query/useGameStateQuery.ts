@@ -1,4 +1,5 @@
 import { restClient } from "@/lib/api";
+import { mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
 import { QueryStale } from "@/lib/query-policy";
 import type { GamePayload } from "@/types/game";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +29,11 @@ export function useGameStateQuery(gameId: string | null | undefined, enabled = t
     queryFn: async (): Promise<GamePayload> => {
       if (!gameId) throw new Error("game id required");
       const { data } = await restClient.get<GamePayload>(`/games/${gameId}/state`);
-      return data;
+      // Never let soft refetch store raw board_after over a freeze-painted cache.
+      // Hub remount between refetch and hydrate used to seed mid pick→put snap/freeze.
+      const prev = qc.getQueryData<GamePayload>(key);
+      if (!prev || prev.id !== data.id) return data;
+      return mergeRemoteBoardState(prev, data);
     },
   });
 }

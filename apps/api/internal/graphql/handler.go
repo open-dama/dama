@@ -40,6 +40,7 @@ type Deps struct {
 	Hub         *ws.Hub
 	DB          *db.Handle
 	Locate      *geo.Resolver
+	Audit       *store.AuditStore
 }
 
 type gqlRequestKey struct{}
@@ -308,6 +309,7 @@ func buildSchema(deps Deps) (gql.Schema, error) {
 			"prizePoolDisplayEnabled":   &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"prizePoolGuaranteeEnabled": &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"kycAutoApprove":            &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
+			"geoPreferDeviceGps":        &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"aiDepths":                  &gql.Field{Type: gql.NewNonNull(gql.NewList(gql.NewNonNull(gql.Int)))},
 		},
 	})
@@ -326,6 +328,7 @@ func buildSchema(deps Deps) (gql.Schema, error) {
 			"prizePoolDisplayEnabled":   &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"prizePoolGuaranteeEnabled": &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"kycAutoApprove":            &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
+			"geoPreferDeviceGps":        &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"ethiopiaPaymentMode":       &gql.Field{Type: gql.NewNonNull(gql.String)},
 			"aiDepths":                  &gql.Field{Type: gql.NewNonNull(gql.NewList(gql.NewNonNull(gql.Int)))},
 		},
@@ -987,6 +990,13 @@ func buildSchema(deps Deps) (gql.Schema, error) {
 					if err := deps.Flags.Set(p.Context, key, enabled, payload); err != nil {
 						return nil, simpleErr("unable to update flag")
 					}
+					if deps.Audit != nil && claims != nil {
+						actor := claims.UserID
+						deps.Audit.Log(p.Context, &actor, "feature_flag.set", "feature_flag", key, map[string]any{
+							"enabled": enabled,
+							"key":     key,
+						})
+					}
 					f := deps.Flags.Get(p.Context)
 					if deps.Hub != nil {
 						deps.Hub.BroadcastFeatureFlags(map[string]any{
@@ -1004,6 +1014,7 @@ func buildSchema(deps Deps) (gql.Schema, error) {
 								"prize_pool_display_enabled":   f.PrizePoolDisplayEnabled,
 								"prize_pool_guarantee_enabled": f.PrizePoolGuaranteeEnabled,
 								"kyc_auto_approve":             f.KycAutoApprove,
+								"geo_prefer_device_gps":        f.GeoPreferDeviceGps,
 								"ai_depths":                    f.AIDepths,
 							},
 						})
@@ -1101,6 +1112,7 @@ func flagsMap(f store.FeatureFlags) map[string]any {
 		"prizePoolDisplayEnabled":   f.PrizePoolDisplayEnabled,
 		"prizePoolGuaranteeEnabled": f.PrizePoolGuaranteeEnabled,
 		"kycAutoApprove":            f.KycAutoApprove,
+		"geoPreferDeviceGps":        f.GeoPreferDeviceGps,
 		"ethiopiaPaymentMode":       payments.PublicChannel(f.EthiopiaPaymentMode),
 		"aiDepths":                  f.AIDepths,
 	}
@@ -1124,6 +1136,7 @@ func flagsMapPublic(f store.FeatureFlags) map[string]any {
 		"prizePoolDisplayEnabled":   f.PrizePoolDisplayEnabled,
 		"prizePoolGuaranteeEnabled": f.PrizePoolGuaranteeEnabled,
 		"kycAutoApprove":            f.KycAutoApprove,
+		"geoPreferDeviceGps":        f.GeoPreferDeviceGps,
 		"aiDepths":                  f.AIDepths,
 	}
 }

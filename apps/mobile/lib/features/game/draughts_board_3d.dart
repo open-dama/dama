@@ -7,6 +7,7 @@ import 'package:dama_mobile/core/board_square.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/game.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
+import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:dama_mobile/features/game/palace_piece.dart';
 import 'package:flutter/material.dart';
 
@@ -107,6 +108,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   static const _durationPerSquareMs = 90;
   static const _moveDurationMaxMs = 820;
   static const _stallGraceMs = 250;
+  /// Web lastFrameAtRef parity: recover when ticker claims animating but value stalls.
+  static const _deadTickerMs = 2000;
 
   double _pitch = 0.55;
   double _yaw = 0.18;
@@ -121,9 +124,17 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   final List<_ActiveAnim> _queue = [];
   int _prevHistoryLen = 0;
   bool _holdSync = false;
+  /// True while this board holds BoardPlyFlight (holdSync OR active OR queue).
+  bool _plyGateHeld = false;
   late final AnimationController _shakeCtrl;
   Timer? _stallWatch;
   bool _finishQueued = false;
+  /// True while app lifecycle paused the flight clock (web document.hidden parity).
+  /// Stall recover must not snap land while the clock is intentionally frozen.
+  bool _flightClockPaused = false;
+  /// Last monotonic ms when `_anim.value` advanced (dead-ticker detect).
+  int _lastAnimAdvanceMs = 0;
+  double _lastAnimAdvanceValue = -1;
 
   /// Board size whose first paint notified parent (height gates; no overlay).
   int? _paintReadyForSize;
@@ -140,17 +151,28 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     });
   }
 
+  // Suppress select/legal/must while the ply fly is up. Parent flips
+  // _boardPlySynced at LAND_PHASE so cues would otherwise flash mid put-down.
+  bool get _moveCuesActive => _active == null;
+
+  int? get _cueSelectedRow => _moveCuesActive ? widget.selectedRow : null;
+  int? get _cueSelectedCol => _moveCuesActive ? widget.selectedCol : null;
+  int? get _cueMustRow => _moveCuesActive ? widget.mustContinueRow : null;
+  int? get _cueMustCol => _moveCuesActive ? widget.mustContinueCol : null;
+  List<List<int>> get _cueLegalMoves =>
+      _moveCuesActive ? widget.legalMoves : const <List<int>>[];
+
   Set<String> get _highlights {
     final set = <String>{};
-    final sr = widget.selectedRow;
-    final sc = widget.selectedCol;
-    final mcR = widget.mustContinueRow;
-    final mcC = widget.mustContinueCol;
+    final sr = _cueSelectedRow;
+    final sc = _cueSelectedCol;
+    final mcR = _cueMustRow;
+    final mcC = _cueMustCol;
     if (mcR != null && mcC != null) set.add('$mcR:$mcC');
     if (sr != null && sc != null) {
       // Selected square uses the same solid highlight fill as destinations.
       set.add('$sr:$sc');
-      for (final m in widget.legalMoves) {
+      for (final m in _cueLegalMoves) {
         if (m.length >= 4 && m[0] == sr && m[1] == sc) {
           set.add('${m[2]}:${m[3]}');
         }
@@ -158,7 +180,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       return set;
     }
     // All movable FROM squares (quiet + capture) - fastest play cue.
-    for (final m in widget.legalMoves) {
+    for (final m in _cueLegalMoves) {
       if (m.length >= 2) set.add('${m[0]}:${m[1]}');
     }
     return set;
@@ -166,11 +188,11 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
 
   /// Legal destination squares only (2D ghost-dot targets).
   Set<String> get _destinationKeys {
-    final sr = widget.selectedRow;
-    final sc = widget.selectedCol;
+    final sr = _cueSelectedRow;
+    final sc = _cueSelectedCol;
     if (sr == null || sc == null) return {};
     final set = <String>{};
-    for (final m in widget.legalMoves) {
+    for (final m in _cueLegalMoves) {
       if (m.length >= 4 && m[0] == sr && m[1] == sc) {
         set.add('${m[2]}:${m[3]}');
       }
@@ -178,9 +200,11 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     return set;
   }
 
-  /// Chess.com-style yellow last-ply from/to (skipped while animating).
+  /// Chess.com-style yellow last-ply from/to (skipped while animating/scrubbing).
   Set<String> get _lastMoveKeys {
-    if (_active != null || widget.moveHistory.isEmpty) return {};
+    if (widget.replayMode || _active != null || widget.moveHistory.isEmpty) {
+      return {};
+    }
     final last = widget.moveHistory.last;
     if (last.from.length < 2 || last.to.length < 2) return {};
     return {
@@ -209,12 +233,30 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     }));
     _renderBoard = _cloneBoard(widget.board);
     _prevHistoryLen = widget.moveHistory.length;
+    // Remount mid pick→put (e.g. 2D↔3D): history already at tip so no ply queues.
+    // Sync parent immediately - otherwise _boardPlySynced freezes until 2.5s safety.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.replayMode) return;
+      if (_holdSync || _active != null || _queue.isNotEmpty) return;
+      if (widget.moveHistory.isEmpty) return;
+      final after = widget.moveHistory.last.boardAfter;
+      if (after == null || after.isEmpty) return;
+      if (_boardsEqual(widget.board, after)) return;
+      if (!_boardsEqual(_renderBoard, after)) {
+        setState(() => _renderBoard = _cloneBoard(after));
+      }
+      widget.onPlyAnimated?.call(after);
+    });
     _anim = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
       ..addListener(() {
         // Flight paints via AnimatedBuilder - avoid full setState every tick.
         final prev = _progress;
         _progress = _anim.value;
+        if (_progress != _lastAnimAdvanceValue) {
+          _lastAnimAdvanceValue = _progress;
+          _lastAnimAdvanceMs = DateTime.now().millisecondsSinceEpoch;
+        }
         final active = _active;
         // Commit board as the piece puts down (captures disappear with the land).
         if (active != null &&
@@ -224,9 +266,12 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
             _progress >= _landPhaseStart) {
           if (!active.boardApplied) {
             active.boardApplied = true;
-            setState(() {
-              _renderBoard = _cloneBoard(active.boardAfter!);
-            });
+            // Skip clone when equal (avoids resting remount flicker on land).
+            if (!_boardsEqual(_renderBoard, active.boardAfter!)) {
+              setState(() {
+                _renderBoard = _cloneBoard(active.boardAfter!);
+              });
+            }
             widget.onPlyAnimated?.call(active.boardAfter!);
           }
           if (!active.soundPlayed && !widget.replayMode) {
@@ -266,11 +311,25 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      if (_anim.isAnimating) _anim.stop(canceled: false);
+      // Gate on _active (not only isAnimating). A hitch-stopped mid-fly still
+      // needs the pause flag or stall watch forceRecover snaps on background.
+      if (_active != null) {
+        _flightClockPaused = true;
+        if (_anim.isAnimating) {
+          _anim.stop(canceled: false);
+        }
+      }
     } else if (state == AppLifecycleState.resumed) {
+      // Re-arm stall clock (web lastFrameAtRef visibility parity) before clearing
+      // pause so a concurrent stall tick cannot false-trigger dead-ticker recover.
+      if (_active != null) {
+        _lastAnimAdvanceMs = DateTime.now().millisecondsSinceEpoch;
+      }
+      // Forward before clearing pause so a concurrent stall tick cannot snap land.
       if (_active != null && !_anim.isAnimating && _anim.value < 1) {
         _anim.forward();
       }
+      _flightClockPaused = false;
     }
   }
 
@@ -285,7 +344,21 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       Duration(milliseconds: durationMs + _stallGraceMs),
       () {
         if (!mounted) return;
+        // Lifecycle-paused mid-flight - wait another grace.
+        if (_flightClockPaused) {
+          _armStallWatch(_stallGraceMs);
+          return;
+        }
+        // Dead ticker: isAnimating can stay true while value never advances
+        // (WebView hitch). Re-arming forever left the board frozen mid pick→put.
         if (_anim.isAnimating) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (_active != null &&
+              _lastAnimAdvanceMs > 0 &&
+              now - _lastAnimAdvanceMs > _deadTickerMs) {
+            _forceRecoverStall();
+            return;
+          }
           _armStallWatch(_stallGraceMs);
           return;
         }
@@ -296,15 +369,53 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     );
   }
 
+  void _bindFlightActive(_ActiveAnim? next) {
+    _active = next;
+    _syncPlyFlightGate();
+  }
+
+  /// Gate remounts from holdSync rise (not only when `_active` binds) - web
+  /// `markPlyInflight` / `data-dama-ply-inflight` same-turn parity.
+  void _syncPlyFlightGate() {
+    final busy = _active != null || _holdSync || _queue.isNotEmpty;
+    if (busy && !_plyGateHeld) {
+      _plyGateHeld = true;
+      BoardPlyFlight.enter();
+    } else if (!busy && _plyGateHeld) {
+      _plyGateHeld = false;
+      BoardPlyFlight.leave();
+    }
+  }
+
   void _forceRecoverStall() {
     _cancelStallWatch();
     _finishQueued = false;
     _anim.stop();
+    // Sync parent to board_after before clearing fly - otherwise _boardPlySynced
+    // stays false and the match board freezes mid-game (web parity).
+    final anim = _active;
+    List<List<dynamic>>? after;
+    if (anim != null &&
+        anim.boardAfter != null &&
+        anim.boardAfter!.isNotEmpty) {
+      after = anim.boardAfter;
+    } else if (widget.moveHistory.isNotEmpty) {
+      after = widget.moveHistory.last.boardAfter;
+    }
+    if (after != null && after.isNotEmpty) {
+      if (anim != null) anim.boardApplied = true;
+      // Skip clone when already landed (avoids resting remount flicker).
+      if (!_boardsEqual(_renderBoard, after)) {
+        _renderBoard = _cloneBoard(after);
+      }
+      widget.onPlyAnimated?.call(after);
+    }
     setState(() {
       _active = null;
       _progress = 0;
       _holdSync = false;
       _queue.clear();
+      _syncPlyFlightGate();
     });
   }
 
@@ -312,11 +423,35 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     if (_queue.isEmpty) {
       _cancelStallWatch();
       _finishQueued = false;
-      setState(() {
-        _active = null;
-        _progress = 0;
-        _holdSync = false;
-      });
+      // Never clear holdSync without a parent land sync (freeze root / web parity).
+      // Always notify parent even when LAND_PHASE already applied locally (missed
+      // callback → _boardPlySynced freeze). Parent _boardsMatch no-ops when synced
+      // (no pick→put remount flicker) - web empty startNext parity.
+      final dangling = _active;
+      if (dangling != null &&
+          dangling.boardAfter != null &&
+          dangling.boardAfter!.isNotEmpty) {
+        dangling.boardApplied = true;
+        if (!_boardsEqual(_renderBoard, dangling.boardAfter!)) {
+          _renderBoard = _cloneBoard(dangling.boardAfter!);
+        }
+        widget.onPlyAnimated?.call(dangling.boardAfter!);
+      } else {
+        final after = widget.moveHistory.isNotEmpty
+            ? widget.moveHistory.last.boardAfter
+            : null;
+        if (after != null && after.isNotEmpty) {
+          if (!_boardsEqual(_renderBoard, after)) {
+            _renderBoard = _cloneBoard(after);
+          }
+          widget.onPlyAnimated?.call(after);
+        }
+      }
+      _active = null;
+      _progress = 0;
+      _holdSync = false;
+      _syncPlyFlightGate();
+      if (mounted) setState(() {});
       return;
     }
     final next = _queue.removeAt(0);
@@ -331,12 +466,21 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         )
         .round();
     _finishQueued = false;
-    setState(() {
-      _active = next;
-      _progress = 0;
-    });
+    // Assign fly state synchronously BEFORE setState. When called from
+    // didUpdateWidget (history grew), the following build must already hide the
+    // origin and show the fly - otherwise one painted frame of resting piece
+    // flashes on pick→put (web useLayoutEffect parity).
+    // Reset controller to 0 BEFORE paint - a completed ply leaves value=1, so the
+    // first build of the next fly would draw at the destination (pick→put flash).
+    _anim.stop();
+    _anim.value = 0;
+    _bindFlightActive(next);
+    _progress = 0;
+    _lastAnimAdvanceValue = 0;
+    _lastAnimAdvanceMs = DateTime.now().millisecondsSinceEpoch;
     _anim.duration = Duration(milliseconds: ms);
     _armStallWatch(ms);
+    if (mounted) setState(() {});
     _anim.forward(from: 0);
   }
 
@@ -349,9 +493,11 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         finished.boardAfter!.isNotEmpty) {
       if (!finished.boardApplied) {
         finished.boardApplied = true;
-        setState(() {
-          _renderBoard = _cloneBoard(finished.boardAfter!);
-        });
+        if (!_boardsEqual(_renderBoard, finished.boardAfter!)) {
+          setState(() {
+            _renderBoard = _cloneBoard(finished.boardAfter!);
+          });
+        }
         widget.onPlyAnimated?.call(finished.boardAfter!);
       }
       if (!finished.soundPlayed && !widget.replayMode) {
@@ -364,15 +510,15 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         );
       }
     }
-    _active = null;
+    // Do not clear _active here (web finishAndAdvance parity). Empty _startNext
+    // owns clear + dangling land sync; clearing first made dangling=null and
+    // could flash a blank fly frame before the next ply primed.
     _progress = 0;
     _finishQueued = false;
-    if (_queue.isNotEmpty) {
-      _startNext();
-    } else {
-      _cancelStallWatch();
-      setState(() => _holdSync = false);
-    }
+    // Always route through _startNext (web finishAndAdvance → startNext parity).
+    // Bare holdSync=false on empty queue skipped parent land sync when boardAfter
+    // was missing on the finished anim and froze _boardPlySynced mid-game.
+    _startNext();
   }
 
   @override
@@ -386,14 +532,27 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         widget.illegalShakeKey != 0) {
       _shakeCtrl.forward(from: 0);
     }
+    if (widget.replayMode) {
+      // Rising into replay mid pick→put: land-sync parent before clearing fly
+      // (bare clear snapped put-down and left _boardPlySynced false).
+      if (_active != null || _holdSync || _queue.isNotEmpty) {
+        _forceRecoverStall();
+      }
+      if (!_boardsEqual(_renderBoard, widget.board)) {
+        _renderBoard = _cloneBoard(widget.board);
+      }
+      return;
+    }
     final len = widget.moveHistory.length;
     if (len < _prevHistoryLen) {
+      // History shrink (scrub / reset) mid-fly: same land-sync-before-clear as replay.
+      if (_active != null || _holdSync || _queue.isNotEmpty) {
+        _forceRecoverStall();
+      }
       _prevHistoryLen = len;
-      _queue.clear();
-      _active = null;
-      _holdSync = false;
-      _anim.stop();
-      _renderBoard = _cloneBoard(widget.board);
+      if (!_boardsEqual(_renderBoard, widget.board)) {
+        _renderBoard = _cloneBoard(widget.board);
+      }
       return;
     }
     if (len > _prevHistoryLen) {
@@ -401,6 +560,8 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       final newEntries = widget.moveHistory.sublist(start);
       _prevHistoryLen = len;
       _holdSync = true;
+      // Gate remounts from holdSync rise - _startNext may still be a frame away.
+      _syncPlyFlightGate();
       for (var i = 0; i < newEntries.length; i++) {
         final e = newEntries[i];
         final prevBoard = i == 0
@@ -409,16 +570,49 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         final anim = _animFromHistory(e, prevBoard);
         if (anim != null) _queue.add(anim);
       }
-      if (_active == null) _startNext();
+      if (_active == null) {
+        // History grew but nothing to fly: sync immediately so _boardPlySynced
+        // cannot stick false and freeze input (web parity).
+        if (_queue.isEmpty) {
+          final after = widget.moveHistory.isNotEmpty
+              ? widget.moveHistory.last.boardAfter
+              : null;
+          if (after != null && after.isNotEmpty) {
+            if (!_boardsEqual(_renderBoard, after)) {
+              _renderBoard = _cloneBoard(after);
+            }
+            widget.onPlyAnimated?.call(after);
+          }
+          _holdSync = false;
+          _syncPlyFlightGate();
+        } else {
+          _startNext();
+        }
+      }
       return;
     }
     if (_holdSync || _active != null || _queue.isNotEmpty) return;
+    if (widget.moveHistory.isNotEmpty) {
+      final completed = widget.moveHistory.last.boardAfter;
+      // Web remount-sync parity: idle with parent behind tip (missed land / remount).
+      // Sync parent - never rewind landed pieces to a lagging freeze.
+      if (completed != null &&
+          completed.isNotEmpty &&
+          !_boardsEqual(widget.board, completed)) {
+        if (!_boardsEqual(_renderBoard, completed)) {
+          _renderBoard = _cloneBoard(completed);
+        }
+        widget.onPlyAnimated?.call(completed);
+        return;
+      }
+    }
     if (!_boardsEqual(_renderBoard, widget.board)) {
       if (widget.moveHistory.isEmpty) {
         final next = _diffAnim(_renderBoard, widget.board, widget.legalMoves);
         if (next != null) {
           _queue.add(next);
           _holdSync = true;
+          _syncPlyFlightGate();
           _startNext();
         } else {
           _renderBoard = _cloneBoard(widget.board);
@@ -468,6 +662,25 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     // Do not call onPaintReady(false) - parent paint gates latch true; false remount-loops.
     WidgetsBinding.instance.removeObserver(this);
     _cancelStallWatch();
+    // Remount (2D↔3D / shell) mid pick→put: land-sync parent before ticker dies.
+    if (_active != null || _holdSync) {
+      final anim = _active;
+      List<List<dynamic>>? after;
+      if (anim != null &&
+          anim.boardAfter != null &&
+          anim.boardAfter!.isNotEmpty) {
+        after = anim.boardAfter;
+      } else if (widget.moveHistory.isNotEmpty) {
+        after = widget.moveHistory.last.boardAfter;
+      }
+      if (after != null && after.isNotEmpty) {
+        widget.onPlyAnimated?.call(after);
+      }
+    }
+    _active = null;
+    _holdSync = false;
+    _queue.clear();
+    _syncPlyFlightGate();
     _anim.dispose();
     _shakeCtrl.dispose();
     super.dispose();
@@ -477,7 +690,23 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     return board.map((row) => List<dynamic>.from(row)).toList();
   }
 
+  static bool _cellKing(dynamic cell) {
+    if (cell is! Map) return false;
+    final k = cell['k'];
+    return k == true || k == 1;
+  }
+
+  static int? _cellPlayer(dynamic cell) {
+    if (cell is! Map) return null;
+    final p = cell['p'];
+    if (p is num) return p.toInt();
+    return null;
+  }
+
+  /// Content equality (web boardsEqual parity). Strict `k`/`p` identity used to
+  /// fail keep-landed and rewind pieces mid put-down.
   static bool _boardsEqual(List<List<dynamic>> a, List<List<dynamic>> b) {
+    if (identical(a, b)) return true;
     if (a.length != b.length) return false;
     for (var r = 0; r < a.length; r++) {
       if (a[r].length != b[r].length) return false;
@@ -486,7 +715,9 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         final y = b[r][c];
         if (x == null && y == null) continue;
         if (x is! Map || y is! Map) return false;
-        if (x['p'] != y['p'] || x['k'] != y['k']) return false;
+        if (_cellPlayer(x) != _cellPlayer(y) || _cellKing(x) != _cellKing(y)) {
+          return false;
+        }
       }
     }
     return true;
@@ -574,12 +805,13 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         fromC.toDouble(),
         fromR.toDouble(),
         rest + ease * (carry - rest),
-        1 + ease * 0.035,
+        // Height lift only. XY scale pulse flickered the piece on pick and put.
+        1,
         0,
       );
     }
     if (progress < _holdPhaseEnd) {
-      return (fromC.toDouble(), fromR.toDouble(), carry, 1.035, 0);
+      return (fromC.toDouble(), fromR.toDouble(), carry, 1, 0);
     }
     if (progress < _landPhaseStart) {
       final t = (progress - _holdPhaseEnd) / (_landPhaseStart - _holdPhaseEnd);
@@ -590,7 +822,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         fromC + (toC - fromC) * smooth,
         fromR + (toR - fromR) * smooth,
         carry,
-        1.035,
+        1,
         0,
       );
     }
@@ -600,7 +832,7 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
       toC.toDouble(),
       toR.toDouble(),
       carry - ease * (carry - rest),
-      1.035 - ease * 0.035,
+      1,
       0,
     );
   }
@@ -610,9 +842,10 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
     final tokens = damaColorsOf(context);
     if (widget.boardSize <= 0) return const BoardAreaSkeleton();
 
-    final display = (_holdSync || _active != null || _queue.isNotEmpty)
-        ? _renderBoard
-        : widget.board;
+    // Always paint _renderBoard (web `renderBoard.length ? renderBoard : board`).
+    // Switching to widget.board when idle rewound landed pieces if parent lagged
+    // board_after for one frame (clock/WS) - pick→put flicker.
+    final display = _renderBoard.isNotEmpty ? _renderBoard : widget.board;
 
     final boardPaint = AnimatedBuilder(
       animation: Listenable.merge([_anim, _shakeCtrl]),
@@ -620,9 +853,11 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
         (double, double, double, double, double)? fly;
         final progress =
             _anim.isAnimating || _active != null ? _anim.value : 0.0;
-        if (_active != null && progress < 1) {
+        // Keep fly at destination until _finishAndAdvance clears _active.
+        // Dropping at progress>=1 left a blank hole while resting was still hidden.
+        if (_active != null) {
           fly = _pieceTransform(
-            progress,
+            progress.clamp(0.0, 1.0),
             _active!.fromR,
             _active!.fromC,
             _active!.toR,
@@ -646,17 +881,18 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
           offset: Offset(shakeDx, 0),
           child: CustomPaint(
             isComplex: true,
-            willChange: true,
+            // willChange:true promoted the full board layer every flight frame and
+            // shimmered on fly→rest handoff (web 2D avoids will-change for the same).
             painter: _Board3DPainter(
               board: display,
               size: widget.boardSize,
               pitch: _pitch,
               yaw: _yaw,
               flipBoard: widget.flipBoard,
-              selectedRow: widget.selectedRow,
-              selectedCol: widget.selectedCol,
-              mustContinueRow: widget.mustContinueRow,
-              mustContinueCol: widget.mustContinueCol,
+              selectedRow: _cueSelectedRow,
+              selectedCol: _cueSelectedCol,
+              mustContinueRow: _cueMustRow,
+              mustContinueCol: _cueMustCol,
               highlights: _highlights,
               destinationKeys: _destinationKeys,
               lastMoveKeys: _lastMoveKeys,
@@ -730,10 +966,10 @@ class _DraughtsBoard3DState extends State<DraughtsBoard3D>
                         pitch: _pitch,
                         yaw: _yaw,
                         flipBoard: widget.flipBoard,
-                        selectedRow: widget.selectedRow,
-                        selectedCol: widget.selectedCol,
-                        mustContinueRow: widget.mustContinueRow,
-                        mustContinueCol: widget.mustContinueCol,
+                        selectedRow: _cueSelectedRow,
+                        selectedCol: _cueSelectedCol,
+                        mustContinueRow: _cueMustRow,
+                        mustContinueCol: _cueMustCol,
                         highlights: _highlights,
                         destinationKeys: _destinationKeys,
                         lastMoveKeys: _lastMoveKeys,
@@ -938,7 +1174,9 @@ class _Board3DPainter extends CustomPainter {
     double yawTwist = 0,
   }) {
     // Match 2D: square fill is the only movable cue - no ring around the piece.
-    final selLift = selected ? 0.1 : 0.0;
+    // No select lift - clearing selection on put dropped the mesh before the
+    // fly overlay picked up (pick→put flicker). 2D/web use square glow only.
+    const selLift = 0.0;
     final wx = col - size / 2 + 0.5;
     final wz = row - size / 2 + 0.5;
     // Approximate yaw twist as a small horizontal skew in screen space.

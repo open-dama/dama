@@ -15,6 +15,8 @@ import {
 import { useEventEntriesQuery } from "@/hooks/query/useEventEntriesQuery";
 import { useEventQuery } from "@/hooks/query/useEventQuery";
 import { useEventsCatalogQuery } from "@/hooks/query/useEventsCatalogQuery";
+import { chromeOnlyToastError } from "@/lib/api-toast-message";
+import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import {
   softCommunityCarouselAria,
   softCommunityJoinStatusMessage,
@@ -30,8 +32,6 @@ import {
 } from "@/lib/community-player-chrome-soft";
 import { resolveCupCardCta } from "@/lib/cupLifecycle";
 import { resolveEventInviteShareUrl } from "@/lib/event-invite-share-url";
-import { chromeOnlyToastError } from "@/lib/api-toast-message";
-import { isAgeRequiredError, isPhoneKycRequiredError } from "@/lib/cash-gate-error";
 import { eventJoinErrorChrome, isAlreadyJoinedEventError } from "@/lib/event-join-error";
 import { hostReputationLine } from "@/lib/host-reputation-line";
 import { playerProfileHref } from "@/lib/player-profile-href";

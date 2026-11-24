@@ -10,6 +10,27 @@ final _pauseInflight = <String>{};
 
 bool isPauseInflight(String gameId) => _pauseInflight.contains(gameId.trim());
 
+/// Cache pause/resume payloads without seeding board_after over a painted freeze.
+void _writeGameStateMerged(String gid, GameStatePayload payload) {
+  final id = gid.trim();
+  if (id.isEmpty) return;
+  final prior = QueryCache.read<GameStatePayload>(
+    CacheKeys.gameState(id),
+    maxAge: QueryCache.sessionTtl,
+    allowStale: true,
+  );
+  final priorPly = prior == null
+      ? 0
+      : (prior.moveCount > 0 ? prior.moveCount : prior.moveHistory.length);
+  final nextPly =
+      payload.moveCount > 0 ? payload.moveCount : payload.moveHistory.length;
+  // Keep painted board when history did not shrink (mid pick→put / same-ply pause).
+  final board = (prior?.board != null && nextPly >= priorPly)
+      ? prior!.board
+      : payload.board;
+  QueryCache.write(CacheKeys.gameState(id), payload.copyWith(board: board));
+}
+
 enum PauseFailKind { pause, resume }
 
 class PauseGameException implements Exception {
@@ -99,7 +120,7 @@ Future<GameStatePayload> fetchPausedGameState(
   final payload = GameStatePayload.fromJson(map);
   final gid = (payload.gameId ?? id).trim();
   if (gid.isNotEmpty) {
-    QueryCache.write(CacheKeys.gameState(gid), payload);
+    _writeGameStateMerged(gid, payload);
   }
   return payload;
 }
@@ -139,7 +160,7 @@ Future<GameStatePayload> _postGameAction(
   final payload = GameStatePayload.fromJson(map);
   final gid = (payload.gameId ?? id).trim();
   if (gid.isNotEmpty) {
-    QueryCache.write(CacheKeys.gameState(gid), payload);
+    _writeGameStateMerged(gid, payload);
   }
   return payload;
 }

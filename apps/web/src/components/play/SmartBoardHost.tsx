@@ -5,6 +5,7 @@ import {
   type BoardStackLayoutMode,
 } from "@/components/play/board-stack-layout";
 import { Button } from "@/components/ui/button";
+import { PLY_IDLE_FAIL_OPEN_MS } from "@/lib/board-view";
 import { cn } from "@/lib/utils";
 import { useShellChromeStore } from "@/store/shell-chrome";
 import {
@@ -226,6 +227,8 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
   const [expanded, setExpanded] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const [spacerPx, setSpacerPx] = useState(0);
+  /** Defer portal→inline while a ply is airborne (Escape / compose tuck). */
+  const [topped, setTopped] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const prevActiveRef = useRef(false);
@@ -314,10 +317,37 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
   }, [active, popSignal, tuckBoard]);
 
   const live = Boolean(maxLg && active);
-  // Tuck on the same render as compose/FAB open (do not wait for useEffect
-  // setExpanded) so the z-60 portal drops before the sheet paints - avoids a
-  // layout thrash that stole first-tap focus from the text field.
-  const topped = Boolean(live && expanded && !tuckBoard);
+  // Portal↔inline remounts the board. Defer BOTH open and close while a ply is
+  // airborne (Escape, compose tuck, resize into max-lg). Unmount forceRecover is
+  // the freeze backstop; deferring avoids pick→put flicker.
+  const wantsTopped = Boolean(live && expanded && !tuckBoard);
+  useLayoutEffect(() => {
+    let cancelled = false;
+    const plyBusy = () => {
+      const host = hostRef.current;
+      if (!host) return false;
+      // Attr lives on the board plane (descendant); also tolerate host itself.
+      return (
+        host.matches("[data-dama-ply-inflight]") ||
+        Boolean(host.querySelector("[data-dama-ply-inflight]"))
+      );
+    };
+    // Stuck ply attr must not defer portal forever (mid-game freeze).
+    // Cap covers multi-capture chains (3s remounted mid-chain → pick→put flicker).
+    const startedAt = Date.now();
+    const applyWhenIdle = (next: boolean) => {
+      if (cancelled) return;
+      if (plyBusy() && Date.now() - startedAt < PLY_IDLE_FAIL_OPEN_MS) {
+        window.setTimeout(() => applyWhenIdle(next), 32);
+        return;
+      }
+      setTopped(next);
+    };
+    applyWhenIdle(wantsTopped);
+    return () => {
+      cancelled = true;
+    };
+  }, [wantsTopped]);
   // Live min + expanded: ALWAYS width-square hug. Never budget-measure host height
   // into side (that feedback is the infinite zoom / postage-stamp collapse).
   const layoutMode: BoardStackLayoutMode = live ? "hug" : "budget";
@@ -385,6 +415,15 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
       setExpanded(false);
       return;
     }
+    // Portal↔inline remounts the board. Never toggle mid pick→put or the fly
+    // RAF/useFrame + land sync die and pieces flicker / the board freezes.
+    const host = hostRef.current;
+    if (
+      host &&
+      (host.matches("[data-dama-ply-inflight]") || host.querySelector("[data-dama-ply-inflight]"))
+    ) {
+      return;
+    }
     setExpanded((v) => !v);
   }, [live, tuckBoard]);
 
@@ -432,6 +471,7 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (Date.now() < toggleLockUntilRef.current) return;
+        // wantsTopped→false; layout effect defers portal drop while ply inflight.
         setExpanded(false);
       }
     };

@@ -41,7 +41,6 @@ export type DraughtsBoard2DProps = {
   className?: string;
 };
 
-const PICK_PHASE_END = 0.24;
 const HOLD_PHASE_END = 0.34;
 const LAND_PHASE_START = 0.72;
 /** Snappy product timing (3D parity) - same for own + opponent plies. */
@@ -79,10 +78,6 @@ function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 
-function easeInOutQuad(t: number) {
-  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-}
-
 function moveDurationSeconds(
   from: [number, number],
   to: [number, number],
@@ -93,6 +88,8 @@ function moveDurationSeconds(
   return Math.min(MOVE_DURATION_MAX, base + dist * DURATION_PER_SQUARE);
 }
 
+/** Content equality (Flutter `_boardsEqual` parity). Strict `k`/`p` identity used to
+ *  fail keep-landed / remount-sync and rewind pieces mid put-down. */
 function boardsEqual(left: BoardGrid | undefined, right: BoardGrid | undefined): boolean {
   if (left === right) return true;
   if (!left || !right || left.length !== right.length) return false;
@@ -104,7 +101,9 @@ function boardsEqual(left: BoardGrid | undefined, right: BoardGrid | undefined):
       const a = lr[col];
       const b = rr[col];
       if (!a && !b) continue;
-      if (!a || !b || a.p !== b.p || a.k !== b.k) return false;
+      if (!a || !b || Number(a.p) !== Number(b.p) || Boolean(a.k) !== Boolean(b.k)) {
+        return false;
+      }
     }
   }
   return true;
@@ -153,7 +152,7 @@ function animationFromBoardDiff(
       const b = next[r]?.[c] ?? null;
       if (a && !b) emptied.push([r, c]);
       if (!a && b) filled.push([r, c]);
-      if (a && b && (a.p !== b.p || a.k !== b.k)) {
+      if (a && b && (Number(a.p) !== Number(b.p) || Boolean(a.k) !== Boolean(b.k))) {
         emptied.push([r, c]);
         filled.push([r, c]);
       }
@@ -204,15 +203,6 @@ function travelT(progress: number): number {
   return easeInOutCubic((progress - HOLD_PHASE_END) / (LAND_PHASE_START - HOLD_PHASE_END));
 }
 
-/** Match 3D PieceMesh lift scale (1.035) - larger 2D scale caused pick/put wobble. */
-function flyScale(progress: number): number {
-  if (progress < PICK_PHASE_END) {
-    return 1 + easeInOutQuad(progress / PICK_PHASE_END) * 0.035;
-  }
-  if (progress < LAND_PHASE_START) return 1.035;
-  return 1.035 - easeInOutQuad((progress - LAND_PHASE_START) / (1 - LAND_PHASE_START)) * 0.035;
-}
-
 function PieceDisc({
   player,
   isKing,
@@ -258,22 +248,42 @@ export default function DraughtsBoard2D({
   const [shake, setShake] = useState(false);
   const [renderBoard, setRenderBoard] = useState<BoardGrid>(board);
   const [activeFly, setActiveFly] = useState<ActiveAnimation | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
 
   const animationRef = useRef<ActiveAnimation | null>(null);
   const queueRef = useRef<ActiveAnimation[]>([]);
   const prevHistoryLen = useRef(moveHistory.length);
   const holdSyncRef = useRef(false);
+  /** performance.now() when holdSync rose - stall recover needs a short grace. */
+  const holdSyncSinceRef = useRef<number | null>(null);
+
+  /**
+   * DOM-only ply gate (never React-controlled). A JSX attr tied to state can be
+   * wiped on an unrelated re-render before setState flushes → remount mid-fly.
+   */
+  const markPlyInflight = useCallback((active: boolean) => {
+    const el = hostRef.current;
+    if (!el) return;
+    if (active) el.setAttribute("data-dama-ply-inflight", "");
+    else el.removeAttribute("data-dama-ply-inflight");
+  }, []);
   const legalHintRef = useRef(legalMoves);
   const onPlyAnimatedRef = useRef(onPlyAnimated);
   const replayModeRef = useRef(replayMode);
+  const moveHistoryRef = useRef(moveHistory);
   const rafRef = useRef(0);
   const lastTsRef = useRef<number | null>(null);
+  /** Last RAF tick that advanced the flight (dead-RAF stall detect). */
+  const lastFrameAtRef = useRef<number | null>(null);
   const loopRunningRef = useRef(false);
+  const ensureAnimLoopRef = useRef<() => void>(() => {});
   const flyElRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef(size);
   const flipRef = useRef(flipBoard);
   /** Cached plane side (px) - remeasure only on resize so pick→put never jitters. */
   const planeSideRef = useRef(0);
+  /** Latest forceRecoverStall - wired after commitBoardAfter exists. */
+  const forceRecoverStallRef = useRef<() => void>(() => {});
   sizeRef.current = size;
   flipRef.current = flipBoard;
   const historyPresent = moveHistory.length > 0;
@@ -289,6 +299,10 @@ export default function DraughtsBoard2D({
   useEffect(() => {
     replayModeRef.current = replayMode;
   }, [replayMode]);
+
+  useEffect(() => {
+    moveHistoryRef.current = moveHistory;
+  }, [moveHistory]);
 
   useEffect(() => {
     if (!illegalShakeKey) return;
@@ -315,21 +329,6 @@ export default function DraughtsBoard2D({
     return () => ro.disconnect();
   }, [measurePlaneSide]);
 
-  // Mid-game stall recovery: holdSync with no active fly must not freeze the board.
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (
-        holdSyncRef.current &&
-        !animationRef.current &&
-        queueRef.current.length === 0 &&
-        !loopRunningRef.current
-      ) {
-        holdSyncRef.current = false;
-      }
-    }, 250);
-    return () => window.clearInterval(id);
-  }, []);
-
   /** Drive fly piece via DOM (3D-stable px math) - never setState every frame. */
   const applyFlyDom = useCallback(
     (anim: ActiveAnimation, progress: number) => {
@@ -343,7 +342,6 @@ export default function DraughtsBoard2D({
       }
       if (side < 1) return;
       const t = travelT(progress);
-      const scale = flyScale(progress);
       const flip = flipRef.current;
       const fromR = flip ? sz - 1 - anim.from[0] : anim.from[0];
       const fromC = flip ? sz - 1 - anim.from[1] : anim.from[1];
@@ -359,18 +357,20 @@ export default function DraughtsBoard2D({
       el.style.top = `${vr * cell + cell / 2}px`;
       el.style.width = `${piece}px`;
       el.style.height = `${piece}px`;
-      // translate3d keeps the fly layer on the compositor (3D-stable; less 2D jitter).
-      el.style.transform = `translate3d(-50%, -50%, 0) scale(${scale})`;
+      // Constant 1. A 1→1.035→1 pulse re-rasterizes drop-shadow and flickers on pick and put.
+      // translate only - identity scale() still promoted a layer that flickered on put.
+      el.style.transform = "translate3d(-50%, -50%, 0)";
     },
     [measurePlaneSide],
   );
 
   const commitBoardAfter = useCallback((anim: ActiveAnimation) => {
-    if (!anim.boardAfter?.length) return;
+    const after = anim.boardAfter;
+    if (!after?.length) return;
     if (!anim.boardApplied) {
       anim.boardApplied = true;
-      setRenderBoard(anim.boardAfter);
-      onPlyAnimatedRef.current?.(anim.boardAfter);
+      setRenderBoard((current) => (boardsEqual(current, after) ? current : after));
+      onPlyAnimatedRef.current?.(after);
     }
     // Put-down only once per ply - Chess.com move / capture / promote samples.
     if (!anim.soundPlayed && !replayModeRef.current) {
@@ -381,6 +381,95 @@ export default function DraughtsBoard2D({
     }
   }, []);
 
+  /**
+   * Stall / hitch recovery: clear fly state BUT always sync parent to board_after
+   * first. Clearing holdSync alone left game.board behind history → boardPlySynced
+   * stuck false and the board looked frozen mid-game.
+   */
+  const forceRecoverStall = useCallback(() => {
+    const anim = animationRef.current;
+    if (anim?.boardAfter?.length) {
+      // If land already applied locally, commitBoardAfter skips parent notify.
+      // Stall clear must still sync parent (missed callback → freeze until 2.5s).
+      // Parent boardsEqual no-ops when already synced (no pick→put churn).
+      const alreadyApplied = anim.boardApplied;
+      commitBoardAfter(anim);
+      if (alreadyApplied) {
+        onPlyAnimatedRef.current?.(anim.boardAfter);
+      }
+    } else {
+      const last = moveHistoryRef.current.at(-1);
+      const snap = last?.board_after;
+      if (snap?.length) {
+        // Skip identity churn when already landed (avoids resting remount flicker).
+        setRenderBoard((current) => (boardsEqual(current, snap) ? current : snap));
+        onPlyAnimatedRef.current?.(snap);
+      }
+    }
+    animationRef.current = null;
+    holdSyncRef.current = false;
+    holdSyncSinceRef.current = null;
+    queueRef.current = [];
+    setActiveFly(null);
+    markPlyInflight(false);
+    loopRunningRef.current = false;
+    lastTsRef.current = null;
+    lastFrameAtRef.current = null;
+  }, [commitBoardAfter, markPlyInflight]);
+
+  forceRecoverStallRef.current = forceRecoverStall;
+
+  // Mid-game stall recovery: holdSync with no active fly must not freeze the board.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      // Orphaned data-dama-ply-inflight (missed clear) freezes portal/flip/2D↔3D.
+      if (
+        !holdSyncRef.current &&
+        !animationRef.current &&
+        queueRef.current.length === 0 &&
+        !loopRunningRef.current
+      ) {
+        markPlyInflight(false);
+      }
+      if (
+        holdSyncRef.current &&
+        !animationRef.current &&
+        queueRef.current.length === 0 &&
+        !loopRunningRef.current
+      ) {
+        // holdSync rise + startNext are same-turn; grace so the 250ms tick cannot
+        // forceRecover before animationRef binds (pick→put snap flicker).
+        const since = holdSyncSinceRef.current;
+        if (since == null || performance.now() - since > 64) {
+          forceRecoverStallRef.current();
+        }
+        return;
+      }
+      // Dead RAF while a fly is active (tab discard / WebView dropped the callback).
+      // Restart first; if still dead after another 2s, land-sync like 3D forceRecover
+      // so boardPlySynced cannot stick false while RAF never revives.
+      if (
+        holdSyncRef.current &&
+        animationRef.current &&
+        typeof document !== "undefined" &&
+        !document.hidden
+      ) {
+        const last = lastFrameAtRef.current;
+        if (last != null && performance.now() - last > 2000) {
+          if (performance.now() - last > 4000) {
+            forceRecoverStallRef.current();
+            return;
+          }
+          window.cancelAnimationFrame(rafRef.current);
+          loopRunningRef.current = false;
+          lastTsRef.current = null;
+          ensureAnimLoopRef.current();
+        }
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [markPlyInflight]);
+
   const ensureAnimLoop = useCallback(() => {
     if (loopRunningRef.current) return;
     loopRunningRef.current = true;
@@ -389,14 +478,19 @@ export default function DraughtsBoard2D({
       if (!anim) {
         loopRunningRef.current = false;
         lastTsRef.current = null;
+        lastFrameAtRef.current = null;
         return;
       }
-      // Tab/ad blur: freeze clock (Chess.com-style) so return does not fast-forward/glitch.
+      // Tab/ad blur: freeze progress (Chess.com-style) so return does not fast-forward.
+      // Keep stall clock alive - otherwise last ages while hidden and tab-return
+      // false-triggers forceRecover (mid pick→put snap/flicker).
       if (typeof document !== "undefined" && document.hidden) {
         lastTsRef.current = null;
+        lastFrameAtRef.current = performance.now();
         rafRef.current = window.requestAnimationFrame(tick);
         return;
       }
+      lastFrameAtRef.current = performance.now();
       const prevTs = lastTsRef.current ?? ts;
       const delta = Math.min(0.05, (ts - prevTs) / 1000);
       lastTsRef.current = ts;
@@ -414,11 +508,7 @@ export default function DraughtsBoard2D({
             finishAndAdvanceRef.current();
           } catch {
             // Never leave the board stuck with finishQueued + active fly (prod hitch path).
-            animationRef.current = null;
-            holdSyncRef.current = false;
-            setActiveFly(null);
-            loopRunningRef.current = false;
-            lastTsRef.current = null;
+            forceRecoverStallRef.current();
             return;
           }
         } else if (
@@ -426,12 +516,7 @@ export default function DraughtsBoard2D({
           performance.now() - (anim.finishQueuedAt ?? 0) > 500
         ) {
           // finishQueued but still active after grace - force recover (mid-game stall).
-          animationRef.current = null;
-          holdSyncRef.current = false;
-          setActiveFly(null);
-          queueRef.current = [];
-          loopRunningRef.current = false;
-          lastTsRef.current = null;
+          forceRecoverStallRef.current();
           return;
         }
       }
@@ -445,40 +530,88 @@ export default function DraughtsBoard2D({
     rafRef.current = window.requestAnimationFrame(tick);
   }, [applyFlyDom, commitBoardAfter]);
 
+  ensureAnimLoopRef.current = ensureAnimLoop;
+
   const finishAndAdvanceRef = useRef<() => void>(() => {});
 
   const startNext = useCallback(() => {
     const next = queueRef.current.shift();
     if (!next) {
+      // Never clear holdSync without a parent land sync (freeze root).
+      const dangling = animationRef.current;
+      // If LAND_PHASE already applied locally, commitBoardAfter skips parent notify.
+      // Empty clear must still re-notify (missed callback → boardPlySynced freeze).
+      // Parent boardsEqual no-ops when synced (no pick→put remount flicker).
+      // History fallback only when boardAfter was missing on the fly.
+      if (dangling?.boardAfter?.length) {
+        const alreadyApplied = dangling.boardApplied;
+        commitBoardAfter(dangling);
+        if (alreadyApplied) {
+          onPlyAnimatedRef.current?.(dangling.boardAfter);
+        }
+      } else {
+        const last = moveHistoryRef.current.at(-1);
+        const snap = last?.board_after;
+        if (snap?.length) {
+          setRenderBoard((current) => (boardsEqual(current, snap) ? current : snap));
+          onPlyAnimatedRef.current?.(snap);
+        }
+      }
       animationRef.current = null;
       holdSyncRef.current = false;
+      holdSyncSinceRef.current = null;
       setActiveFly(null);
+      markPlyInflight(false);
       lastTsRef.current = null;
+      lastFrameAtRef.current = null;
       return;
     }
     animationRef.current = next;
+    // Seed stall clock (Flutter _lastAnimAdvanceMs). If RAF never ticks after
+    // ply start, last stayed null and Dead-RAF recover never armed → mid-air freeze.
+    lastFrameAtRef.current = performance.now();
+    markPlyInflight(true);
     setActiveFly(next);
     lastTsRef.current = null;
     ensureAnimLoop();
-  }, [ensureAnimLoop]);
+  }, [commitBoardAfter, ensureAnimLoop, markPlyInflight]);
 
   const finishAndAdvance = useCallback(() => {
     const finished = animationRef.current;
     if (finished) commitBoardAfter(finished);
+    // Always route through startNext (empty path owns holdSync clear + parent sync).
+    // Bare holdSync=false here skipped history fallback when boardAfter was missing.
     startNext();
-    if (!animationRef.current && queueRef.current.length === 0) {
-      holdSyncRef.current = false;
-    }
   }, [commitBoardAfter, startNext]);
 
   finishAndAdvanceRef.current = finishAndAdvance;
 
-  useEffect(() => {
+  // Portal/2D↔3D/shell remount mid pick→put: land-sync + gate clear in layout
+  // (before paint). useEffect ran after layout gates saw idle → remount flicker.
+  useLayoutEffect(() => {
     return () => {
       loopRunningRef.current = false;
       window.cancelAnimationFrame(rafRef.current);
+      forceRecoverStallRef.current();
     };
   }, []);
+
+  // Tab discard / long background can drop the pending RAF while loopRunningRef
+  // stays true - ensureAnimLoop then no-ops and the piece freezes mid pick→put.
+  useEffect(() => {
+    const onVis = () => {
+      if (typeof document === "undefined" || document.hidden) return;
+      if (!animationRef.current) return;
+      window.cancelAnimationFrame(rafRef.current);
+      loopRunningRef.current = false;
+      lastTsRef.current = null;
+      // Re-arm stall clock on return (hide may have aged last without a dead loop).
+      lastFrameAtRef.current = performance.now();
+      ensureAnimLoop();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [ensureAnimLoop]);
 
   useLayoutEffect(() => {
     if (activeFly) applyFlyDom(activeFly, activeFly.progress);
@@ -488,11 +621,12 @@ export default function DraughtsBoard2D({
     if (!size) return;
 
     if (replayMode) {
-      queueRef.current = [];
-      animationRef.current = null;
-      holdSyncRef.current = false;
-      setActiveFly(null);
-      setRenderBoard(board);
+      // Rising into replay mid pick→put: land-sync parent before clearing fly
+      // (bare clear snapped put-down and left boardPlySynced false).
+      if (animationRef.current || holdSyncRef.current || queueRef.current.length > 0) {
+        forceRecoverStallRef.current();
+      }
+      setRenderBoard((current) => (boardsEqual(current, board) ? current : board));
       return;
     }
 
@@ -501,18 +635,21 @@ export default function DraughtsBoard2D({
       prevHistoryLen.current = 0;
       if (!animationRef.current && queueRef.current.length === 0) {
         holdSyncRef.current = false;
-        setRenderBoard(board);
+        holdSyncSinceRef.current = null;
+        markPlyInflight(false);
+        // Parent may pass a new board ref each render (clock/WS) - skip remount.
+        setRenderBoard((current) => (boardsEqual(current, board) ? current : board));
       }
       return;
     }
 
     if (len < prevHistoryLen.current) {
+      // History shrink (scrub / reset) mid-fly: same land-sync-before-clear as replay.
+      if (animationRef.current || holdSyncRef.current || queueRef.current.length > 0) {
+        forceRecoverStallRef.current();
+      }
       prevHistoryLen.current = len;
-      queueRef.current = [];
-      animationRef.current = null;
-      holdSyncRef.current = false;
-      setActiveFly(null);
-      setRenderBoard(board);
+      setRenderBoard((current) => (boardsEqual(current, board) ? current : board));
       return;
     }
 
@@ -521,6 +658,9 @@ export default function DraughtsBoard2D({
       const newEntries = moveHistory.slice(start);
       prevHistoryLen.current = len;
       holdSyncRef.current = true;
+      holdSyncSinceRef.current = performance.now();
+      // Gate remounts from the holdSync rise - startNext may still be a frame away.
+      markPlyInflight(true);
       for (let i = 0; i < newEntries.length; i++) {
         const entry = newEntries[i];
         if (!entry) continue;
@@ -533,9 +673,25 @@ export default function DraughtsBoard2D({
         const anim = animationFromHistoryEntry(entry, yourPlayer, prevBoard);
         if (anim) queueRef.current.push(anim);
       }
-      if (!animationRef.current) startNext();
+      if (!animationRef.current) {
+        // History grew but nothing to fly (bad/missing from-to): sync immediately
+        // so boardPlySynced cannot stick false and freeze input.
+        if (queueRef.current.length === 0) {
+          const last = moveHistory.at(-1);
+          const snap = last?.board_after;
+          if (snap?.length) {
+            setRenderBoard((current) => (boardsEqual(current, snap) ? current : snap));
+            onPlyAnimatedRef.current?.(snap);
+          }
+          holdSyncRef.current = false;
+          holdSyncSinceRef.current = null;
+          markPlyInflight(false);
+        } else {
+          startNext();
+        }
+      }
     }
-  }, [board, size, moveHistory, replayMode, yourPlayer, startNext]);
+  }, [board, size, moveHistory, replayMode, yourPlayer, startNext, markPlyInflight]);
 
   useLayoutEffect(() => {
     if (!size || replayMode) return;
@@ -545,6 +701,13 @@ export default function DraughtsBoard2D({
     if (historyPresent) {
       const last = moveHistory.at(-1);
       const completed = last?.board_after;
+      // Remount mid pick→put (e.g. 2D↔3D): history already at tip so no ply queues.
+      // Sync parent immediately - otherwise boardPlySynced freezes until 2.5s safety.
+      if (completed?.length && !boardsEqual(board, completed)) {
+        setRenderBoard((current) => (boardsEqual(current, completed) ? current : completed));
+        onPlyAnimatedRef.current?.(completed);
+        return;
+      }
       setRenderBoard((current) => {
         if (boardsEqual(current, board)) return current;
         if (completed && boardsEqual(current, completed) && !boardsEqual(board, completed)) {
@@ -559,33 +722,41 @@ export default function DraughtsBoard2D({
       const anim = animationFromBoardDiff(current, board, legalHintRef.current);
       if (!anim) return board;
       holdSyncRef.current = true;
+      holdSyncSinceRef.current = performance.now();
+      markPlyInflight(true);
       queueRef.current.push(anim);
       if (!animationRef.current) startNext();
       return current;
     });
-  }, [board, size, moveHistory, historyPresent, replayMode, startNext]);
+  }, [board, size, moveHistory, historyPresent, replayMode, startNext, markPlyInflight]);
+
+  // Suppress select/legal/must while the ply fly is up. Parent flips boardPlySynced
+  // at LAND_PHASE (~0.72) so cues would otherwise flash mid put-down.
+  const cueSelected = activeFly ? null : selected;
+  const cueLegalMoves = activeFly ? ([] as LegalMove[]) : legalMoves;
+  const cueMustContinue = activeFly ? null : mustContinue;
 
   const legalTargets = useMemo(() => {
     const set = new Set<string>();
-    for (const m of legalMoves) {
-      if (selected) {
-        if (m.from[0] === selected[0] && m.from[1] === selected[1]) {
+    for (const m of cueLegalMoves) {
+      if (cueSelected) {
+        if (m.from[0] === cueSelected[0] && m.from[1] === cueSelected[1]) {
           set.add(`${m.to[0]},${m.to[1]}`);
         }
       }
     }
     return set;
-  }, [legalMoves, selected]);
+  }, [cueLegalMoves, cueSelected]);
 
   /** Same as 3D `legalFromSquares` - used for square fill + under-piece ring. */
   const legalOrigins = useMemo(() => {
     const set = new Set<string>();
-    if (selected) return set;
-    for (const m of legalMoves) {
+    if (cueSelected) return set;
+    for (const m of cueLegalMoves) {
       set.add(`${m.from[0]},${m.from[1]}`);
     }
     return set;
-  }, [legalMoves, selected]);
+  }, [cueLegalMoves, cueSelected]);
 
   const hiddenKeys = useMemo(() => {
     const anim = activeFly;
@@ -640,12 +811,15 @@ export default function DraughtsBoard2D({
 
   return (
     <div
+      ref={hostRef}
       className={cn(
         "relative aspect-square w-full overflow-hidden touch-none overscroll-none",
-        shake && "animate-pulse",
+        // Opacity pulse flickered every piece on reject; match 3D translate-only shake.
+        shake && "dama-board-reject",
         className,
       )}
       style={{ touchAction: "none" }}
+      data-dama-board-plane=""
       // biome-ignore lint/a11y/useSemanticElements: interactive board uses grid ARIA on div layout
       role="grid"
       aria-rowcount={size}
@@ -667,15 +841,15 @@ export default function DraughtsBoard2D({
           const cell = display[row]?.[col] ?? null;
           const dark = isDark(row, col);
           const key = `${row},${col}`;
-          const isSelected = selected?.[0] === row && selected?.[1] === col;
-          const isMust = mustContinue?.[0] === row && mustContinue?.[1] === col;
+          const isSelected = cueSelected?.[0] === row && cueSelected?.[1] === col;
+          const isMust = cueMustContinue?.[0] === row && cueMustContinue?.[1] === col;
           const isLegalTarget = legalTargets.has(key);
           const isLastFrom = lastMoveKeys?.from === key;
           const isLastTo = lastMoveKeys?.to === key;
           const isLastMove = isLastFrom || isLastTo;
           // Select / dest / must / movable-from use brand highlight; last ply uses Chess yellow.
           const squareHighlighted =
-            isSelected || isLegalTarget || isMust || (!selected && legalOrigins.has(key));
+            isSelected || isLegalTarget || isMust || (!cueSelected && legalOrigins.has(key));
           const hidePiece = hiddenKeys.has(key);
           const canClick = Boolean(interactive && dark && !ownAirLocked);
           // Always opaque fill (3D meshStandardMaterial parity). The old quiet-square
@@ -770,10 +944,7 @@ export default function DraughtsBoard2D({
         aria-hidden
         style={{ visibility: activeFly ? "visible" : "hidden" }}
       >
-        <div
-          ref={flyElRef}
-          className="absolute flex items-center justify-center will-change-transform"
-        >
+        <div ref={flyElRef} className="absolute flex items-center justify-center">
           {activeFly ? (
             <PieceDisc
               player={activeFly.player}

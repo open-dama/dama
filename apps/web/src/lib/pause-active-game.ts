@@ -1,6 +1,7 @@
 import { gameStateQueryKey } from "@/hooks/query/useGameStateQuery";
 import { authHeaders, restClient } from "@/lib/api";
 import { ApiClientError } from "@/lib/api-client-error";
+import { mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
 import {
   clearStoredPlaySession,
   patchStoredPlayPaused,
@@ -9,6 +10,14 @@ import {
 } from "@/lib/play-session-storage";
 import type { GamePayload } from "@/types/game";
 import type { QueryClient } from "@tanstack/react-query";
+
+/** RQ write that keeps freeze-merged board (no mid pick→put board_after seed). */
+function setGameStateMerged(qc: QueryClient, payload: GamePayload) {
+  if (!payload?.id) return;
+  qc.setQueryData(gameStateQueryKey(payload.id), (prev: GamePayload | undefined) =>
+    !prev || prev.id !== payload.id ? payload : mergeRemoteBoardState(prev, payload),
+  );
+}
 
 /** True when the match already has a decisive/draw result (leave-pause must no-op). */
 export function isGameFinishedPayload(game: GamePayload | null | undefined): boolean {
@@ -157,7 +166,7 @@ export function postGamePause(token: string, gameId: string): Promise<GamePayloa
 export async function postGameResume(token: string, gameId: string): Promise<GamePayload> {
   const payload = await postGameAction(token, gameId, "resume");
   if (payload?.id && pauseQueryClient) {
-    pauseQueryClient.setQueryData(gameStateQueryKey(payload.id), payload);
+    setGameStateMerged(pauseQueryClient, payload);
   }
   return payload;
 }
@@ -211,8 +220,8 @@ export async function pauseGameOnLeave(
         phase: "finished",
         updatedAt: new Date().toISOString(),
       });
-      if (payload.id) {
-        pauseQueryClient?.setQueryData(gameStateQueryKey(payload.id), payload);
+      if (payload.id && pauseQueryClient) {
+        setGameStateMerged(pauseQueryClient, payload);
       }
       return null;
     }
@@ -220,7 +229,7 @@ export async function pauseGameOnLeave(
     const kind = (payload.pause_kind || "").trim() || undefined;
     patchStoredPlayPaused(true, expires > 0 ? expires : undefined, kind);
     if (payload?.id && pauseQueryClient) {
-      pauseQueryClient.setQueryData(gameStateQueryKey(payload.id), payload);
+      setGameStateMerged(pauseQueryClient, payload);
     }
     return payload;
   } catch (err) {

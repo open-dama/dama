@@ -6,6 +6,7 @@ import 'package:dama_mobile/core/board_square.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/game.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
+import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:dama_mobile/features/game/palace_piece.dart';
 import 'package:flutter/material.dart';
 
@@ -86,7 +87,6 @@ class _ActiveAnim {
 
 class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  static const _pickPhaseEnd = 0.24;
   static const _holdPhaseEnd = 0.34;
   static const _landPhaseStart = 0.72;
   /** Snappy product timing (web/3D parity) - same for own + opponent. */
@@ -95,6 +95,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
   static const _durationPerSquareMs = 90;
   static const _moveDurationMaxMs = 820;
   static const _stallGraceMs = 250;
+  /// Web lastFrameAtRef parity: recover when ticker claims animating but value stalls.
+  static const _deadTickerMs = 2000;
 
   late final AnimationController _anim;
   late final AnimationController _shakeCtrl;
@@ -104,8 +106,16 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
   final List<_ActiveAnim> _queue = [];
   int _prevHistoryLen = 0;
   bool _holdSync = false;
+  /// True while this board holds BoardPlyFlight (holdSync OR active OR queue).
+  bool _plyGateHeld = false;
   Timer? _stallWatch;
   bool _finishQueued = false;
+  /// True while app lifecycle paused the flight clock (web document.hidden parity).
+  /// Stall recover must not snap land while the clock is intentionally frozen.
+  bool _flightClockPaused = false;
+  /// Last monotonic ms when `_anim.value` advanced (dead-ticker detect).
+  int _lastAnimAdvanceMs = 0;
+  double _lastAnimAdvanceValue = -1;
 
   @override
   void initState() {
@@ -113,6 +123,20 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     WidgetsBinding.instance.addObserver(this);
     _renderBoard = _cloneBoard(widget.board);
     _prevHistoryLen = widget.moveHistory.length;
+    // Remount mid pick→put (e.g. 2D↔3D): history already at tip so no ply queues.
+    // Sync parent immediately - otherwise _boardPlySynced freezes until 2.5s safety.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.replayMode) return;
+      if (_holdSync || _active != null || _queue.isNotEmpty) return;
+      if (widget.moveHistory.isEmpty) return;
+      final after = widget.moveHistory.last.boardAfter;
+      if (after == null || after.isEmpty) return;
+      if (_boardsEqual(widget.board, after)) return;
+      if (!_boardsEqual(_renderBoard, after)) {
+        setState(() => _renderBoard = _cloneBoard(after));
+      }
+      widget.onPlyAnimated?.call(after);
+    });
     _anim = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
       ..addListener(() {
@@ -120,6 +144,10 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         // on land commit (board + SFX), same idea as web DOM-driven flight.
         final prev = _progress;
         _progress = _anim.value;
+        if (_progress != _lastAnimAdvanceValue) {
+          _lastAnimAdvanceValue = _progress;
+          _lastAnimAdvanceMs = DateTime.now().millisecondsSinceEpoch;
+        }
         final active = _active;
         if (active != null &&
             active.boardAfter != null &&
@@ -128,9 +156,12 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
             _progress >= _landPhaseStart) {
           if (!active.boardApplied) {
             active.boardApplied = true;
-            setState(() {
-              _renderBoard = _cloneBoard(active.boardAfter!);
-            });
+            // Skip clone when equal (avoids resting remount flicker on land).
+            if (!_boardsEqual(_renderBoard, active.boardAfter!)) {
+              setState(() {
+                _renderBoard = _cloneBoard(active.boardAfter!);
+              });
+            }
             widget.onPlyAnimated?.call(active.boardAfter!);
           }
           if (!active.soundPlayed && !widget.replayMode) {
@@ -168,11 +199,25 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     // Web tab-hidden freeze: pause flight clock so resume does not fast-forward.
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      if (_anim.isAnimating) _anim.stop(canceled: false);
+      // Gate on _active (not only isAnimating). A hitch-stopped mid-fly still
+      // needs the pause flag or stall watch forceRecover snaps on background.
+      if (_active != null) {
+        _flightClockPaused = true;
+        if (_anim.isAnimating) {
+          _anim.stop(canceled: false);
+        }
+      }
     } else if (state == AppLifecycleState.resumed) {
+      // Re-arm stall clock (web lastFrameAtRef visibility parity) before clearing
+      // pause so a concurrent stall tick cannot false-trigger dead-ticker recover.
+      if (_active != null) {
+        _lastAnimAdvanceMs = DateTime.now().millisecondsSinceEpoch;
+      }
+      // Forward before clearing pause so a concurrent stall tick cannot snap land.
       if (_active != null && !_anim.isAnimating && _anim.value < 1) {
         _anim.forward();
       }
+      _flightClockPaused = false;
     }
   }
 
@@ -187,8 +232,21 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
       Duration(milliseconds: durationMs + _stallGraceMs),
       () {
         if (!mounted) return;
-        // Still ticking (or lifecycle-paused mid-flight) - wait another grace.
+        // Lifecycle-paused mid-flight - wait another grace.
+        if (_flightClockPaused) {
+          _armStallWatch(_stallGraceMs);
+          return;
+        }
+        // Dead ticker: isAnimating can stay true while value never advances
+        // (WebView hitch). Re-arming forever left the board frozen mid pick→put.
         if (_anim.isAnimating) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (_active != null &&
+              _lastAnimAdvanceMs > 0 &&
+              now - _lastAnimAdvanceMs > _deadTickerMs) {
+            _forceRecoverStall();
+            return;
+          }
           _armStallWatch(_stallGraceMs);
           return;
         }
@@ -200,15 +258,53 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     );
   }
 
+  void _bindFlightActive(_ActiveAnim? next) {
+    _active = next;
+    _syncPlyFlightGate();
+  }
+
+  /// Gate remounts from holdSync rise (not only when `_active` binds) - web
+  /// `markPlyInflight` / `data-dama-ply-inflight` same-turn parity.
+  void _syncPlyFlightGate() {
+    final busy = _active != null || _holdSync || _queue.isNotEmpty;
+    if (busy && !_plyGateHeld) {
+      _plyGateHeld = true;
+      BoardPlyFlight.enter();
+    } else if (!busy && _plyGateHeld) {
+      _plyGateHeld = false;
+      BoardPlyFlight.leave();
+    }
+  }
+
   void _forceRecoverStall() {
     _cancelStallWatch();
     _finishQueued = false;
     _anim.stop();
+    // Sync parent to board_after before clearing fly - otherwise _boardPlySynced
+    // stays false and the match board freezes mid-game (web parity).
+    final anim = _active;
+    List<List<dynamic>>? after;
+    if (anim != null &&
+        anim.boardAfter != null &&
+        anim.boardAfter!.isNotEmpty) {
+      after = anim.boardAfter;
+    } else if (widget.moveHistory.isNotEmpty) {
+      after = widget.moveHistory.last.boardAfter;
+    }
+    if (after != null && after.isNotEmpty) {
+      if (anim != null) anim.boardApplied = true;
+      // Skip clone when already landed (avoids resting remount flicker).
+      if (!_boardsEqual(_renderBoard, after)) {
+        _renderBoard = _cloneBoard(after);
+      }
+      widget.onPlyAnimated?.call(after);
+    }
     setState(() {
       _active = null;
       _progress = 0;
       _holdSync = false;
       _queue.clear();
+      _syncPlyFlightGate();
     });
   }
 
@@ -216,11 +312,35 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     if (_queue.isEmpty) {
       _cancelStallWatch();
       _finishQueued = false;
-      setState(() {
-        _active = null;
-        _progress = 0;
-        _holdSync = false;
-      });
+      // Never clear holdSync without a parent land sync (freeze root / web parity).
+      // Always notify parent even when LAND_PHASE already applied locally (missed
+      // callback → _boardPlySynced freeze). Parent _boardsMatch no-ops when synced
+      // (no pick→put remount flicker) - web empty startNext parity.
+      final dangling = _active;
+      if (dangling != null &&
+          dangling.boardAfter != null &&
+          dangling.boardAfter!.isNotEmpty) {
+        dangling.boardApplied = true;
+        if (!_boardsEqual(_renderBoard, dangling.boardAfter!)) {
+          _renderBoard = _cloneBoard(dangling.boardAfter!);
+        }
+        widget.onPlyAnimated?.call(dangling.boardAfter!);
+      } else {
+        final after = widget.moveHistory.isNotEmpty
+            ? widget.moveHistory.last.boardAfter
+            : null;
+        if (after != null && after.isNotEmpty) {
+          if (!_boardsEqual(_renderBoard, after)) {
+            _renderBoard = _cloneBoard(after);
+          }
+          widget.onPlyAnimated?.call(after);
+        }
+      }
+      _active = null;
+      _progress = 0;
+      _holdSync = false;
+      _syncPlyFlightGate();
+      if (mounted) setState(() {});
       return;
     }
     final next = _queue.removeAt(0);
@@ -235,12 +355,21 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         )
         .round();
     _finishQueued = false;
-    setState(() {
-      _active = next;
-      _progress = 0;
-    });
+    // Assign fly state synchronously BEFORE setState. When called from
+    // didUpdateWidget (history grew), the following build must already hide the
+    // origin and show the fly - otherwise one painted frame of resting piece
+    // flashes on pick→put (web useLayoutEffect parity).
+    // Reset controller to 0 BEFORE paint - a completed ply leaves value=1, so the
+    // first build of the next fly would draw at the destination (pick→put flash).
+    _anim.stop();
+    _anim.value = 0;
+    _bindFlightActive(next);
+    _progress = 0;
+    _lastAnimAdvanceValue = 0;
+    _lastAnimAdvanceMs = DateTime.now().millisecondsSinceEpoch;
     _anim.duration = Duration(milliseconds: ms);
     _armStallWatch(ms);
+    if (mounted) setState(() {});
     _anim.forward(from: 0);
   }
 
@@ -253,9 +382,11 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         finished.boardAfter!.isNotEmpty) {
       if (!finished.boardApplied) {
         finished.boardApplied = true;
-        setState(() {
-          _renderBoard = _cloneBoard(finished.boardAfter!);
-        });
+        if (!_boardsEqual(_renderBoard, finished.boardAfter!)) {
+          setState(() {
+            _renderBoard = _cloneBoard(finished.boardAfter!);
+          });
+        }
         widget.onPlyAnimated?.call(finished.boardAfter!);
       }
       if (!finished.soundPlayed && !widget.replayMode) {
@@ -268,15 +399,15 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         );
       }
     }
-    _active = null;
+    // Do not clear _active here (web finishAndAdvance parity). Empty _startNext
+    // owns clear + dangling land sync; clearing first made dangling=null and
+    // could flash a blank fly frame before the next ply primed.
     _progress = 0;
     _finishQueued = false;
-    if (_queue.isNotEmpty) {
-      _startNext();
-    } else {
-      _cancelStallWatch();
-      setState(() => _holdSync = false);
-    }
+    // Always route through _startNext (web finishAndAdvance → startNext parity).
+    // Bare holdSync=false on empty queue skipped parent land sync when boardAfter
+    // was missing on the finished anim and froze _boardPlySynced mid-game.
+    _startNext();
   }
 
   @override
@@ -288,22 +419,27 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     }
 
     if (widget.replayMode) {
-      _queue.clear();
-      _active = null;
-      _holdSync = false;
-      _anim.stop();
-      _renderBoard = _cloneBoard(widget.board);
+      // Rising into replay mid pick→put: land-sync parent before clearing fly
+      // (bare clear snapped put-down and left _boardPlySynced false).
+      if (_active != null || _holdSync || _queue.isNotEmpty) {
+        _forceRecoverStall();
+      }
+      if (!_boardsEqual(_renderBoard, widget.board)) {
+        _renderBoard = _cloneBoard(widget.board);
+      }
       return;
     }
 
     final len = widget.moveHistory.length;
     if (len < _prevHistoryLen) {
+      // History shrink (scrub / reset) mid-fly: same land-sync-before-clear as replay.
+      if (_active != null || _holdSync || _queue.isNotEmpty) {
+        _forceRecoverStall();
+      }
       _prevHistoryLen = len;
-      _queue.clear();
-      _active = null;
-      _holdSync = false;
-      _anim.stop();
-      _renderBoard = _cloneBoard(widget.board);
+      if (!_boardsEqual(_renderBoard, widget.board)) {
+        _renderBoard = _cloneBoard(widget.board);
+      }
       return;
     }
     if (len > _prevHistoryLen) {
@@ -311,6 +447,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
       final newEntries = widget.moveHistory.sublist(start);
       _prevHistoryLen = len;
       _holdSync = true;
+      // Gate remounts from holdSync rise - _startNext may still be a frame away.
+      _syncPlyFlightGate();
       for (var i = 0; i < newEntries.length; i++) {
         final e = newEntries[i];
         final prevBoard = i == 0
@@ -319,16 +457,49 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         final anim = _animFromHistory(e, prevBoard);
         if (anim != null) _queue.add(anim);
       }
-      if (_active == null) _startNext();
+      if (_active == null) {
+        // History grew but nothing to fly: sync immediately so _boardPlySynced
+        // cannot stick false and freeze input (web parity).
+        if (_queue.isEmpty) {
+          final after = widget.moveHistory.isNotEmpty
+              ? widget.moveHistory.last.boardAfter
+              : null;
+          if (after != null && after.isNotEmpty) {
+            if (!_boardsEqual(_renderBoard, after)) {
+              _renderBoard = _cloneBoard(after);
+            }
+            widget.onPlyAnimated?.call(after);
+          }
+          _holdSync = false;
+          _syncPlyFlightGate();
+        } else {
+          _startNext();
+        }
+      }
       return;
     }
     if (_holdSync || _active != null || _queue.isNotEmpty) return;
+    if (widget.moveHistory.isNotEmpty) {
+      final completed = widget.moveHistory.last.boardAfter;
+      // Web remount-sync parity: idle with parent behind tip (missed land / remount).
+      // Sync parent - never rewind landed pieces to a lagging freeze.
+      if (completed != null &&
+          completed.isNotEmpty &&
+          !_boardsEqual(widget.board, completed)) {
+        if (!_boardsEqual(_renderBoard, completed)) {
+          _renderBoard = _cloneBoard(completed);
+        }
+        widget.onPlyAnimated?.call(completed);
+        return;
+      }
+    }
     if (!_boardsEqual(_renderBoard, widget.board)) {
       if (widget.moveHistory.isEmpty) {
         final next = _diffAnim(_renderBoard, widget.board, widget.legalMoves);
         if (next != null) {
           _queue.add(next);
           _holdSync = true;
+          _syncPlyFlightGate();
           _startNext();
         } else {
           _renderBoard = _cloneBoard(widget.board);
@@ -445,6 +616,25 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelStallWatch();
+    // Remount (2D↔3D / shell) mid pick→put: land-sync parent before ticker dies.
+    if (_active != null || _holdSync) {
+      final anim = _active;
+      List<List<dynamic>>? after;
+      if (anim != null &&
+          anim.boardAfter != null &&
+          anim.boardAfter!.isNotEmpty) {
+        after = anim.boardAfter;
+      } else if (widget.moveHistory.isNotEmpty) {
+        after = widget.moveHistory.last.boardAfter;
+      }
+      if (after != null && after.isNotEmpty) {
+        widget.onPlyAnimated?.call(after);
+      }
+    }
+    _active = null;
+    _holdSync = false;
+    _queue.clear();
+    _syncPlyFlightGate();
     _anim.dispose();
     _shakeCtrl.dispose();
     super.dispose();
@@ -454,7 +644,23 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     return board.map((row) => List<dynamic>.from(row)).toList();
   }
 
+  static bool _cellKing(dynamic cell) {
+    if (cell is! Map) return false;
+    final k = cell['k'];
+    return k == true || k == 1;
+  }
+
+  static int? _cellPlayer(dynamic cell) {
+    if (cell is! Map) return null;
+    final p = cell['p'];
+    if (p is num) return p.toInt();
+    return null;
+  }
+
+  /// Content equality (web boardsEqual parity). Strict `k`/`p` identity used to
+  /// fail keep-landed and rewind pieces mid put-down.
   static bool _boardsEqual(List<List<dynamic>> a, List<List<dynamic>> b) {
+    if (identical(a, b)) return true;
     if (a.length != b.length) return false;
     for (var r = 0; r < a.length; r++) {
       if (a[r].length != b[r].length) return false;
@@ -463,7 +669,9 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
         final y = b[r][c];
         if (x == null && y == null) continue;
         if (x is! Map || y is! Map) return false;
-        if (x['p'] != y['p'] || x['k'] != y['k']) return false;
+        if (_cellPlayer(x) != _cellPlayer(y) || _cellKing(x) != _cellKing(y)) {
+          return false;
+        }
       }
     }
     return true;
@@ -471,13 +679,26 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
 
   bool _isDark(int row, int col) => (row + col).isOdd;
 
+  // Suppress select/legal/must while the ply fly is up. Parent flips
+  // _boardPlySynced at LAND_PHASE so cues would otherwise flash mid put-down.
+  bool get _moveCuesActive => _active == null;
+
+  int? get _cueSelectedRow => _moveCuesActive ? widget.selectedRow : null;
+  int? get _cueSelectedCol => _moveCuesActive ? widget.selectedCol : null;
+  int? get _cueMustRow => _moveCuesActive ? widget.mustContinueRow : null;
+  int? get _cueMustCol => _moveCuesActive ? widget.mustContinueCol : null;
+  List<List<int>> get _cueLegalMoves =>
+      _moveCuesActive ? widget.legalMoves : const <List<int>>[];
+
   Set<String> get _targets {
     final out = <String>{};
-    final hasSel = widget.selectedRow != null && widget.selectedCol != null;
-    for (final m in widget.legalMoves) {
+    final sr = _cueSelectedRow;
+    final sc = _cueSelectedCol;
+    final hasSel = sr != null && sc != null;
+    for (final m in _cueLegalMoves) {
       if (m.length < 4) continue;
       if (hasSel) {
-        if (m[0] == widget.selectedRow && m[1] == widget.selectedCol) {
+        if (m[0] == sr && m[1] == sc) {
           out.add('${m[2]},${m[3]}');
         }
       }
@@ -487,8 +708,8 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
 
   Set<String> get _origins {
     final out = <String>{};
-    if (widget.selectedRow != null) return out;
-    for (final m in widget.legalMoves) {
+    if (_cueSelectedRow != null) return out;
+    for (final m in _cueLegalMoves) {
       if (m.length >= 2) out.add('${m[0]},${m[1]}');
     }
     return out;
@@ -525,28 +746,16 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
     return t < 0.5 ? 4 * t * t * t : 1 - math.pow(-2 * t + 2, 3).toDouble() / 2;
   }
 
-  /// Match 3D piece lift scale (1.035) - larger 2D scale caused pick/put wobble.
-  double _flyScale(double progress) {
-    if (progress < _pickPhaseEnd) {
-      final t = progress / _pickPhaseEnd;
-      final ease = t * t * (3 - 2 * t);
-      return 1 + ease * 0.035;
-    }
-    if (progress < _landPhaseStart) return 1.035;
-    final t = (progress - _landPhaseStart) / (1 - _landPhaseStart);
-    final ease = t * t * (3 - 2 * t);
-    return 1.035 - ease * 0.035;
-  }
-
   @override
   Widget build(BuildContext context) {
     final tokens = damaColorsOf(context);
     final size = widget.boardSize;
     if (size <= 0) return const BoardAreaSkeleton();
 
-    final display = (_holdSync || _active != null || _queue.isNotEmpty)
-        ? _renderBoard
-        : widget.board;
+    // Always paint _renderBoard (web `renderBoard.length ? renderBoard : board`).
+    // Switching to widget.board when idle rewound landed pieces if parent lagged
+    // board_after for one frame (clock/WS) - pick→put flicker.
+    final display = _renderBoard.isNotEmpty ? _renderBoard : widget.board;
     final targets = _targets;
     final origins = _origins;
     final hidden = _hiddenKeys;
@@ -583,11 +792,10 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                       animation: _anim,
                       builder: (context, child) {
                         final progress = _anim.value;
-                        if (progress >= 1) {
-                          return const SizedBox.shrink();
-                        }
+                        // Keep fly at destination until _finishAndAdvance clears
+                        // _active. Shrinking at progress>=1 left a blank hole while
+                        // resting was still hidden (pick→put flicker).
                         final t = _travelT(progress);
-                        final scale = _flyScale(progress);
                         final fromR = widget.flipBoard
                             ? size - 1 - active.fromR
                             : active.fromR;
@@ -602,15 +810,15 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                             : active.toC;
                         final vr = fromR + (toR - fromR) * t;
                         final vc = fromC + (toC - fromC) * t;
+                        // Constant 1. A 1→1.035→1 pulse re-rasterizes the disc and
+                        // flickers on pick and put. No Transform.scale layer either -
+                        // identity scale still flickered on put-down.
                         return Positioned(
                           left: vc * cell + (cell - piece) / 2,
                           top: vr * cell + (cell - piece) / 2,
                           width: piece,
                           height: piece,
-                          child: Transform.scale(
-                            scale: scale,
-                            child: child,
-                          ),
+                          child: child ?? const SizedBox.shrink(),
                         );
                       },
                       child: _PieceDisc(
@@ -645,10 +853,9 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                           (row < display.length && col < display[row].length)
                               ? display[row][col]
                               : null;
-                      final selected = widget.selectedRow == row &&
-                          widget.selectedCol == col;
-                      final must = widget.mustContinueRow == row &&
-                          widget.mustContinueCol == col;
+                      final selected =
+                          _cueSelectedRow == row && _cueSelectedCol == col;
+                      final must = _cueMustRow == row && _cueMustCol == col;
                       final key = '$row,$col';
                       final isTarget = targets.contains(key);
                       final isLastFrom = lastMove?.$1 == key;
@@ -666,7 +873,7 @@ class _DraughtsBoard2DState extends State<DraughtsBoard2D>
                           isTarget ||
                           must ||
                           isLast ||
-                          (widget.selectedRow == null && origins.contains(key));
+                          (_cueSelectedRow == null && origins.contains(key));
                       final hidePiece = hidden.contains(key);
                       // 3D/web parity: only lock own piece while still in the air.
                       final ownAirLocked = _active != null &&
@@ -875,32 +1082,32 @@ class _PieceDisc extends StatelessWidget {
   Widget build(BuildContext context) {
     final role = palacePieceRole(player, king);
     // Neo silhouette fills the square (Chess.com Neo pattern) - not a stamped disc.
-    return Transform.scale(
-      scale: scale,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          boxShadow: [
-            const BoxShadow(
-              color: Color(0x55000000),
-              blurRadius: 3,
-              offset: Offset(0, 2),
+    // Skip identity Transform.scale - fly/rest handoff flickered with an empty layer.
+    final disc = DecoratedBox(
+      decoration: BoxDecoration(
+        boxShadow: [
+          const BoxShadow(
+            color: Color(0x55000000),
+            blurRadius: 3,
+            offset: Offset(0, 2),
+          ),
+          if (glow != null)
+            BoxShadow(
+              color: glow!.withValues(alpha: 0.85),
+              blurRadius: 12,
+              spreadRadius: 1,
             ),
-            if (glow != null)
-              BoxShadow(
-                color: glow!.withValues(alpha: 0.85),
-                blurRadius: 12,
-                spreadRadius: 1,
-              ),
-          ],
-        ),
-        child: PalacePieceMark(
-          role: role,
-          pieceLight: light,
-          pieceDark: dark,
-          player: player,
-          darkSplit: darkSplit,
-        ),
+        ],
+      ),
+      child: PalacePieceMark(
+        role: role,
+        pieceLight: light,
+        pieceDark: dark,
+        player: player,
+        darkSplit: darkSplit,
       ),
     );
+    if ((scale - 1.0).abs() < 0.001) return disc;
+    return Transform.scale(scale: scale, child: disc);
   }
 }

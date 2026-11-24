@@ -150,18 +150,31 @@ export function mergeRemoteBoardState(
   const sameOutcome = previous.outcome === incoming.outcome;
   const sameDraw = Boolean(previous.draw) === Boolean(incoming.draw);
 
-  if (samePly && sameTurn && sameOutcome && sameDraw) {
+  // Same-ply WS (clock tick, pause, vote, clock_flag, abandon) must never snap
+  // board under an in-flight pick→put. Keep previous.board + local board_after
+  // even when turn/outcome/draw change mid-animation.
+  if (samePly) {
+    if (sameTurn && sameOutcome && sameDraw) {
+      return withResolvedOutcome({
+        ...previous,
+        legal_moves: incoming.legal_moves ?? previous.legal_moves,
+        must_continue: incoming.must_continue ?? previous.must_continue,
+        // Later WS tick may add end_reason after outcome; never drop on-time framing.
+        end_reason: incoming.end_reason ?? previous.end_reason,
+        draw_reason: incoming.draw_reason ?? previous.draw_reason,
+        clock_active: incoming.clock_active ?? previous.clock_active,
+        clock_p1_remaining_ms: incoming.clock_p1_remaining_ms ?? previous.clock_p1_remaining_ms,
+        clock_p2_remaining_ms: incoming.clock_p2_remaining_ms ?? previous.clock_p2_remaining_ms,
+        clock_server_now_ms: incoming.clock_server_now_ms ?? previous.clock_server_now_ms,
+        ...mergePauseFieldsFromIncoming(previous, incoming),
+      });
+    }
     return withResolvedOutcome({
-      ...previous,
-      legal_moves: incoming.legal_moves ?? previous.legal_moves,
-      must_continue: incoming.must_continue ?? previous.must_continue,
-      // Later WS tick may add end_reason after outcome; never drop on-time framing.
+      ...incoming,
+      board: previous.board,
+      move_history: mergeMoveHistorySnapshots(previous.move_history, incoming.move_history),
       end_reason: incoming.end_reason ?? previous.end_reason,
       draw_reason: incoming.draw_reason ?? previous.draw_reason,
-      clock_active: incoming.clock_active ?? previous.clock_active,
-      clock_p1_remaining_ms: incoming.clock_p1_remaining_ms ?? previous.clock_p1_remaining_ms,
-      clock_p2_remaining_ms: incoming.clock_p2_remaining_ms ?? previous.clock_p2_remaining_ms,
-      clock_server_now_ms: incoming.clock_server_now_ms ?? previous.clock_server_now_ms,
       ...mergePauseFieldsFromIncoming(previous, incoming),
     });
   }

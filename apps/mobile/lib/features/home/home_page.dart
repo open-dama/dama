@@ -1922,6 +1922,8 @@ class _HomePreviewBoard3DState extends State<_HomePreviewBoard3D> {
         selectedCol: null,
         onSelectSquare: (_, __) {},
         interactive: false,
+        moveHistory: const [],
+        replayMode: true,
         onPaintReady: (ready) {
           // Latch true only - ignore false (shell remount must not re-open hydrate).
           if (!mounted || !ready || _painted) return;

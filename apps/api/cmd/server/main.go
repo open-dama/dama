@@ -175,6 +175,7 @@ func main() {
 		Payments:          paySvc,
 		RBAC:              rbacStore,
 		OfficialPause:     officialPauseStore,
+		Audit:             audit,
 	}
 	hub.SetMoveHandler(api.ApplyMoveCore)
 	hub.SetClockFlagHandler(api.ClaimClockFlagCore)
@@ -195,6 +196,7 @@ func main() {
 			"prize_pool_display_enabled":   f.PrizePoolDisplayEnabled,
 			"prize_pool_guarantee_enabled": f.PrizePoolGuaranteeEnabled,
 			"kyc_auto_approve":             f.KycAutoApprove,
+			"geo_prefer_device_gps":        f.GeoPreferDeviceGps,
 			"ai_depths":                    f.AIDepths,
 		}
 	})
@@ -255,7 +257,7 @@ func main() {
 		SupabaseURL:       cfg.SupabaseURL,
 		SupabaseJWTSecret: cfg.SupabaseJWTSecret,
 	}
-	payAPI := &rest.PaymentsAPI{Payments: paySvc, Users: users, Settings: settings, Cash: cashRmg, Locate: geoResolver, Avatars: avatars, DB: handle}
+	payAPI := &rest.PaymentsAPI{Payments: paySvc, Users: users, Settings: settings, Flags: flags, Cash: cashRmg, Locate: geoResolver, Avatars: avatars, DB: handle}
 	telegramBotAPI := &rest.TelegramBotAPI{
 		Payments: paySvc, Payouts: payouts, Users: users, Settings: settings, Cash: cashRmg, DB: handle,
 	}
@@ -264,10 +266,10 @@ func main() {
 	cashAPI := &rest.CashRmgAPI{Cash: cashRmg, Users: users, OTP: otpStore, Flags: flags, Settings: settings, Locate: geoResolver, Docs: kycDocs}
 	kycAPI := &rest.KycAPI{Cash: cashRmg, Docs: kycDocs, Avatars: avatars, Settings: settings, Flags: flags, DB: handle, Users: users}
 	ytAPI := &rest.YouTubeAPI{Pool: ytPool, Worker: ytWorker, Settings: settings}
-	adsAPI := &rest.AdsAPI{Ads: ads, YT: ytPool, Worker: ytWorker, Geo: adGeo, Locate: geoResolver, Settings: settings, Audit: audit, Avatars: avatars, Payments: paySvc, Cash: cashRmg, Users: users, DB: handle}
+	adsAPI := &rest.AdsAPI{Ads: ads, YT: ytPool, Worker: ytWorker, Geo: adGeo, Locate: geoResolver, Settings: settings, Flags: flags, Audit: audit, Avatars: avatars, Payments: paySvc, Cash: cashRmg, Users: users, DB: handle}
 	go rest.RunCampaignAutoCloseWorker(workerCtx, adsAPI)
 	rbacAPI := &rest.RBACAPI{RBAC: rbacStore, Users: users, Settings: settings, Audit: audit}
-	invoiceAPI := &rest.InvoiceAPI{Ads: ads, Settings: settings, Locate: geoResolver}
+	invoiceAPI := &rest.InvoiceAPI{Ads: ads, Settings: settings, Flags: flags, Locate: geoResolver}
 	tourAPI := &rest.TournamentAPI{
 		Tournaments: tournaments, Entries: entries, Payments: paySvc, Settings: settings, Flags: flags,
 		Avatars: avatars, Cash: cashRmg, Users: users, Locate: geoResolver, Games: gameStore,
@@ -336,7 +338,7 @@ func main() {
 	dmAPI := &rest.DMAPI{DMs: dmStore, Users: users, Settings: settings, Presence: presenceSvc, Media: avatars, Hub: hub, Cash: cashRmg, DB: handle}
 	progAPI := &rest.ProgressionAPI{Settings: settings}
 	rulesAPI := &rest.GameRulesAPI{Settings: settings}
-	geoAPI := &rest.GeoAPI{Geo: geoResolver, Payments: paySvc, Presence: presenceSvc, Users: users, Settings: settings, DB: handle, Activity: activityAPI}
+	geoAPI := &rest.GeoAPI{Geo: geoResolver, Payments: paySvc, Presence: presenceSvc, Users: users, Settings: settings, Flags: flags, DB: handle, Activity: activityAPI}
 	otpAPI := &rest.OTPAPI{OTP: otpStore, Flags: flags, Users: users, Redis: redisClient, Settings: settings}
 	fpAPI := &rest.FingerprintAPI{Fingerprints: fingerprints, Settings: settings}
 	authMW := auth.Middleware{Tokens: tokens, Revoked: revoked, Disabled: disabled}
@@ -817,6 +819,7 @@ func main() {
 		RBAC:        rbacStore,
 		DB:          handle,
 		Locate:      geoResolver,
+		Audit:       audit,
 	}))
 	r.Get("/ws/game", hub.HandleGame)
 	r.Get("/ws/matchmaking", hub.HandleMatchmaking)

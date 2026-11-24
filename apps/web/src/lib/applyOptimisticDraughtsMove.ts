@@ -117,6 +117,8 @@ export function applyOptimisticDraughtsMove(
 
   return {
     ...state,
+    // Keep painted board frozen at pre-ply; land commit applies board_after.
+    board: state.board,
     turn: continueCapture ? yourPlayer : nextTurn,
     must_continue: continueCapture ? ([to[0], to[1]] as [number, number]) : null,
     move_count: (state.move_count ?? 0) + 1,

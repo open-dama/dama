@@ -202,7 +202,7 @@ func (a *PayoutAPI) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		writeWalletChromeError(w, a.Settings, r.Context(), http.StatusBadRequest, "payout_amount_currency_required")
 		return
 	}
-	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, 0, 0)
+	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, 0, 0)
 	if payerCC == "" {
 		writeWalletChromeError(w, a.Settings, r.Context(), http.StatusBadRequest, "country_required_checkout")
 		return

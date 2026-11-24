@@ -11,7 +11,7 @@ function countPlayer(board: BoardCell[][] | undefined, player: 1 | 2): number {
   return n;
 }
 
-function boardsEqual(a: BoardCell[][] | undefined, b: BoardCell[][] | undefined): boolean {
+export function boardsEqual(a: BoardCell[][] | undefined, b: BoardCell[][] | undefined): boolean {
   if (a === b) return true;
   if (!a || !b || a.length !== b.length) return false;
   for (let r = 0; r < a.length; r++) {
@@ -22,7 +22,9 @@ function boardsEqual(a: BoardCell[][] | undefined, b: BoardCell[][] | undefined)
       const ac = ar[c];
       const bc = br[c];
       if (!ac && !bc) continue;
-      if (!ac || !bc || ac.p !== bc.p || Boolean(ac.k) !== Boolean(bc.k)) return false;
+      if (!ac || !bc || Number(ac.p) !== Number(bc.p) || Boolean(ac.k) !== Boolean(bc.k)) {
+        return false;
+      }
     }
   }
   return true;

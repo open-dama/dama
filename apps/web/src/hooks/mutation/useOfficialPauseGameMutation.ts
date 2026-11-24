@@ -1,6 +1,7 @@
 import { gameStateQueryKey } from "@/hooks/query/useGameStateQuery";
 import { officialPauseEventsQueryKey } from "@/hooks/query/useOfficialPauseEventsQuery";
 import { authHeaders, restClient } from "@/lib/api";
+import { mergeRemoteBoardState } from "@/lib/gameBoardStateMerge";
 import type { GamePayload } from "@/types/game";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -29,7 +30,10 @@ export function useOfficialPauseGameMutation(token: string | null | undefined) {
     },
     onSuccess: (game) => {
       if (game?.id) {
-        qc.setQueryData(gameStateQueryKey(game.id), game);
+        // Merge so official pause mid pick→put cannot seed board_after into RQ.
+        qc.setQueryData(gameStateQueryKey(game.id), (prev: GamePayload | undefined) =>
+          !prev || prev.id !== game.id ? game : mergeRemoteBoardState(prev, game),
+        );
         void qc.invalidateQueries({ queryKey: officialPauseEventsQueryKey(game.id) });
       }
       void qc.invalidateQueries({ queryKey: ["event-live-boards"] });

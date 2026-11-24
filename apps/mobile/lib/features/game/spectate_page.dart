@@ -11,6 +11,7 @@ import 'package:dama_mobile/core/network/game_ws_client.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:dama_mobile/core/prefs/board_palette_prefs.dart';
 import 'package:dama_mobile/core/prefs/board_view_prefs.dart';
+import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:dama_mobile/features/game/draughts_board_2d.dart';
 import 'package:dama_mobile/features/game/draughts_board_3d.dart';
 import 'package:dama_mobile/features/game/game_move_history.dart';
@@ -78,7 +79,13 @@ class _SpectatePageState extends State<SpectatePage> {
   int _turn = 1;
   bool _draw = false;
   bool _flipBoard = false;
+  bool _manualFlipTapScheduled = false;
+  bool _replaySelectScheduled = false;
+  int? _pendingReplayIdx;
+  bool _liveSelectScheduled = false;
   bool _shareCopied = false;
+  /// Connect/id swap: drop stale dispose land (web suppressPlyLandRef parity).
+  int _plyLandEpoch = 0;
   Map<String, dynamic>? _liveVotes;
   int? _outcome;
   String? _endReason;
@@ -108,9 +115,83 @@ class _SpectatePageState extends State<SpectatePage> {
   List<MatchClockPreset> _clockPresets = const [];
   int? _gameTimeControlSeconds;
 
+  /// Force-sync board if land commit never reaches parent (web freeze safety).
+  Timer? _plySyncWatch;
+
   /// Focus: collapse vote so Moves/Chat/Info get room; Back restores overview.
   bool _watchFocus = false;
   _WatchTab _watchTab = _WatchTab.moves;
+
+  bool get _boardPlySynced {
+    if (_moveHistory.isEmpty) return true;
+    final after = _moveHistory.last.boardAfter;
+    if (after == null || after.isEmpty) return true;
+    return _boardsMatch(_board, after);
+  }
+
+  void _armPlySyncSafety() {
+    if (_boardPlySynced || _replayIndex != null) {
+      _plySyncWatch?.cancel();
+      _plySyncWatch = null;
+      return;
+    }
+    if (_plySyncWatch?.isActive == true) return;
+    final after = _moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null;
+    if (after == null || after.isEmpty) return;
+    // Align with BoardPlyFlight.idleTimeout - a 2.5s snap mid multi-capture
+    // remounted pieces under the fly (web PLY_IDLE_FAIL_OPEN_MS parity).
+    final armedAt = DateTime.now();
+    void arm() {
+      _plySyncWatch = Timer(BoardPlyFlight.idleTimeout, () {
+        if (!mounted || _boardPlySynced || _replayIndex != null) return;
+        if (BoardPlyFlight.isActive &&
+            DateTime.now().difference(armedAt) <
+                BoardPlyFlight.idleTimeout * 2) {
+          arm();
+          return;
+        }
+        final snap =
+            _moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null;
+        if (snap == null || snap.isEmpty) return;
+        setState(() {
+          _board = snap;
+          _liveBoard = snap;
+        });
+        _cachePaintedBoard(snap);
+      });
+    }
+
+    arm();
+  }
+
+  /// Persist painted board so leave→back / remount does not re-freeze until safety.
+  void _cachePaintedBoard(List<List<dynamic>> board) {
+    final gid = _gameIdCtrl.text.trim();
+    if (gid.isEmpty) return;
+    final prior = QueryCache.read<GameStatePayload>(
+      CacheKeys.gameState(gid),
+      maxAge: QueryCache.sessionTtl,
+      allowStale: true,
+    );
+    if (prior == null) return;
+    QueryCache.write(
+      CacheKeys.gameState(gid),
+      prior.copyWith(board: board),
+    );
+  }
+
+  /// Land commit from 2D/3D boards. Skip rebuild when content already matches.
+  void _handlePlyAnimated(List<List<dynamic>> boardAfter) {
+    // Stale land after connect/id swap must not paint onto the new watch target.
+    final epoch = _plyLandEpoch;
+    if (_boardsMatch(_board, boardAfter)) return;
+    if (epoch != _plyLandEpoch) return;
+    setState(() {
+      _board = boardAfter;
+      _liveBoard = boardAfter;
+    });
+    _cachePaintedBoard(boardAfter);
+  }
 
   /// Seat clock follows animating ply, then side-to-move (web activeClockPlayer parity).
   int? get _activeClockPlayer {
@@ -138,10 +219,12 @@ class _SpectatePageState extends State<SpectatePage> {
       for (var c = 0; c < a[r].length; c++) {
         final ac = a[r][c];
         final bc = b[r][c];
-        final ap = ac is Map ? ac['p'] : null;
-        final bp = bc is Map ? bc['p'] : null;
-        final ak = ac is Map ? ac['k'] == true : false;
-        final bk = bc is Map ? bc['k'] == true : false;
+        if (ac == null && bc == null) continue;
+        if (ac is! Map || bc is! Map) return false;
+        final ap = ac['p'] is num ? (ac['p'] as num).toInt() : null;
+        final bp = bc['p'] is num ? (bc['p'] as num).toInt() : null;
+        final ak = ac['k'] == true || ac['k'] == 1;
+        final bk = bc['k'] == true || bc['k'] == 1;
         if (ap != bp || ak != bk) return false;
       }
     }
@@ -151,6 +234,8 @@ class _SpectatePageState extends State<SpectatePage> {
   @override
   void initState() {
     super.initState();
+    // Reset process-wide ply gate (hot reload / prior route missed leave).
+    BoardPlyFlight.clear();
     final preset = widget.initialGameId?.trim();
     if (preset != null && preset.isNotEmpty) {
       _gameIdCtrl.text = preset;
@@ -168,6 +253,10 @@ class _SpectatePageState extends State<SpectatePage> {
   Future<void> _hydrateBoardView() async {
     final mode = await readBoardViewMode();
     if (!mounted) return;
+    // Prefs hydrate remounts 2D↔3D - defer like web useBoardViewMode plyInflight.
+    await BoardPlyFlight.waitUntilIdle();
+    if (!mounted) return;
+    if (_boardView == mode) return;
     setState(() => _boardView = mode);
   }
 
@@ -184,8 +273,66 @@ class _SpectatePageState extends State<SpectatePage> {
   }
 
   Future<void> _setBoardView(BoardViewMode mode) async {
+    // 2D↔3D remounts the plane; never mid pick→put (ticker dies → flicker/freeze).
+    // Stuck gate must not drop the tap forever - waitUntilIdle fail-opens at 5.5s.
+    await BoardPlyFlight.waitUntilIdle();
+    if (!mounted) return;
+    if (_boardView == mode) return;
     setState(() => _boardView = mode);
     await writeBoardViewMode(mode);
+  }
+
+  /// Manual flip chrome: coalesce taps so stacked waitUntilIdle cannot double-flip.
+  /// Same gate as 2D↔3D - flip remaps screen coords mid-flight → flicker.
+  Future<void> _manualFlipWhenIdle() async {
+    if (_manualFlipTapScheduled) return;
+    _manualFlipTapScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      setState(() => _flipBoard = !_flipBoard);
+    } finally {
+      _manualFlipTapScheduled = false;
+    }
+  }
+
+  /// Replay scrub: latest idx wins (stacked waits must not apply stale plies).
+  Future<void> _selectReplayWhenIdle(int idx) async {
+    _pendingReplayIdx = idx;
+    if (_replaySelectScheduled) return;
+    _replaySelectScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      final next = _pendingReplayIdx;
+      if (next == null) return;
+      setState(() {
+        _replayIndex = next;
+        _watchTab = _WatchTab.moves;
+        _watchFocus = true;
+      });
+    } finally {
+      _replaySelectScheduled = false;
+      _pendingReplayIdx = null;
+    }
+  }
+
+  /// Live chip: never snap `_board` to tip while a ply is airborne.
+  Future<void> _selectLiveWhenIdle() async {
+    if (_liveSelectScheduled) return;
+    _liveSelectScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      setState(() {
+        _replayIndex = null;
+        _board = _liveBoard;
+        _watchTab = _WatchTab.moves;
+        _watchFocus = true;
+      });
+    } finally {
+      _liveSelectScheduled = false;
+    }
   }
 
   Future<void> _loadChrome() async {
@@ -478,13 +625,50 @@ class _SpectatePageState extends State<SpectatePage> {
     final incomingHist = payload.moveHistory;
     final prevLen = _moveHistory.length;
     final histGrew = incomingHist.length > prevLen;
-    // Freeze parent board while history grows so scene animates + clock follows ply.
-    if (histGrew && _board != null) {
+    // Match match_board_page freeze: keep painted board while history grows so
+    // the scene can animate; same-ply WS must not snap mid pick→put.
+    if (payload.board != null) {
       _liveBoard = payload.board;
-      _moveHistory = incomingHist;
+      if (_replayIndex == null && !histGrew) {
+        final lastAfter = incomingHist.isNotEmpty
+            ? incomingHist.last.boardAfter
+            : (_moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null);
+        if (lastAfter == null ||
+            lastAfter.isEmpty ||
+            _boardsMatch(_board, lastAfter)) {
+          _board = payload.board;
+        }
+      } else if (!histGrew || _board == null) {
+        _board = payload.board;
+      }
+    }
+    // Preserve local board_after snapshots when the server omits them.
+    if (incomingHist.isNotEmpty && _moveHistory.isNotEmpty) {
+      final merged = <MoveHistoryEntry>[];
+      for (var i = 0; i < incomingHist.length; i++) {
+        final entry = incomingHist[i];
+        if (entry.boardAfter != null && entry.boardAfter!.isNotEmpty) {
+          merged.add(entry);
+          continue;
+        }
+        if (i < _moveHistory.length &&
+            _moveHistory[i].boardAfter != null &&
+            _moveHistory[i].boardAfter!.isNotEmpty) {
+          merged.add(
+            MoveHistoryEntry(
+              from: entry.from,
+              to: entry.to,
+              captures: entry.captures,
+              player: entry.player,
+              boardAfter: _moveHistory[i].boardAfter,
+            ),
+          );
+        } else {
+          merged.add(entry);
+        }
+      }
+      _moveHistory = merged;
     } else {
-      _board = payload.board;
-      _liveBoard = payload.board;
       _moveHistory = incomingHist;
     }
     _boardSize = payload.size;
@@ -512,7 +696,11 @@ class _SpectatePageState extends State<SpectatePage> {
     _applyServerClock(payload);
     final gid = (payload.gameId ?? _gameIdCtrl.text).trim();
     if (gid.isNotEmpty) {
-      QueryCache.write(CacheKeys.gameState(gid), payload);
+      // Cache painted board while history is ahead (server payload has board_after).
+      QueryCache.write(
+        CacheKeys.gameState(gid),
+        payload.copyWith(board: _board ?? payload.board),
+      );
     }
   }
 
@@ -629,6 +817,8 @@ class _SpectatePageState extends State<SpectatePage> {
       maxAge: QueryCache.sessionTtl,
       allowStale: true,
     );
+    // Bump epoch before teardown so mid-fly dispose land cannot paint the old game.
+    _plyLandEpoch++;
     setState(() {
       _error = null;
       _status = chrome.connectingStatus;
@@ -658,7 +848,7 @@ class _SpectatePageState extends State<SpectatePage> {
         final decoded = jsonDecode(res.body);
         if (decoded is Map<String, dynamic>) {
           final payload = GameStatePayload.fromJson(decoded);
-          QueryCache.write(CacheKeys.gameState(gameId), payload);
+          // Do not raw-write board_after here; _applyPayload caches painted board.
           setState(() {
             _applyPayload(payload);
           });
@@ -994,6 +1184,7 @@ class _SpectatePageState extends State<SpectatePage> {
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _plySyncWatch?.cancel();
     _sub?.cancel();
     _chatLiveSub?.cancel();
     _ws.dispose();
@@ -1003,6 +1194,7 @@ class _SpectatePageState extends State<SpectatePage> {
 
   @override
   Widget build(BuildContext context) {
+    _armPlySyncSafety();
     final tokens = damaColorsOf(context);
     if (_chromeLoading) {
       return Scaffold(
@@ -1045,7 +1237,7 @@ class _SpectatePageState extends State<SpectatePage> {
           if (_railChrome != null && _connected && connectedId.isNotEmpty) ...[
             IconButton(
               tooltip: _railChrome!.flipBoardAria,
-              onPressed: () => setState(() => _flipBoard = !_flipBoard),
+              onPressed: () => unawaited(_manualFlipWhenIdle()),
               icon: const Icon(Icons.flip_camera_android_outlined),
             ),
             IconButton(
@@ -1300,46 +1492,44 @@ class _SpectatePageState extends State<SpectatePage> {
                     board: BoardPaletteScope(
                       board: boardPaletteById(_boardPaletteId),
                       piece: piecePaletteById(_piecePaletteId),
-                      child: _boardView == BoardViewMode.flat2d
-                          ? DraughtsBoard2D(
-                              board: _displayBoard!,
-                              boardSize: _boardSize,
-                              legalMoves: const [],
-                              selectedRow: null,
-                              selectedCol: null,
-                              onSelectSquare: (_, __) {},
-                              interactive: false,
-                              yourPlayer: 1,
-                              flipBoard: _flipBoard,
-                              moveHistory: _replayIndex != null
-                                  ? const []
-                                  : _moveHistory,
-                              replayMode: _replayIndex != null,
-                              onPlyAnimated: _replayIndex == null
-                                  ? (boardAfter) {
-                                      setState(() => _board = boardAfter);
-                                    }
-                                  : null,
-                            )
-                          : DraughtsBoard3D(
-                              board: _displayBoard!,
-                              boardSize: _boardSize,
-                              legalMoves: const [],
-                              selectedRow: null,
-                              selectedCol: null,
-                              onSelectSquare: (_, __) {},
-                              interactive: false,
-                              yourPlayer: 1,
-                              flipBoard: _flipBoard,
-                              moveHistory: _replayIndex != null
-                                  ? const []
-                                  : _moveHistory,
-                              onPlyAnimated: _replayIndex == null
-                                  ? (boardAfter) {
-                                      setState(() => _board = boardAfter);
-                                    }
-                                  : null,
-                            ),
+                      child: KeyedSubtree(
+                        key: ValueKey(connectedId),
+                        child: _boardView == BoardViewMode.flat2d
+                            ? DraughtsBoard2D(
+                                board: _displayBoard!,
+                                boardSize: _boardSize,
+                                legalMoves: const [],
+                                selectedRow: null,
+                                selectedCol: null,
+                                onSelectSquare: (_, __) {},
+                                interactive: false,
+                                yourPlayer: 1,
+                                flipBoard: _flipBoard,
+                                moveHistory: _replayIndex != null
+                                    ? const []
+                                    : _moveHistory,
+                                replayMode: _replayIndex != null,
+                                // Always wire land sync - replay scrub uses
+                                // displayBoard; tip must still update `_liveBoard`.
+                                onPlyAnimated: _handlePlyAnimated,
+                              )
+                            : DraughtsBoard3D(
+                                board: _displayBoard!,
+                                boardSize: _boardSize,
+                                legalMoves: const [],
+                                selectedRow: null,
+                                selectedCol: null,
+                                onSelectSquare: (_, __) {},
+                                interactive: false,
+                                yourPlayer: 1,
+                                flipBoard: _flipBoard,
+                                moveHistory: _replayIndex != null
+                                    ? const []
+                                    : _moveHistory,
+                                replayMode: _replayIndex != null,
+                                onPlyAnimated: _handlePlyAnimated,
+                              ),
+                      ),
                     ),
                   ),
                 );
@@ -1354,19 +1544,11 @@ class _SpectatePageState extends State<SpectatePage> {
                 boardSize: _boardSize > 0 ? _boardSize : 0,
                 replayIndex: _replayIndex,
                 onSelectLive: () {
-                  setState(() {
-                    _replayIndex = null;
-                    _board = _liveBoard;
-                    _watchTab = _WatchTab.moves;
-                    _watchFocus = true;
-                  });
+                  unawaited(_selectLiveWhenIdle());
                 },
                 onSelectMove: (idx) {
-                  setState(() {
-                    _replayIndex = idx;
-                    _watchTab = _WatchTab.moves;
-                    _watchFocus = true;
-                  });
+                  // Replay remounts the plane; defer mid pick→put (fail-open).
+                  unawaited(_selectReplayWhenIdle(idx));
                 },
                 liveLabel: chrome.liveLabel,
                 historyLabel: chrome.historyLabel,

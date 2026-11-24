@@ -2,7 +2,18 @@ import { authHeaders, restClient } from "@/lib/api";
 import { QueryStale } from "@/lib/query-policy";
 import { useAuthStore } from "@/store/auth";
 import type { LocateResult } from "@/types/payments";
+import type { FeatureFlags } from "@/types/platform";
 import { useQuery } from "@tanstack/react-query";
+
+async function preferDeviceGps(): Promise<boolean> {
+  try {
+    const { data } = await restClient.get<FeatureFlags>("/feature-flags");
+    // Default ON when omitted (protect jurisdiction).
+    return data.geo_prefer_device_gps !== false;
+  } catch {
+    return true;
+  }
+}
 
 async function locateCountry(
   token: string | null | undefined,
@@ -29,9 +40,11 @@ async function locateCountry(
 
 /** Prefer HTML5 GPS (Nominatim reverse on API), then GeoIP / DB localhost invent.
  * Pay-chain parity with reference: no profile-country fallback.
- * Pass Bearer when available so geo_ip_records bind to the user (cash locate gate). */
+ * Pass Bearer when available so geo_ip_records bind to the user (cash locate gate).
+ * When admin Prefer device GPS is OFF, skip HTML5 GPS (IP-only). */
 export async function detectBrowserCountry(token?: string | null): Promise<string> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
+  const useGps = await preferDeviceGps();
+  if (!useGps || typeof navigator === "undefined" || !navigator.geolocation) {
     return locateCountry(token);
   }
   return new Promise((resolve) => {

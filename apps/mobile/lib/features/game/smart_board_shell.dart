@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:dama_mobile/core/theme/dama_theme.dart';
+import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -110,10 +112,38 @@ class _SmartBoardShellState extends State<SmartBoardShell>
         !SmartBoardShell.suppressExpand.value;
   }
 
+  Timer? _plyDeferPortal;
+
   void _onSuppressExpand() {
     if (!mounted) return;
     setState(() {});
+    // Compose tuck must drop overlay for focus; if a ply is airborne, defer the
+    // remount until land (BoardPlyFlight) so ticker/land sync are not aborted.
     _syncPortal(force: true);
+  }
+
+  void _deferPortalUntilPlyIdle({required bool force}) {
+    _plyDeferPortal?.cancel();
+    final startedAt = DateTime.now();
+    _plyDeferPortal = Timer.periodic(const Duration(milliseconds: 32), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      // Stuck BoardPlyFlight must not defer portal forever (mid-game freeze).
+      if (BoardPlyFlight.isActive &&
+          DateTime.now().difference(startedAt) < BoardPlyFlight.idleTimeout) {
+        return;
+      }
+      // Fail-open remount: do not clear() first - that let sticky ply-sync treat
+      // the board as idle and tip-snap under a still-airborne fly. Remount dispose
+      // forceRecoverStall land-syncs + leave(); clear only if depth stays stuck
+      // after sync (orphan enter without a board holder).
+      t.cancel();
+      _plyDeferPortal = null;
+      _syncPortal(force: force);
+      if (BoardPlyFlight.isActive) BoardPlyFlight.clear();
+    });
   }
 
   @override
@@ -171,12 +201,24 @@ class _SmartBoardShellState extends State<SmartBoardShell>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_wantExpanded(context)) {
+        // Opening overlay remounts inline→portal - wait out pick→put (web parity).
+        if (BoardPlyFlight.isActive) {
+          _deferPortalUntilPlyIdle(force: force);
+          return;
+        }
+        _plyDeferPortal?.cancel();
+        _plyDeferPortal = null;
         if (!_overlayOwnsBoard) {
           setState(_openOverlay);
         } else {
           _openOverlay();
         }
       } else if (force || _overlayOwnsBoard) {
+        // Closing overlay remounts the board inline - wait out pick→put.
+        if (BoardPlyFlight.isActive) {
+          _deferPortalUntilPlyIdle(force: force);
+          return;
+        }
         _closeOverlay();
       }
     });
@@ -237,9 +279,36 @@ class _SmartBoardShellState extends State<SmartBoardShell>
     });
   }
 
+  bool _toggleFlushScheduled = false;
+
   void _toggle() {
     if (!_isCompact(context) || !widget.active) return;
     if (DateTime.now().isBefore(_toggleLockUntil)) return;
+    // Overlay↔inline remounts the board. Never toggle mid pick→put or the
+    // ticker + land sync die (web SmartBoardHost ply-inflight lock parity).
+    // Stuck gate must not drop the tap forever - defer with fail-open.
+    if (BoardPlyFlight.isActive) {
+      unawaited(_toggleWhenIdle());
+      return;
+    }
+    _applyToggle();
+  }
+
+  Future<void> _toggleWhenIdle() async {
+    if (_toggleFlushScheduled) return;
+    _toggleFlushScheduled = true;
+    try {
+      await BoardPlyFlight.waitUntilIdle();
+      if (!mounted) return;
+      if (!_isCompact(context) || !widget.active) return;
+      if (DateTime.now().isBefore(_toggleLockUntil)) return;
+      _applyToggle();
+    } finally {
+      _toggleFlushScheduled = false;
+    }
+  }
+
+  void _applyToggle() {
     HapticFeedback.selectionClick();
     setState(() => _collapsed = !_collapsed);
     _syncPortal(force: true);
@@ -283,6 +352,8 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   @override
   void dispose() {
     SmartBoardShell.suppressExpand.removeListener(_onSuppressExpand);
+    _plyDeferPortal?.cancel();
+    _plyDeferPortal = null;
     if (_portal.isShowing) _portal.hide();
     if (_fabPortal.isShowing) _fabPortal.hide();
     _anim.dispose();
@@ -341,15 +412,17 @@ class _SmartBoardShellState extends State<SmartBoardShell>
   Widget _boardColumn({required bool expanded}) {
     // No in-tree FAB - portaled below board so it cannot be cropped or cover clocks.
     // Inline: full section width. Pop only: regular side inset (web max-lg:px-3 parity).
+    // Always keep Padding in the tree - flipping Padding on/off remounts the board
+    // mid pick→put and aborts ply land sync (flicker / freeze).
     final column = _scoped(widget.child, expanded: expanded);
     return KeyedSubtree(
       key: _boardKey,
-      child: expanded
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: column,
-            )
-          : column,
+      child: Padding(
+        padding: expanded
+            ? const EdgeInsets.symmetric(horizontal: 12)
+            : EdgeInsets.zero,
+        child: column,
+      ),
     );
   }
 
@@ -358,12 +431,23 @@ class _SmartBoardShellState extends State<SmartBoardShell>
     final compact = _isCompact(context);
     final wantExpanded = _wantExpanded(context);
     final tokens = damaColorsOf(context);
+    final leaveSmart = !compact || !widget.active;
+    // Compact→desktop / active-off while overlay owns the board mid pick→put:
+    // keep overlay tree until land (web SmartBoardHost applyWhenIdle parity).
+    final holdOverlayForPly = leaveSmart &&
+        BoardPlyFlight.isActive &&
+        (_overlayOwnsBoard || _portal.isShowing);
 
-    if (!compact || !widget.active) {
+    if (leaveSmart && !holdOverlayForPly) {
       if (_portal.isShowing || _overlayOwnsBoard || _fabPortal.isShowing) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           if (_isCompact(context) && widget.active) return;
+          if (BoardPlyFlight.isActive &&
+              (_overlayOwnsBoard || _portal.isShowing)) {
+            _deferPortalUntilPlyIdle(force: true);
+            return;
+          }
           if (_portal.isShowing) _portal.hide();
           if (_fabPortal.isShowing) _fabPortal.hide();
           if (_overlayOwnsBoard || _spacerH != 0 || _fabPos != null) {
@@ -375,10 +459,20 @@ class _SmartBoardShellState extends State<SmartBoardShell>
           }
         });
       }
-      return widget.child;
+      // Same KeyedSubtree + Padding + scope tree as compact hug so compact↔desktop
+      // / active flips do not remount the board mid pick→put.
+      return _boardColumn(expanded: false);
     }
 
-    final boardInOverlay = wantExpanded && _overlayOwnsBoard;
+    if (holdOverlayForPly) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _deferPortalUntilPlyIdle(force: true);
+      });
+    }
+
+    final boardInOverlay =
+        _overlayOwnsBoard && (wantExpanded || holdOverlayForPly);
     final media = MediaQuery.sizeOf(context);
     if (boardInOverlay) {
       _scheduleSpacerSync();

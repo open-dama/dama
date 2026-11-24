@@ -260,6 +260,48 @@ class GameStatePayload {
 
   bool get isOfficialPause => paused && pauseKind.trim() == 'official';
 
+  /// Keep painted board when caching mid pick→put (server payload often has board_after).
+  GameStatePayload copyWith({List<List<dynamic>>? board}) {
+    return GameStatePayload(
+      board: board ?? this.board,
+      size: size,
+      player1Id: player1Id,
+      player2Id: player2Id,
+      moveCount: moveCount,
+      hasMoveCount: hasMoveCount,
+      halfmoveClock: halfmoveClock,
+      turn: turn,
+      legalMoves: legalMoves,
+      legalMoveDetails: legalMoveDetails,
+      mustContinue: mustContinue,
+      piecesPerSide: piecesPerSide,
+      draw: draw,
+      outcome: outcome,
+      gameId: gameId,
+      moveHistory: moveHistory,
+      timeControlSeconds: timeControlSeconds,
+      rated: rated,
+      endReason: endReason,
+      clockActive: clockActive,
+      clockIncrementSeconds: clockIncrementSeconds,
+      clockP1RemainingMs: clockP1RemainingMs,
+      clockP2RemainingMs: clockP2RemainingMs,
+      clockServerNowMs: clockServerNowMs,
+      clockLastTickUnixMs: clockLastTickUnixMs,
+      paused: paused,
+      pausedAtUnixMs: pausedAtUnixMs,
+      pauseExpiresAtUnixMs: pauseExpiresAtUnixMs,
+      pausedByUserId: pausedByUserId,
+      pauseRemainingMs: pauseRemainingMs,
+      pauseKind: pauseKind,
+      pauseReasonKey: pauseReasonKey,
+      pauseReasonLabel: pauseReasonLabel,
+      pauseNote: pauseNote,
+      pauseActorRole: pauseActorRole,
+      pauseActorDisplayName: pauseActorDisplayName,
+    );
+  }
+
   static String? _asId(dynamic v) {
     if (v is String && v.isNotEmpty) return v;
     return null;

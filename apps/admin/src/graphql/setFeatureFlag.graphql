@@ -26,5 +26,6 @@ mutation SetFeatureFlag(
     prizePoolDisplayEnabled
     prizePoolGuaranteeEnabled
     kycAutoApprove
+    geoPreferDeviceGps
   }
 }

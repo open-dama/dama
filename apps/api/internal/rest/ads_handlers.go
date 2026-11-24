@@ -31,6 +31,7 @@ type AdsAPI struct {
 	Geo      *adsgeo.Index
 	Locate   *geo.Resolver
 	Settings *store.SettingsStore
+	Flags    *store.FlagStore
 	Audit    *store.AuditStore
 	Avatars  *media.AvatarService
 	Payments *payments.Service
@@ -71,7 +72,7 @@ func (a *AdsAPI) impressionUnitCost() (float64, bool) {
 
 // payerCountryISO resolves payer country like reference pay geo (IP / GPS invent; no profile).
 func (a *AdsAPI) payerCountryISO(r *http.Request) string {
-	return resolvePayerCountryFromRequest(r, a.Locate, a.Settings, 0, 0)
+	return resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, 0, 0)
 }
 
 func asJSONFloat64(v any) (float64, bool) {
@@ -168,7 +169,7 @@ func (a *AdsAPI) campaignCreateFeeAt(r *http.Request, lat, lng float64) (amount 
 	if a.Settings == nil {
 		return 0, "", false
 	}
-	cc := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, lat, lng)
+	cc := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, lat, lng)
 	return a.Settings.CampaignCreateFeeForCountry(cc)
 }
 
@@ -200,7 +201,7 @@ func (a *AdsAPI) Pricing(w http.ResponseWriter, r *http.Request) {
 		"impression_unit_cost":         cost,
 		"campaign_create_fee_amount":   fee,
 		"campaign_create_fee_currency": currency,
-		"country_code":                 resolvePayerCountryFromRequest(r, a.Locate, a.Settings, lat, lng),
+		"country_code":                 resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, lat, lng),
 	})
 }
 
@@ -326,7 +327,7 @@ func (a *AdsAPI) Create(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_daily_spend_cap_required")
 		return
 	}
-	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, pinLat, pinLng)
+	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, pinLat, pinLng)
 	if payerCC == "" {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_map_locate_failed")
 		return

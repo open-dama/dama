@@ -23,6 +23,9 @@ type FeatureFlags struct {
 	PrizePoolDisplayEnabled   bool           `json:"prize_pool_display_enabled"`
 	PrizePoolGuaranteeEnabled bool           `json:"prize_pool_guarantee_enabled"`
 	KycAutoApprove            bool           `json:"kyc_auto_approve"`
+	// GeoPreferDeviceGps default ON: HTML5/device GPS may enrich /geo/locate.
+	// When false: locate is IP-only (clients should skip sending lat/lng).
+	GeoPreferDeviceGps        bool           `json:"geo_prefer_device_gps"`
 	EthiopiaPaymentMode       string         `json:"-"` // internal gateway mode; public APIs map via PublicChannel
 	AIDepths                  []int          `json:"ai_depths"`
 	Source                    string         `json:"-"`
@@ -67,6 +70,7 @@ func (s *FlagStore) Get(ctx context.Context) FeatureFlags {
 		return s.fromMemLocked("memory")
 	}
 	// Fail closed: no VS-AI, no payment mode guess, no invented AI depths.
+	// Prefer device GPS stays ON so jurisdiction protection is not gutted when flags are unavailable.
 	return FeatureFlags{
 		VSAIEnabled:               false,
 		OTPRequired:               false,
@@ -80,6 +84,7 @@ func (s *FlagStore) Get(ctx context.Context) FeatureFlags {
 		PrizePoolDisplayEnabled:   false,
 		PrizePoolGuaranteeEnabled: false,
 		KycAutoApprove:            false,
+		GeoPreferDeviceGps:        true,
 		EthiopiaPaymentMode:       "",
 		AIDepths:                  []int{},
 		Source:                    "unavailable",
@@ -145,12 +150,13 @@ func (s *FlagStore) fromMemLocked(source string) FeatureFlags {
 		PrizePoolDisplayEnabled:   false,
 		PrizePoolGuaranteeEnabled: false,
 		KycAutoApprove:            false,
+		GeoPreferDeviceGps:        true, // default ON until catalog row explicitly disables
 		EthiopiaPaymentMode:       "",
 		AIDepths:                  []int{},
 		Source:                    source,
 		Raw:                       map[string]any{},
 	}
-	vsKey, otpKey, payKey, cashKey, phoneKycKey, phoneOtpKey, eventsKey, publicEventsKey, publicRatedKey, prizePoolKey, prizeGuaranteeKey, kycAutoKey := "", "", "", "", "", "", "", "", "", "", "", ""
+	vsKey, otpKey, payKey, cashKey, phoneKycKey, phoneOtpKey, eventsKey, publicEventsKey, publicRatedKey, prizePoolKey, prizeGuaranteeKey, kycAutoKey, geoGpsKey := "", "", "", "", "", "", "", "", "", "", "", "", ""
 	if s.settings != nil {
 		cat := s.settings.FeatureFlagCatalog()
 		if cat.Source == "database" {
@@ -183,6 +189,8 @@ func (s *FlagStore) fromMemLocked(source string) FeatureFlags {
 					prizeGuaranteeKey = t.Key
 				case "kycAutoApprove":
 					kycAutoKey = t.Key
+				case "geoPreferDeviceGps":
+					geoGpsKey = t.Key
 				}
 			}
 		}
@@ -261,6 +269,11 @@ func (s *FlagStore) fromMemLocked(source string) FeatureFlags {
 	if kycAutoKey != "" {
 		if row, ok := s.mem[kycAutoKey]; ok {
 			flags.KycAutoApprove = row.Enabled
+		}
+	}
+	if geoGpsKey != "" {
+		if row, ok := s.mem[geoGpsKey]; ok {
+			flags.GeoPreferDeviceGps = row.Enabled
 		}
 	}
 	for k, v := range s.mem {

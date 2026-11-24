@@ -152,6 +152,11 @@ export default function ConsoleFeatureFlagsPage() {
           <p className="text-sm text-[var(--dama-danger)]">{chrome.load_failed}</p>
         ) : (
           <>
+            {data.geoPreferDeviceGps === false ? (
+              <output className="block rounded-md border border-[var(--dama-border)] bg-[var(--dama-bg)] px-3 py-2 text-sm text-[var(--dama-muted)]">
+                {(chrome.geo_ip_only_mode_warn || "").trim()}
+              </output>
+            ) : null}
             {catalog.toggles.map((toggle) => {
               if (toggle.kind === "boolean") {
                 return (
