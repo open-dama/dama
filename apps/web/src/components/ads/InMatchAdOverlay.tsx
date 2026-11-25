@@ -10,9 +10,9 @@ import {
 import { useInMatchEligibilityMutation } from "@/hooks/mutation/useInMatchEligibilityMutation";
 import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { usePlayerGeoQuery } from "@/hooks/query/usePlayerGeoQuery";
+import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import { armAudioGestureResume, resumeGameAudio } from "@/lib/audio-notify";
 import { PLY_IDLE_FAIL_OPEN_MS, runWhenPlyIdle } from "@/lib/board-view";
-import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import {
   parseViewportBreakpoints,
   pickCampaignCreative,

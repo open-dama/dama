@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
@@ -629,6 +630,22 @@ class _SpectatePageState extends State<SpectatePage> {
 
   void _applyPayload(GameStatePayload payload, {bool authoritative = false}) {
     final incomingHist = payload.moveHistory;
+    final incomingPly = math.max(payload.moveCount, incomingHist.length);
+    final localPly = math.max(
+      _lastMoveCount >= 0 ? _lastMoveCount : 0,
+      _moveHistory.length,
+    );
+    // Stale poll/WS: never rewind a newer painted tip (snap-back after forward).
+    // match_board_page / LivePlayHub hardResync parity.
+    if (!authoritative && incomingPly < localPly) {
+      if (payload.draw) _draw = true;
+      final incomingOutcome =
+          payload.outcome is num ? (payload.outcome as num).toInt() : null;
+      if (incomingOutcome != null) _outcome = incomingOutcome;
+      final endReason = (payload.endReason ?? '').trim();
+      if (endReason.isNotEmpty) _endReason = endReason;
+      return;
+    }
     final prevLen = _moveHistory.length;
     final histGrew = incomingHist.length > prevLen;
     final histShrunk = incomingHist.length < prevLen;
@@ -636,16 +653,22 @@ class _SpectatePageState extends State<SpectatePage> {
     // the scene can animate; same-ply WS must not snap mid pick→put.
     if (payload.board != null) {
       _liveBoard = payload.board;
-      if (authoritative || histShrunk) {
+      if (authoritative) {
         _board = payload.board;
+      } else if (histShrunk) {
+        // Non-force shrink: keep forward painted board.
       } else if (_replayIndex == null && !histGrew) {
-        final lastAfter = incomingHist.isNotEmpty
-            ? incomingHist.last.boardAfter
-            : (_moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null);
-        if (lastAfter == null ||
-            lastAfter.isEmpty ||
-            _boardsMatch(_board, lastAfter)) {
-          _board = payload.board;
+        if (BoardPlyFlight.isActive) {
+          // Keep painted board under the fly.
+        } else {
+          final lastAfter = incomingHist.isNotEmpty
+              ? incomingHist.last.boardAfter
+              : (_moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null);
+          if (lastAfter == null ||
+              lastAfter.isEmpty ||
+              _boardsMatch(_board, lastAfter)) {
+            _board = payload.board;
+          }
         }
       } else if (!histGrew || _board == null) {
         _board = payload.board;
@@ -677,7 +700,7 @@ class _SpectatePageState extends State<SpectatePage> {
         }
       }
       _moveHistory = merged;
-    } else {
+    } else if (authoritative || incomingHist.length >= _moveHistory.length) {
       _moveHistory = incomingHist;
     }
     _boardSize = payload.size;
@@ -906,7 +929,8 @@ class _SpectatePageState extends State<SpectatePage> {
         if (!mounted) return;
         if (msg['type'] == 'ws_open') {
           if (_wsSawOpen) {
-            unawaited(_resyncSpectateAfterWs());
+            // True reconnect: authoritative snap so ghost tips unlock.
+            unawaited(_resyncSpectateAfterWs(force: true));
           }
           _wsSawOpen = true;
           return;
@@ -979,9 +1003,15 @@ class _SpectatePageState extends State<SpectatePage> {
     }
   }
 
-  Future<void> _resyncSpectateAfterWs() async {
+  /// Poll/reconnect board sync. Stale GET /state must never rewind a newer tip
+  /// (snap-back after forward). `force` only for true WS reconnect.
+  Future<void> _resyncSpectateAfterWs({bool force = false}) async {
     final gameId = _gameIdCtrl.text.trim();
     if (gameId.isEmpty || !mounted) return;
+    final localPlyBefore = math.max(
+      _lastMoveCount >= 0 ? _lastMoveCount : 0,
+      _moveHistory.length,
+    );
     try {
       final res = await http
           .get(Uri.parse('${ApiConfig.baseUrl}/api/v1/games/$gameId/state'))
@@ -990,8 +1020,16 @@ class _SpectatePageState extends State<SpectatePage> {
       final decoded = jsonDecode(res.body);
       if (decoded is! Map<String, dynamic>) return;
       final payload = GameStatePayload.fromJson(decoded);
+      final incomingPly =
+          math.max(payload.moveCount, payload.moveHistory.length);
+      // Spectate has no local submit ghost: never rewind a newer tip on reconnect.
+      if (incomingPly < localPlyBefore) return;
+      if (incomingPly <= localPlyBefore && BoardPlyFlight.isActive) {
+        return;
+      }
       setState(() {
-        _applyPayload(payload, authoritative: true);
+        // Always freeze-merge (never authoritative rewind of a shorter tip).
+        _applyPayload(payload, authoritative: false);
       });
       _armPlySyncSafety();
     } catch (_) {
@@ -1016,6 +1054,7 @@ class _SpectatePageState extends State<SpectatePage> {
         _spectatePollWatch = null;
         return;
       }
+      // Non-force: never rewind a newer tip mid-watch.
       unawaited(_resyncSpectateAfterWs());
     });
   }

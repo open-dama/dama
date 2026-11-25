@@ -510,7 +510,7 @@ assert(
   liveHub.includes("REST `/move` is primary") &&
     liveHub.includes("submitMoveViaRest") &&
     liveHub.includes("/games/${gameId}/move") &&
-    liveHub.includes("void hardResyncGameState(game.id)") &&
+    liveHub.includes("hardResyncGameState(game.id, { force: true, rewindGhost: true })") &&
     liveHub.includes("do not dual-send") &&
     matchPage.includes("REST `/move` is primary") &&
     matchPage.includes("_submitMoveViaRest") &&
@@ -529,18 +529,53 @@ assert(
   "web+flutter cold-start fail-open (no busy pointer/tap trap / intro cap / legal_moves safe)",
 );
 assert(
-  matchIntroWeb.includes("Timed intro must be pointer-events-none") &&
-    matchIntroWeb.includes("pointer-events-none bg-[var(--dama-bg)]/45") &&
-    matchIntroFlutter.includes("IgnorePointer so VS cinematic never steals board taps") &&
+  matchIntroWeb.includes("Full cinematic look (roster-parity /90 blur)") &&
+    matchIntroWeb.includes("bg-[var(--dama-bg)]/90") &&
+    matchIntroWeb.includes("backdrop-blur-md") &&
+    matchIntroWeb.includes('persistent ? "pointer-events-auto" : "pointer-events-none"') &&
+    matchIntroFlutter.includes("Full cinematic look (roster-parity 0.90 / blur 12)") &&
     matchIntroFlutter.includes("IgnorePointer(ignoring: true, child: visual)") &&
     matchIntroFlutter.includes("AbsorbPointer(absorbing: true, child: visual)") &&
-    matchIntroFlutter.includes("scrimAlpha = widget.persistent ? 0.90 : 0.45") &&
-    liveHub.includes("Never mount a timed VS board cover") &&
-    liveHub.includes("Sound-only; pause/result covers still mount") &&
-    !/setMatchIntroActive\(true\)/.test(liveHub) &&
-    matchPage.includes("Never mount timed VS board cover") &&
+    matchIntroFlutter.includes("const scrimAlpha = 0.90") &&
+    liveHub.includes("Full VS cinematic") &&
+    liveHub.includes("setMatchIntroActive(true)") &&
+    liveHub.includes("board stays tappable under the timed design") &&
+    matchPage.includes("Overlay is IgnorePointer (timed)") &&
     matchPage.includes("GameNotify.play('game_start')"),
-  "web+flutter skip timed intro cover on all live seats (pause still absorbs)",
+  "web+flutter full VS intro cinematic (/90) with freeze-safe non-blocking taps",
+);
+assert(
+  liveHub.includes("Stale GET /state must never rewind") &&
+    liveHub.includes("mergeRemoteBoardState(prev, data)") &&
+    liveHub.includes("rewindGhost") &&
+    liveHub.includes("incomingPly < tip && !rewindGhost") &&
+    liveHub.includes("{ force: true, rewindGhost: true }") &&
+    liveHub.includes("data-dama-ply-inflight") &&
+    matchPage.includes("Stale GET /state must never rewind") &&
+    matchPage.includes("BoardPlyFlight.isActive") &&
+    matchPage.includes("rewindGhost") &&
+    matchPage.includes("authoritative: authoritative") &&
+    matchPage.includes("rewindGhost: true"),
+  "web+flutter hardResync drops stale /state (no snap-back after forward)",
+);
+assert(
+  web2d.includes("flushSync") &&
+    web2d.includes("3D `isAnimating` parity") &&
+    web2d.includes("activeFly") &&
+    web2d.includes("applyFlyDom(next, 0)") &&
+    web2d.includes("let shouldStart = false") &&
+    web2d.includes("if (shouldStart) startNext()") &&
+    web2d.includes("enqueue + startNext outside the updater") &&
+    web3d.includes("let shouldStart = false") &&
+    web3d.includes("if (shouldStart) startNext()"),
+  "web 2D flushSync + activeFly idle guards (3D pick→put parity, no flicker)",
+);
+assert(
+  liveHub.includes("do NOT tap-dismiss the timed VS cinematic") &&
+    matchPage.includes("do NOT tap-dismiss the timed VS cinematic") &&
+    !liveHub.includes("if (matchIntroActive) setMatchIntroActive(false)") &&
+    !matchPage.includes("First board tap dismisses timed VS cover"),
+  "web+flutter timed VS cinematic is not tap-dismissed (roster full hold)",
 );
 assert(
   inMatchAd.includes("Never POST eligibility at t≈0") &&
@@ -571,9 +606,12 @@ assert(
   assert(
     liveHub.includes("releaseBodyPointerEvents") &&
       liveHub.includes("Hard fail-open: intro cover must never outlive") &&
-      liveHub.includes("Zero/invalid duration: never mount a cover") &&
+      liveHub.includes("fallback 3500") &&
+      liveHub.includes("duration may hydrate late") &&
       matchIntroFlutter.includes("IgnorePointer(child: SizedBox.shrink())") &&
-      matchPage.includes("Hard fail-open: intro cover must never outlive"),
+      matchPage.includes("Hard fail-open: intro cover must never outlive") &&
+      matchPage.includes("fallback 3500") &&
+      matchPage.includes("Duration may hydrate late"),
     "web+flutter intro fail-open + body pointer-events release on play",
   );
   assert(
@@ -619,9 +657,14 @@ assert(
     flWs.includes("bool sendMove") &&
     matchPage.includes("_resyncAfterWsReconnect") &&
     matchPage.includes("_wsSawOpen") &&
-    matchPage.includes("authoritative: true") &&
+    matchPage.includes("_resyncAfterWsReconnect(force: true)") &&
+    matchPage.includes("authoritative: authoritative") &&
+    matchPage.includes("rewindGhost") &&
     spectatePage.includes("_resyncSpectateAfterWs") &&
-    spectatePage.includes("authoritative: true"),
+    spectatePage.includes("_resyncSpectateAfterWs(force: true)") &&
+    spectatePage.includes("authoritative: false") &&
+    spectatePage.includes("never rewind a newer tip on reconnect") &&
+    spectatePage.includes("Stale GET /state must never rewind"),
   "flutter WS auto-reconnect + authoritative resync (match + spectate)",
 );
 assert(

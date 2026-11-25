@@ -187,13 +187,11 @@ class _MatchIntroOverlayState extends State<MatchIntroOverlay>
     final tokens = damaColorsOf(context);
     final theme = Theme.of(context);
     final starting = widget.startingLabel.trim();
-    // Timed intro: IgnorePointer so VS cinematic never steals board taps
-    // (opaque GestureDetector → start→abandon with zero moves). Pause cover
-    // stays persistent + absorbing so play cannot continue under official pause.
-    // Timed: lighter blur/alpha so pieces stay visible (opaque 0.90 read as freeze).
-    // Persistent pause keeps heavy cover so play cannot continue underneath.
-    final blurSigma = widget.persistent ? 12.0 : 2.0;
-    final scrimAlpha = widget.persistent ? 0.90 : 0.45;
+    // Full cinematic look (roster-parity 0.90 / blur 12). Timed intro stays
+    // IgnorePointer so the design cannot steal board taps / freeze play.
+    // Persistent pause cover still absorbs input under official/player pause.
+    const blurSigma = 12.0;
+    const scrimAlpha = 0.90;
     final visual = SizedBox.expand(
       child: ClipRect(
         child: BackdropFilter(

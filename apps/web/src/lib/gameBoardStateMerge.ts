@@ -125,6 +125,9 @@ export function mergeBoardStateAfterReconnect(
   if (!previous || previous.id !== incoming.id) return withResolvedOutcome(incoming);
   const previousPly = plyCount(previous);
   const incomingPly = plyCount(incoming);
+  // Force-only path (failed submit / true WS reconnect): server tip wins when
+  // shorter so rejected optimistic ghosts unlock. Non-force polls use
+  // mergeRemoteBoardState and never call this (avoids snap-back after forward).
   if (incomingPly < previousPly) {
     return withResolvedOutcome(incoming);
   }

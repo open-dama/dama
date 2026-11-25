@@ -1092,6 +1092,9 @@ function BoardScene({
       return;
     }
     // No history yet: infer a single ply from board diffs (legacy API).
+    // 2D parity: enqueue + startNext outside the updater so the first paint
+    // already has animMask (startNext-inside-updater = resting+fly flicker).
+    let shouldStart = false;
     setRenderBoard((current) => {
       if (boardsEqual(current, board)) return current;
       const anim = animationFromBoardDiff(current, board, legalHintRef.current);
@@ -1101,9 +1104,10 @@ function BoardScene({
       // Same-turn host gate before startNext (board-diff path).
       markPlyInflight(true);
       queueRef.current.push(anim);
-      if (!animationRef.current) startNext();
+      if (!animationRef.current) shouldStart = true;
       return current;
     });
+    if (shouldStart) startNext();
   }, [
     board,
     size,

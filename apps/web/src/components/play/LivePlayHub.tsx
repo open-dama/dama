@@ -51,6 +51,7 @@ import { usePlayRailChromeQuery } from "@/hooks/query/usePlayRailChromeQuery";
 import { useProgressionQuery } from "@/hooks/query/useProgressionQuery";
 import { usePublicPlayerQuery } from "@/hooks/query/usePublicPlayerQuery";
 import { useRestFeatureFlagsQuery } from "@/hooks/query/useRestFeatureFlagsQuery";
+import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import { useMaxLg } from "@/hooks/useMaxLg";
 import { authHeaders, resolveWsUrl, restClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/api-client-error";
@@ -69,7 +70,6 @@ import {
   runWhenPlyIdle,
   useBoardViewMode,
 } from "@/lib/board-view";
-import { releaseBodyPointerEvents } from "@/hooks/use-deferred-dialog-selection";
 import { notifyIncomingChatMessage } from "@/lib/chat-message-notify";
 import { CountryFlag } from "@/lib/country-flag";
 import { formatDmUnreadBadge } from "@/lib/dm-unread-badge";
@@ -549,26 +549,79 @@ export function LivePlayHub({
   const effectiveTokenRef = useRef(effectiveToken);
   effectiveTokenRef.current = effectiveToken;
 
-  /** Snap optimistic ghost plies the server never saw (half-open WS / timed-out move). */
+  /**
+   * Poll/reconnect board sync. Stale GET /state must never rewind a newer local
+   * ply (mid pick→put / after AI WS) - that snapped pieces backward after a
+   * forward move. `force` is only for failed-submit recovery.
+   */
   const hardResyncGameState = useCallback(
-    async (gameId?: string | null) => {
+    async (gameId?: string | null, opts?: { force?: boolean; rewindGhost?: boolean }) => {
       const gid = (gameId || gameRef.current?.id || gameIdParam || "").trim();
       const tok = (effectiveTokenRef.current || "").trim();
       if (!gid || !tok) return;
+      // Never clobber an in-flight local submit with a racing /state poll.
+      if (!opts?.force && (moveSubmitLockRef.current || pendingLocalMoveRef.current)) {
+        return;
+      }
+      const localPlyBefore =
+        gameRef.current?.move_count ?? gameRef.current?.move_history?.length ?? 0;
+      // Only failed-submit recovery may rewind. WS reconnect force alone used to
+      // treat moveSubmitLock as "ghost" and snap optimistic plies back while
+      // REST /move (~1s) was still in flight - classic mid-game snap-back.
+      const rewindGhost = Boolean(opts?.rewindGhost);
       try {
         const { data } = await restClient.get<GamePayload>(`/games/${gid}/state`, {
           headers: authHeaders(tok),
         });
         if (!data?.id) return;
-        setAiThinking(false);
-        pendingLocalMoveRef.current = false;
+        const incomingPly = data.move_count ?? data.move_history?.length ?? 0;
+        const livePly = gameRef.current?.move_count ?? gameRef.current?.move_history?.length ?? 0;
+        const tip = Math.max(localPlyBefore, livePly);
+        const plyInflight =
+          typeof document !== "undefined" &&
+          Boolean(document.querySelector("[data-dama-ply-inflight]"));
+        // Stale GET behind a newer local tip: never rewind unless explicit ghost recovery.
+        if (incomingPly < tip && !rewindGhost) {
+          return;
+        }
+        // Mid pick→put: same-ply /state must not churn parent board (2D resting remount).
+        // Even force reconnect must not remount resting pieces under an active fly.
+        if (incomingPly <= livePly && plyInflight && !rewindGhost) {
+          return;
+        }
+        if (!opts?.force) {
+          const aiSeat = data.ai_player;
+          const thinking =
+            data.mode === "ai" &&
+            typeof aiSeat === "number" &&
+            data.turn === aiSeat &&
+            data.outcome == null &&
+            !data.draw &&
+            !data.paused;
+          setAiThinking(thinking);
+        } else {
+          setAiThinking(false);
+          // Do not clear pending on plain reconnect - that drops optimistic protection
+          // while REST /move is still open. Only failed-submit rewind clears it.
+          if (rewindGhost) pendingLocalMoveRef.current = false;
+        }
         setGame((prev) => {
-          const merged = mergeBoardStateAfterReconnect(prev, data);
+          const prevPly = prev?.move_count ?? prev?.move_history?.length ?? 0;
+          let merged: GamePayload;
+          if (rewindGhost) {
+            // Failed submit: server tip wins when shorter.
+            merged = mergeBoardStateAfterReconnect(prev, data);
+          } else if (incomingPly < prevPly) {
+            // Stale poll - keep the forward board (never snap backward).
+            return prev;
+          } else {
+            merged = mergeRemoteBoardState(prev, data);
+          }
           gameRef.current = merged;
           if (merged.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
           return merged;
         });
-        setSelected(null);
+        if (rewindGhost) setSelected(null);
       } catch {
         /* keep painted; sticky ply-safety still applies */
       }
@@ -1092,7 +1145,7 @@ export function LivePlayHub({
         // Proxy drops leave optimistic turn/history ahead of the server → interactive
         // stays false (AI turn ghost / boardPlySynced lag) until a hard resync.
         if (!wasReconnect || disposed) return;
-        void hardResyncGameState(activeId);
+        void hardResyncGameState(activeId, { force: true });
       };
       ws.onmessage = (ev) => {
         try {
@@ -1211,10 +1264,10 @@ export function LivePlayHub({
             return;
           }
           if ((msg.type === "move_ack" || msg.type === "game_state") && msg.game) {
-            const wasLocal =
-              pendingLocalMoveRef.current ||
-              moveSubmitLockRef.current ||
-              Boolean(moveWaitRef.current);
+            // Only pending/wait mark a local human ply. Including moveSubmitLock
+            // made deferred-AI game_state merge as "local" while REST /move was
+            // still open (~1s) → wrong merge path / tip churn mid AI reply.
+            const wasLocal = pendingLocalMoveRef.current || Boolean(moveWaitRef.current);
             const incoming = msg.game;
             // Keep ai_thinking true while the computer seat still owns the turn
             // (human game_state ack must not clear the indicator before AI lands).
@@ -1830,9 +1883,9 @@ export function LivePlayHub({
 
   const onSelectSquare = useCallback(
     (row: number, col: number) => {
-      // First board interaction dismisses timed VS cover (pointer-events-none alone
-      // still looked frozen under opaque scrim → zero-move abandons).
-      if (matchIntroActive) setMatchIntroActive(false);
+      // Roster parity: do NOT tap-dismiss the timed VS cinematic - let duration
+      // (+ fail-open) finish. Overlay is pointer-events-none so the board stays
+      // playable under the design without cutting the intro short.
       // Do not gate on `busy` - start/hydrate busy used to swallow taps on a painted
       // board (API logs: start → abandon with zero /move).
       if (!chrome || !game || game.outcome != null || game.draw || game.paused) {
@@ -1930,34 +1983,31 @@ export function LivePlayHub({
       // (second ApplyMoveCore → false "illegal" / ghost interactive freeze).
       void submitMoveViaRest(game.id, from, to)
         .catch(() => {
-          pendingLocalMoveRef.current = false;
           const live = gameRef.current;
-          if (live?.outcome != null || live?.draw) return;
+          if (live?.outcome != null || live?.draw) {
+            pendingLocalMoveRef.current = false;
+            return;
+          }
           const livePly = live?.move_count ?? live?.move_history?.length ?? 0;
           // Duplicate submit after the first ply already landed - resync quietly.
+          // Non-force: never rewind a newer local ply (awaiting-reply poll parity).
           if (livePly >= submittedPly) {
-            void hardResyncGameState(game.id);
+            pendingLocalMoveRef.current = false;
+            void hardResyncGameState(game.id, { force: false });
             return;
           }
           setAiThinking(false);
           toast.error(chrome.toast_move_failed || chrome.toast_live_required);
-          void hardResyncGameState(game.id);
+          // Explicit rewindGhost: only failed submit may snap optimistic back.
+          // Do not clear pending before this call - reconnect races must not
+          // look like "no ghost" while we still need authoritative recovery.
+          void hardResyncGameState(game.id, { force: true, rewindGhost: true });
         })
         .finally(() => {
           moveSubmitLockRef.current = false;
         });
     },
-    [
-      chrome,
-      game,
-      selected,
-      userId,
-      yourPlayer,
-      qc,
-      hardResyncGameState,
-      submitMoveViaRest,
-      matchIntroActive,
-    ],
+    [chrome, game, selected, userId, yourPlayer, qc, hardResyncGameState, submitMoveViaRest],
   );
 
   // Honor URL mode and live game.mode - AI resume must not stay stuck as PvP.
@@ -1985,18 +2035,10 @@ export function LivePlayHub({
       if (oppId && oppPlayerQuery.isLoading) return;
     }
     // Mark seen only when we actually arm the overlay (not before chrome is ready).
+    // Roster parity: VS + aria arm the cinematic; duration may hydrate late
+    // (fallback below) - do not skip the whole intro when duration is briefly empty.
     if (!(railChrome?.match_intro_vs_label || chrome?.match_intro_vs_label || "").trim()) return;
     if (!(railChrome?.match_intro_aria || chrome?.match_intro_aria || "").trim()) return;
-    // Zero/invalid duration: never mount a cover that can eat board taps.
-    const durRaw = Number.parseInt(
-      (railChrome?.match_intro_duration_ms || chrome?.match_intro_duration_ms || "").trim(),
-      10,
-    );
-    if (!Number.isFinite(durRaw) || durRaw <= 0) {
-      matchIntroSeenRef.current = id;
-      void playGameNotify("game_start");
-      return;
-    }
     // Full VS cinematic (player vs player). Overlay is pointer-events-none so the
     // board stays tappable under the timed design (freeze-safe).
     matchIntroSeenRef.current = id;
@@ -2016,7 +2058,6 @@ export function LivePlayHub({
     chrome,
     railChrome?.match_intro_vs_label,
     railChrome?.match_intro_aria,
-    railChrome?.match_intro_duration_ms,
   ]);
 
   // Hard fail-open: intro cover must never outlive its cap (stuck active → freeze).
@@ -2427,6 +2468,7 @@ export function LivePlayHub({
     ""
   ).trim();
   // Cap intro so misconfigured chrome cannot cover the board forever (reads as freeze).
+  // Roster parity: missing duration still shows the full cinematic (fallback 3500).
   const introDurationRaw = Number.parseInt(
     (railChrome?.match_intro_duration_ms || chrome.match_intro_duration_ms || "").trim(),
     10,
@@ -2434,7 +2476,7 @@ export function LivePlayHub({
   const introDurationMs =
     Number.isFinite(introDurationRaw) && introDurationRaw > 0
       ? Math.min(introDurationRaw, 5000)
-      : 0;
+      : 3500;
   const resultDurationMs = Number.parseInt(
     (railChrome?.match_result_duration_ms || chrome.match_result_duration_ms || "").trim(),
     10,

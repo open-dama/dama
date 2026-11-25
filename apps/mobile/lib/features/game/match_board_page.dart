@@ -621,14 +621,27 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (!mounted) return;
     if (_matchIntroSeenGameId == gid) return;
     if (_matchIntroPendingGameId != gid) return;
-    // Wait for rail chrome so VS intro duration/labels are DB-driven (no skip race).
-    for (var i = 0; i < 50 && _railChrome == null; i++) {
+    // Wait for VS + aria (roster parity). Duration may hydrate late - fallback
+    // keeps the full cinematic instead of permanently skipping it.
+    for (var i = 0; i < 50; i++) {
+      final rail = _railChrome;
+      final play = _chrome;
+      final vs =
+          (rail?.matchIntroVsLabel ?? play?.matchIntroVsLabel ?? '').trim();
+      final aria = (rail?.matchIntroAria ?? '').trim();
+      // Web LivePlayHub / roster parity: rail OR play chrome can arm VS labels.
+      if (vs.isNotEmpty && aria.isNotEmpty) break;
       await Future<void>.delayed(const Duration(milliseconds: 100));
       if (!mounted) return;
       if (_matchIntroPendingGameId != gid) return;
     }
-    if (_railChrome == null) {
-      // Fail closed: do not invent intro without chrome; mark seen so we don't loop.
+    final rail = _railChrome;
+    final play = _chrome;
+    final vs =
+        (rail?.matchIntroVsLabel ?? play?.matchIntroVsLabel ?? '').trim();
+    final aria = (rail?.matchIntroAria ?? '').trim();
+    if (vs.isEmpty || aria.isEmpty) {
+      // Fail closed after wait: do not invent intro without VS chrome.
       _matchIntroSeenGameId = gid;
       _matchIntroPendingGameId = null;
       return;
@@ -658,22 +671,41 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     // Turn/legal/must_continue still update from the server, but highlights are
     // gated on _boardPlySynced so they do not flash onto a frozen pre-ply board.
     final incomingHist = payload.moveHistory;
+    final incomingPly = payload.moveCount;
+    // Stale WS/poll: never rewind a newer local ply (snap-back after forward).
+    // Still adopt pause / terminal fields (web mergeRemoteBoardState parity).
+    if (!authoritative && incomingPly < _moveCount) {
+      _observePause(payload);
+      if (payload.draw) _draw = true;
+      final incomingOutcome =
+          payload.outcome is num ? (payload.outcome as num).toInt() : null;
+      if (incomingOutcome != null) _outcome = incomingOutcome;
+      final endReason = (payload.endReason ?? '').trim();
+      if (endReason.isNotEmpty) _endReason = endReason;
+      return;
+    }
     final histGrew = incomingHist.length > _moveHistory.length;
     final histShrunk = incomingHist.length < _moveHistory.length;
     if (payload.board != null) {
       _liveBoard = payload.board;
-      if (authoritative || histShrunk) {
+      if (authoritative) {
         // WS reconnect / rejected optimistic ghost: snap to server so turn unlocks.
         _board = payload.board;
+      } else if (histShrunk) {
+        // Non-force shrink: keep the forward painted board (never snap backward).
       } else if (_replayIndex == null && !histGrew) {
         // Same-ply WS (move_ack + game_state) must not snap the board mid-flight.
-        final lastAfter = incomingHist.isNotEmpty
-            ? incomingHist.last.boardAfter
-            : (_moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null);
-        if (lastAfter == null ||
-            lastAfter.isEmpty ||
-            _boardsMatch(_board, lastAfter)) {
-          _board = payload.board;
+        if (BoardPlyFlight.isActive) {
+          // Keep painted board under the fly (web same-ply freeze parity).
+        } else {
+          final lastAfter = incomingHist.isNotEmpty
+              ? incomingHist.last.boardAfter
+              : (_moveHistory.isNotEmpty ? _moveHistory.last.boardAfter : null);
+          if (lastAfter == null ||
+              lastAfter.isEmpty ||
+              _boardsMatch(_board, lastAfter)) {
+            _board = payload.board;
+          }
         }
       } else if (!histGrew || _board == null) {
         // Cold attach / resume with existing history: seed paint board. Leaving
@@ -712,7 +744,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         }
       }
       _moveHistory = merged;
-    } else {
+    } else if (authoritative || incomingHist.length >= _moveHistory.length) {
       _moveHistory = incomingHist;
     }
     _boardSize = payload.size;
@@ -760,7 +792,9 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         p2Ms: payload.clockP2RemainingMs,
       );
     }
-    _moveCount = payload.moveCount;
+    if (authoritative || incomingPly >= _moveCount) {
+      _moveCount = payload.moveCount;
+    }
     _halfmoveClock = payload.halfmoveClock;
     _turn = payload.turn;
     final incomingOutcome =
@@ -1502,12 +1536,9 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   void _onSquareTap(int row, int col) {
     unawaited(GameNotify.unlock());
-    // First board tap dismisses timed VS cover (web onSelectSquare parity).
-    if (_matchIntroVisible) {
-      _matchIntroFailOpen?.cancel();
-      _matchIntroFailOpen = null;
-      setState(() => _matchIntroVisible = false);
-    }
+    // Roster parity: do NOT tap-dismiss the timed VS cinematic - duration +
+    // fail-open finish it. Overlay is IgnorePointer so the board stays
+    // playable under the design without cutting the intro short.
     if (_paused) {
       final official = (_chrome?.errOfficiallyPaused ?? '').trim();
       final specific = (_chrome?.errGamePaused ?? '').trim();
@@ -1635,10 +1666,15 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       ).timeout(const Duration(seconds: 45));
       if (!mounted) return;
       if (res.statusCode >= 300) {
-        await _resyncAfterWsReconnect();
         if (!mounted) return;
         // Duplicate / stale submit after our ply already landed - stay quiet.
-        if (_moveCount >= submittedPly) return;
+        if (_moveCount >= submittedPly) {
+          await _resyncAfterWsReconnect(force: false);
+          return;
+        }
+        // Explicit rewindGhost: rejected submit only (not WS reconnect).
+        await _resyncAfterWsReconnect(force: true, rewindGhost: true);
+        if (!mounted) return;
         final label =
             (_chrome?.toastMoveFailed ?? _chrome?.toastWsConnectionError ?? '')
                 .trim();
@@ -1673,7 +1709,13 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       _armAwaitingReplyWatch();
     } catch (_) {
       if (!mounted) return;
-      await _resyncAfterWsReconnect();
+      // Web parity: only failed-submit rewindGhost may snap optimistic back.
+      // Plain force reconnect must never rewind while /move is still in flight.
+      if (_moveCount >= submittedPly) {
+        await _resyncAfterWsReconnect(force: false);
+      } else {
+        await _resyncAfterWsReconnect(force: true, rewindGhost: true);
+      }
     } finally {
       _moveSubmitLock = false;
     }
@@ -1707,10 +1749,17 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     });
   }
 
-  /// After WS drop/reconnect: snap away optimistic ghost plies that freeze input.
-  Future<void> _resyncAfterWsReconnect() async {
+  /// After WS drop/reconnect: adopt newer server tip; never rewind mid-submit.
+  /// Stale GET /state must never rewind a newer local ply (snap-back after forward).
+  /// Only [rewindGhost] (failed REST submit) may authoritatively snap optimistic back.
+  Future<void> _resyncAfterWsReconnect({
+    bool force = false,
+    bool rewindGhost = false,
+  }) async {
     final id = (_gameId ?? '').trim();
     if (id.isEmpty || !mounted) return;
+    if (!force && _moveSubmitLock) return;
+    final localPlyBefore = _moveCount;
     try {
       final res = await authGet(
         Uri.parse('${ApiConfig.baseUrl}/api/v1/games/$id/state'),
@@ -1720,10 +1769,29 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       final payload = GameStatePayload.fromJson(
         jsonDecode(res.body) as Map<String, dynamic>,
       );
+      final tip = localPlyBefore > _moveCount ? localPlyBefore : _moveCount;
+      // Stale GET behind a newer local tip: never rewind unless failed-submit recovery.
+      // WS reconnect used to treat _moveSubmitLock as ghost → snap-back during /move.
+      if (payload.moveCount < tip && !rewindGhost) return;
+      // Mid pick→put: even force reconnect must not remount under an active fly.
+      if (payload.moveCount <= _moveCount &&
+          BoardPlyFlight.isActive &&
+          !rewindGhost) {
+        return;
+      }
+      final yp = _yourPlayer;
+      final thinking = widget.mode == 'ai' &&
+          yp != null &&
+          payload.turn != yp &&
+          payload.outcome == null &&
+          !payload.draw &&
+          !payload.paused;
+      final authoritative = rewindGhost;
       setState(() {
-        _aiThinking = false;
+        _aiThinking = authoritative ? false : thinking;
         _busy = false;
-        _applyBoardPayload(payload, authoritative: true);
+        // Background / reconnect: freeze-merge. Failed submit: authoritative snap.
+        _applyBoardPayload(payload, authoritative: authoritative);
       });
       _armPlySyncSafety();
       _scheduleGameOverIfNeeded();
@@ -2273,7 +2341,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (msg['type'] == 'ws_open') {
       if (_wsSawOpen) {
         // Auto-reconnect after proxy kill - hard resync so ghost turns unlock.
-        unawaited(_resyncAfterWsReconnect());
+        unawaited(_resyncAfterWsReconnect(force: true));
       }
       _wsSawOpen = true;
       return;
@@ -3272,20 +3340,21 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       return null;
     }
 
-    // Intro / result covers still need rail chrome for aria + duration soft-fill.
-    if (rail == null) return null;
+    // Intro / result: rail preferred; play chrome can supply VS label (web parity).
+    if (rail == null && chrome.matchIntroVsLabel.trim().isEmpty) return null;
 
     if (_matchIntroVisible && (widget.mode == 'pvp' || widget.mode == 'ai')) {
       // Hard fail-open: intro cover must never outlive its cap (stuck active → freeze).
       // Overlay is IgnorePointer (timed) so the board stays tappable under the VS design.
-      final introVs = rail.matchIntroVsLabel.trim().isNotEmpty
-          ? rail.matchIntroVsLabel.trim()
-          : chrome.matchIntroVsLabel.trim();
+      final introVs = (rail?.matchIntroVsLabel.trim().isNotEmpty == true
+          ? rail!.matchIntroVsLabel.trim()
+          : chrome.matchIntroVsLabel.trim());
       // Cap intro so misconfigured chrome cannot cover the board forever.
-      final introRaw = int.tryParse(rail.matchIntroDurationMs) ?? 0;
-      final introMs = introRaw <= 0 ? 0 : (introRaw > 5000 ? 5000 : introRaw);
-      // Zero duration: clear flag and never mount an opaque hit target.
-      if (introMs <= 0) {
+      // Roster parity: missing duration still shows the full cinematic (fallback 3500).
+      final introRaw = int.tryParse(rail?.matchIntroDurationMs ?? '') ?? 0;
+      final introMs =
+          introRaw <= 0 ? 3500 : (introRaw > 5000 ? 5000 : introRaw);
+      if (introVs.isEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _matchIntroVisible) {
             _matchIntroFailOpen?.cancel();
@@ -3297,8 +3366,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       }
       return MatchIntroOverlay(
         vsLabel: introVs,
-        ariaLabel: rail.matchIntroAria,
-        startingLabel: rail.matchIntroStartingLabel,
+        ariaLabel: (rail?.matchIntroAria ?? '').trim(),
+        startingLabel: (rail?.matchIntroStartingLabel ?? '').trim(),
         durationMs: introMs,
         top: topSeat(),
         bottom: bottomSeat(),
@@ -3333,29 +3402,29 @@ class _MatchBoardPageState extends State<MatchBoardPage>
           // Clock endings: rail on-time aria preferred (web LivePlayHub parity), else play_chrome.
           if (onTime) {
             if (_draw || _endReason == 'clock_draw') {
-              final railAria = rail.matchResultDrawOnTimeAria.trim();
+              final railAria = (rail?.matchResultDrawOnTimeAria ?? '').trim();
               return railAria.isNotEmpty
                   ? railAria
                   : chrome.matchResultDrawOnTimeAria.trim();
             }
             if (_yourPlayer != null && _outcome == _yourPlayer) {
-              final railAria = rail.matchResultWinOnTimeAria.trim();
+              final railAria = (rail?.matchResultWinOnTimeAria ?? '').trim();
               return railAria.isNotEmpty
                   ? railAria
                   : chrome.matchResultWinOnTimeAria.trim();
             }
-            final railAria = rail.matchResultLossOnTimeAria.trim();
+            final railAria = (rail?.matchResultLossOnTimeAria ?? '').trim();
             return railAria.isNotEmpty
                 ? railAria
                 : chrome.matchResultLossOnTimeAria.trim();
           }
-          if (_draw) return rail.matchResultDrawAria;
+          if (_draw) return (rail?.matchResultDrawAria ?? '').trim();
           if (_yourPlayer != null && _outcome == _yourPlayer) {
-            return rail.matchResultWinAria;
+            return (rail?.matchResultWinAria ?? '').trim();
           }
-          return rail.matchResultLossAria;
+          return (rail?.matchResultLossAria ?? '').trim();
         }(),
-        durationMs: int.tryParse(rail.matchResultDurationMs) ?? 0,
+        durationMs: int.tryParse(rail?.matchResultDurationMs ?? '') ?? 0,
         onDone: () {
           if (mounted) setState(() => _matchResultVisible = false);
         },

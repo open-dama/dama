@@ -157,14 +157,11 @@ export function MatchIntroOverlay({
     <output
       className={cn(
         // overflow-hidden so pop-up / pop-down seats animate within the plane.
-        // Timed intro must be pointer-events-none: a full-board hit target blocked
-        // every tap until dismiss (start→abandon with zero /move in API logs).
-        // Persistent pause cover still captures input so the board cannot be played under pause.
-        // Timed: lighter backdrop so pieces stay visible (opaque /90 read as freeze).
-        "@container/intro absolute inset-0 z-40 flex h-full min-h-full w-full min-w-full flex-col items-center justify-center overflow-hidden px-3 py-2 @[420px]/intro:px-4 @[420px]/intro:py-3",
-        persistent
-          ? "pointer-events-auto bg-[var(--dama-bg)]/90 backdrop-blur-md"
-          : "pointer-events-none bg-[var(--dama-bg)]/45 backdrop-blur-[2px]",
+        // Full cinematic look (roster-parity /90 blur). Timed intro stays
+        // pointer-events-none so the design cannot steal board taps / freeze play.
+        // Persistent pause cover still captures input under official/player pause.
+        "@container/intro absolute inset-0 z-40 flex h-full min-h-full w-full min-w-full flex-col items-center justify-center overflow-hidden bg-[var(--dama-bg)]/90 px-3 py-2 backdrop-blur-md @[420px]/intro:px-4 @[420px]/intro:py-3",
+        persistent ? "pointer-events-auto" : "pointer-events-none",
         reserveBottom && "pb-24 @[420px]/intro:pb-28",
       )}
       aria-label={ariaLabel}

@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 
 type BoardGrid = BoardCell[][];
 
@@ -410,6 +411,7 @@ export default function DraughtsBoard2D({
     holdSyncRef.current = false;
     holdSyncSinceRef.current = null;
     queueRef.current = [];
+    // No flushSync here - forceRecover also runs from unmount layout cleanup.
     setActiveFly(null);
     markPlyInflight(false);
     loopRunningRef.current = false;
@@ -420,31 +422,10 @@ export default function DraughtsBoard2D({
   forceRecoverStallRef.current = forceRecoverStall;
 
   // Mid-game stall recovery: holdSync with no active fly must not freeze the board.
+  // 3D parity: never holdSync-recover while animationRef/queue/activeFly/loop are busy
+  // (stale activeFly alone used to remount resting pieces → pick→put flicker).
   useEffect(() => {
     const id = window.setInterval(() => {
-      // Orphaned data-dama-ply-inflight (missed clear) freezes portal/flip/2D↔3D.
-      if (
-        !holdSyncRef.current &&
-        !animationRef.current &&
-        queueRef.current.length === 0 &&
-        !loopRunningRef.current
-      ) {
-        markPlyInflight(false);
-      }
-      if (
-        holdSyncRef.current &&
-        !animationRef.current &&
-        queueRef.current.length === 0 &&
-        !loopRunningRef.current
-      ) {
-        // holdSync rise + startNext are same-turn; grace so the 250ms tick cannot
-        // forceRecover before animationRef binds (pick→put snap flicker).
-        const since = holdSyncSinceRef.current;
-        if (since == null || performance.now() - since > 64) {
-          forceRecoverStallRef.current();
-        }
-        return;
-      }
       // Dead RAF while a fly is active (tab discard / WebView dropped the callback).
       // Restart first; if still dead after another 2s, land-sync like 3D forceRecover
       // so boardPlySynced cannot stick false while RAF never revives.
@@ -464,8 +445,23 @@ export default function DraughtsBoard2D({
           loopRunningRef.current = false;
           lastTsRef.current = null;
           ensureAnimLoopRef.current();
+          return;
         }
       }
+      if (animationRef.current || queueRef.current.length > 0 || loopRunningRef.current) {
+        return;
+      }
+      // holdSync rise + startNext are same-turn; grace so the 250ms tick cannot
+      // forceRecover before animationRef binds (pick→put snap flicker).
+      if (holdSyncRef.current) {
+        const since = holdSyncSinceRef.current;
+        if (since == null || performance.now() - since > 64) {
+          forceRecoverStallRef.current();
+        }
+        return;
+      }
+      // Orphaned data-dama-ply-inflight (missed clear) freezes portal/flip/2D↔3D.
+      markPlyInflight(false);
     }, 250);
     return () => window.clearInterval(id);
   }, [markPlyInflight]);
@@ -571,10 +567,16 @@ export default function DraughtsBoard2D({
     // ply start, last stayed null and Dead-RAF recover never armed → mid-air freeze.
     lastFrameAtRef.current = performance.now();
     markPlyInflight(true);
-    setActiveFly(next);
+    // Flutter _bindFlightActive parity: hide origins + seed fly DOM before paint.
+    // RAF finish→startNext is outside useLayoutEffect; without flushSync the next
+    // paint kept stale hiddenKeys for one frame (resting + fly double = flicker).
+    flushSync(() => {
+      setActiveFly(next);
+    });
+    applyFlyDom(next, 0);
     lastTsRef.current = null;
     ensureAnimLoop();
-  }, [commitBoardAfter, ensureAnimLoop, markPlyInflight]);
+  }, [applyFlyDom, commitBoardAfter, ensureAnimLoop, markPlyInflight]);
 
   const finishAndAdvance = useCallback(() => {
     const finished = animationRef.current;
@@ -633,7 +635,13 @@ export default function DraughtsBoard2D({
     const len = moveHistory.length;
     if (len === 0) {
       prevHistoryLen.current = 0;
-      if (!animationRef.current && queueRef.current.length === 0) {
+      // 3D isAnimating parity: activeFly/loop lag animationRef clear by a frame.
+      if (
+        !animationRef.current &&
+        queueRef.current.length === 0 &&
+        !activeFly &&
+        !loopRunningRef.current
+      ) {
         holdSyncRef.current = false;
         holdSyncSinceRef.current = null;
         markPlyInflight(false);
@@ -691,11 +699,19 @@ export default function DraughtsBoard2D({
         }
       }
     }
-  }, [board, size, moveHistory, replayMode, yourPlayer, startNext, markPlyInflight]);
+  }, [activeFly, board, size, moveHistory, replayMode, yourPlayer, startNext, markPlyInflight]);
 
   useLayoutEffect(() => {
     if (!size || replayMode) return;
-    if (holdSyncRef.current || animationRef.current || queueRef.current.length > 0) {
+    // 3D `isAnimating` parity: do not rewrite renderBoard while the fly layer is
+    // still painted (animationRef can clear a frame before activeFly flushes).
+    if (
+      holdSyncRef.current ||
+      activeFly ||
+      animationRef.current ||
+      queueRef.current.length > 0 ||
+      loopRunningRef.current
+    ) {
       return;
     }
     if (historyPresent) {
@@ -717,6 +733,10 @@ export default function DraughtsBoard2D({
       });
       return;
     }
+    // History-grow parity: enqueue + startNext outside the updater so the first
+    // paint already has activeFly/hiddenKeys (startNext-inside-updater left one
+    // frame of resting+fly = pick→put flicker).
+    let shouldStart = false;
     setRenderBoard((current) => {
       if (boardsEqual(current, board)) return current;
       const anim = animationFromBoardDiff(current, board, legalHintRef.current);
@@ -725,10 +745,11 @@ export default function DraughtsBoard2D({
       holdSyncSinceRef.current = performance.now();
       markPlyInflight(true);
       queueRef.current.push(anim);
-      if (!animationRef.current) startNext();
+      if (!animationRef.current) shouldStart = true;
       return current;
     });
-  }, [board, size, moveHistory, historyPresent, replayMode, startNext, markPlyInflight]);
+    if (shouldStart) startNext();
+  }, [activeFly, board, size, moveHistory, historyPresent, replayMode, startNext, markPlyInflight]);
 
   // Suppress select/legal/must while the ply fly is up. Parent flips boardPlySynced
   // at LAND_PHASE (~0.72) so cues would otherwise flash mid put-down.
