@@ -167,6 +167,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   /// Sync lock (web moveSubmitLockRef / smart-menu moveLockRef): blocks a second
   /// REST `/move` from a stale double-tap before turn flips.
   bool _moveSubmitLock = false;
+
+  /// smart-menu refreshStateInFlightRef: coalesce overlapping GET /state polls.
+  bool _resyncInFlight = false;
+
+  /// Consecutive await-reply polls with a shorter server tip (tip-rewind freeze).
+  int _awaitLowerPlyStrikes = 0;
   bool _abandoning = false;
 
   /// True while Stop confirm dialog is open (dismiss if official pause lands).
@@ -1732,7 +1738,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (id.isEmpty) return;
     final yp = _yourPlayer;
     if (yp == null || _turn == yp) return;
-    _awaitingReplyWatch = Timer.periodic(const Duration(seconds: 4), (_) {
+    // smart-menu / web parity: immediate + ~500ms while awaiting AI/opponent.
+    void tick() {
       if (!mounted) return;
       if (_outcome != null || _draw || _paused || _replayIndex != null) {
         _awaitingReplyWatch?.cancel();
@@ -1746,6 +1753,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         return;
       }
       unawaited(_resyncAfterWsReconnect());
+    }
+
+    tick();
+    _awaitingReplyWatch =
+        Timer.periodic(const Duration(milliseconds: 500), (_) {
+      tick();
     });
   }
 
@@ -1758,7 +1771,12 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   }) async {
     final id = (_gameId ?? '').trim();
     if (id.isEmpty || !mounted) return;
-    if (!force && _moveSubmitLock) return;
+    // smart-menu AI poll is not gated on moveLock - only in-flight single-flight.
+    // Skipping while _moveSubmitLock froze await-reply GET /state for the whole
+    // /move RTT; ply guards below already reject tip rewind.
+    // smart-menu parity: overlapping 500ms polls must not race.
+    if (_resyncInFlight && !rewindGhost) return;
+    _resyncInFlight = true;
     final localPlyBefore = _moveCount;
     try {
       final res = await authGet(
@@ -1770,13 +1788,50 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         jsonDecode(res.body) as Map<String, dynamic>,
       );
       final tip = localPlyBefore > _moveCount ? localPlyBefore : _moveCount;
-      // Stale GET behind a newer local tip: never rewind unless failed-submit recovery.
-      // WS reconnect used to treat _moveSubmitLock as ghost → snap-back during /move.
-      if (payload.moveCount < tip && !rewindGhost) return;
+      // Stale GET behind a newer local tip: never rewind unless failed-submit recovery
+      // OR await-reply saw a shorter tip repeatedly (server tip rewind → permanent freeze).
+      var authoritative = rewindGhost;
+      if (payload.moveCount < tip && !authoritative) {
+        final awaitingReply = _outcome == null &&
+            !_draw &&
+            !_paused &&
+            (_aiThinking ||
+                (widget.mode == 'ai' &&
+                    _yourPlayer != null &&
+                    _turn != _yourPlayer));
+        if (awaitingReply) {
+          _awaitLowerPlyStrikes++;
+          if (_awaitLowerPlyStrikes < 8) return;
+          _awaitLowerPlyStrikes = 0;
+          authoritative = true;
+        } else {
+          _awaitLowerPlyStrikes = 0;
+          return;
+        }
+      } else {
+        _awaitLowerPlyStrikes = 0;
+      }
       // Mid pick→put: even force reconnect must not remount under an active fly.
+      // Exception: adopt turn/legal so AI→human unlock is not delayed until land.
       if (payload.moveCount <= _moveCount &&
           BoardPlyFlight.isActive &&
-          !rewindGhost) {
+          !authoritative) {
+        if (payload.moveCount == _moveCount && payload.turn != _turn) {
+          setState(() {
+            _turn = payload.turn;
+            _legalMoves = payload.legalMoves;
+            _legalMoveDetails = payload.legalMoveDetails;
+            _mustContinue = payload.mustContinue;
+            _busy = false;
+            final yp = _yourPlayer;
+            _aiThinking = widget.mode == 'ai' &&
+                yp != null &&
+                payload.turn != yp &&
+                payload.outcome == null &&
+                !payload.draw &&
+                !payload.paused;
+          });
+        }
         return;
       }
       final yp = _yourPlayer;
@@ -1786,11 +1841,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
           payload.outcome == null &&
           !payload.draw &&
           !payload.paused;
-      final authoritative = rewindGhost;
       setState(() {
         _aiThinking = authoritative ? false : thinking;
         _busy = false;
-        // Background / reconnect: freeze-merge. Failed submit: authoritative snap.
+        // Background / reconnect: freeze-merge. Failed submit / tip-rewind recover: authoritative.
         _applyBoardPayload(payload, authoritative: authoritative);
       });
       _armPlySyncSafety();
@@ -1798,6 +1852,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     } catch (_) {
       if (!mounted) return;
       setState(() => _aiThinking = false);
+    } finally {
+      _resyncInFlight = false;
     }
   }
 

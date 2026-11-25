@@ -408,6 +408,8 @@ func (a *API) OfficialResumeGameCore(
 		}
 		a.Hub.BroadcastGame(id, env)
 	}
+	// Same as seat resume: re-kick VS-AI if pause aborted the deferred computer ply.
+	a.kickDeferredAIIfNeeded(id, st)
 	return payload, nil
 }
 

@@ -43,6 +43,7 @@ bin/
 # Go
 apps/api/bin/
 apps/api/vendor/
+.gocache/
 *.test
 coverage.out
 

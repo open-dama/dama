@@ -374,6 +374,9 @@ func (a *API) ResumeGameCore(ctx context.Context, id, userID string) (map[string
 		}
 		a.Hub.BroadcastGame(id, env)
 	}
+	// Pause can abort completeDeferredAI mid-think; without a re-kick the computer
+	// seat stays forever and every client board freezes on await-reply /state.
+	a.kickDeferredAIIfNeeded(id, st)
 	return payload, nil
 }
 

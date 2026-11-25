@@ -631,10 +631,18 @@ assert(
 assert(
   liveHub.includes("Half-open sockets never fire onclose") &&
     liveHub.includes("void hardResyncGameState(gid)") &&
+    liveHub.includes("immediate refresh + ~500ms") &&
+    liveHub.includes("}, 500)") &&
     matchPage.includes("_armAwaitingReplyWatch") &&
-    matchPage.includes("Timer.periodic(const Duration(seconds: 4)") &&
+    matchPage.includes("Timer.periodic(const Duration(milliseconds: 500)") &&
+    matchPage.includes("tick();") &&
     spectateHub.includes("Half-open spectate WSS stops live plies") &&
-    spectatePage.includes("_armSpectatePollWatch"),
+    spectatePage.includes("_armSpectatePollWatch") &&
+    read("apps/api/internal/rest/handlers.go").includes("fail-open drain") &&
+    read("apps/api/internal/rest/handlers.go").includes(
+      "Do NOT bail on MustContinue",
+    ) &&
+    read("apps/api/internal/rest/handlers.go").includes("pickDeferredAIMove"),
   "web+flutter poll /state while awaiting AI/opponent or spectating (half-open WSS)",
 );
 assert(

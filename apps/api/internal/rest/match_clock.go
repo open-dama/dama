@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"dama/apps/api/internal/auth"
 	"dama/apps/api/internal/game/engine"
+	"dama/apps/api/internal/gamestore"
 	"dama/apps/api/internal/store"
 
 	"github.com/go-chi/chi/v5"
@@ -88,6 +90,26 @@ func (a *API) syncMatchClock(ctx context.Context, id string, state *engine.State
 		// Concurrent official/player pause must win over this debit persist.
 		_ = a.applyStorePauseOnto(id, state)
 		if err := a.Store.Update(id, state); err != nil {
+			if errors.Is(err, gamestore.ErrStaleUpdate) {
+				// Concurrent /move or deferred AI advanced the tip. Never rewind
+				// move_count - rebase the debit onto the fresher board once.
+				fresh, ok := a.Store.GetAuthoritative(id)
+				if !ok || fresh.State == nil || engine.GameOutcome(fresh.State) != nil {
+					return nil, false, nil
+				}
+				flagged2, advanced2 := engine.DebitActiveClock(fresh.State, time.Now().UnixMilli())
+				if flagged2 {
+					payload, ferr := a.finishClockFlag(ctx, id, fresh.State)
+					return payload, true, ferr
+				}
+				if advanced2 {
+					_ = a.applyStorePauseOnto(id, fresh.State)
+					if uerr := a.Store.Update(id, fresh.State); uerr != nil && !errors.Is(uerr, gamestore.ErrStaleUpdate) {
+						return nil, false, fmt.Errorf("unable to save clock")
+					}
+				}
+				return nil, false, nil
+			}
 			return nil, false, fmt.Errorf("unable to save clock")
 		}
 	}

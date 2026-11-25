@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"dama/apps/api/internal/db"
 	"dama/apps/api/internal/game/ai"
 	"dama/apps/api/internal/game/engine"
+	"dama/apps/api/internal/gamestore"
 	"dama/apps/api/internal/notifications"
 	"dama/apps/api/internal/pagination"
 	"dama/apps/api/internal/payments"
@@ -671,7 +673,16 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 		// Concurrent official/player pause must win over this debit persist.
 		_ = a.applyStorePauseOnto(id, rec.State)
 		if err := a.Store.Update(id, rec.State); err != nil {
-			return nil, fmt.Errorf("unable to save clock")
+			if errors.Is(err, gamestore.ErrStaleUpdate) {
+				// Tip advanced under the debit write - reseat before FindMove.
+				fresh, ok := a.Store.GetAuthoritative(id)
+				if !ok || fresh.State == nil {
+					return nil, fmt.Errorf("unable to save clock")
+				}
+				rec = fresh
+			} else {
+				return nil, fmt.Errorf("unable to save clock")
+			}
 		}
 	}
 	// Pause may have landed between GetAuthoritative and the debit persist.
@@ -697,6 +708,9 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 	// waiting for AI search before this broadcast caused false "Move failed" timeouts.
 	_ = a.applyStorePauseOnto(id, next)
 	if err := a.Store.Update(id, next); err != nil {
+		if errors.Is(err, gamestore.ErrStaleUpdate) {
+			return nil, fmt.Errorf("move conflict")
+		}
 		return nil, fmt.Errorf("unable to save move")
 	}
 	humanPayload := a.gamePayload(id, next)
@@ -724,99 +738,169 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 	if a.Hub != nil {
 		a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": true})
 	}
-	go a.completeDeferredAI(id)
+	// Pass expectMC so the goroutine waits for the human tip (memory-first) instead of
+	// racing a stale Redis read and bailing while turn is still AI forever (board freeze).
+	go a.completeDeferredAI(id, next.MoveCount)
 	return humanPayload, nil
 }
 
+// pickDeferredAIMove chooses a computer ply. Never return nil while legal moves
+// exist - ChooseMove(nil) on bad depth used to leave turn=AI forever (client freeze).
+func pickDeferredAIMove(state *engine.State) *engine.Move {
+	if state == nil {
+		return nil
+	}
+	depth := state.AISearchDepth
+	if depth < 1 {
+		depth = ai.DepthNovice
+	}
+	if depth > ai.DepthGrandmaster {
+		depth = ai.DepthGrandmaster
+	}
+	if m := ai.ChooseMove(state, depth); m != nil {
+		return m
+	}
+	moves := engine.LegalMoves(state)
+	if len(moves) == 0 {
+		return nil
+	}
+	cp := moves[0]
+	return &cp
+}
+
+// cloneStateJSON deep-copies a board tip so deferred AI never mutates the live store pointer.
+func cloneStateJSON(st *engine.State) *engine.State {
+	if st == nil {
+		return nil
+	}
+	raw, err := json.Marshal(st)
+	if err != nil {
+		return nil
+	}
+	var out engine.State
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return &out
+}
+
 // completeDeferredAI runs VS-AI search after the human ply is already persisted + acked.
-func (a *API) completeDeferredAI(id string) {
+// expectMC is the human tip move_count; we wait briefly for that tip (memory-first) so a
+// concurrent /state clock debit cannot make us bail while Redis still shows the AI seat.
+func (a *API) completeDeferredAI(id string, expectMC int) {
 	defer func() {
 		if a.Hub != nil {
 			a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": false})
 		}
 	}()
-	rec, ok := a.Store.GetAuthoritative(id)
-	if !ok || rec.State == nil {
+
+	var next *engine.State
+	for attempt := 0; attempt < 40; attempt++ {
+		// Memory first: ApplyMoveCore just wrote this process's tip. Preferring Redis-only
+		// (GetAuthoritative) raced concurrent GET /state loaders and could miss the AI seat.
+		rec, ok := a.Store.Get(id)
+		if !ok || rec.State == nil {
+			rec, ok = a.Store.GetAuthoritative(id)
+		}
+		if !ok || rec.State == nil {
+			return
+		}
+		st := rec.State
+		if engine.GameOutcome(st) != nil {
+			return
+		}
+		if st.Mode != "ai" || st.AIPlayer == nil {
+			return
+		}
+		if st.MoveCount > expectMC {
+			// Tip already past our human ply (AI or another writer finished).
+			return
+		}
+		if st.MoveCount == expectMC && st.Turn == *st.AIPlayer {
+			next = cloneStateJSON(st)
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if next == nil {
+		log.Printf("deferred AI tip miss game=%s expectMC=%d", id, expectMC)
 		return
 	}
-	next := rec.State
-	if engine.GameOutcome(next) != nil {
-		return
-	}
-	if next.Mode != "ai" || next.AIPlayer == nil || next.MustContinue != nil || next.Turn != *next.AIPlayer {
-		return
-	}
-	if a.Flags == nil || !a.Flags.Get(context.Background()).VSAIEnabled {
-		return
-	}
+	// Do NOT bail on MustContinue - abandoning mid multi-capture left turn=AI forever
+	// (client boards froze while GET /state kept returning the computer seat).
+	// Even if the flag flips mid-flight, fail-open legal plies so the human is
+	// never stuck on the computer seat (boards frozen until abandon).
+	vsAI := a.Flags != nil && a.Flags.Get(context.Background()).VSAIEnabled
 
 	ctx := context.Background()
-	for engine.GameOutcome(next) == nil && next.MustContinue == nil && next.Turn == *next.AIPlayer {
-		// Concurrent pause (other tab / seat) wins: keep human ply, stop AI replies.
-		if a.applyStorePauseOnto(id, next) {
-			break
+	deadline := time.Now().Add(3500 * time.Millisecond)
+	clockFinalized := false
+
+	applyOneAI := func() bool {
+		if next == nil || next.AIPlayer == nil || next.Turn != *next.AIPlayer {
+			return false
+		}
+		if a.applyStorePauseOnto(id, next) || next.Paused {
+			return false
 		}
 		nowMs := time.Now().UnixMilli()
 		if flagged, _ := engine.DebitActiveClock(next, nowMs); flagged {
 			_, _ = a.finishClockFlag(ctx, id, next)
-			return
+			clockFinalized = true
+			return false
 		}
-		// Pause may land after debit; do not spend an AI ply under freeze.
-		if a.applyStorePauseOnto(id, next) {
-			break
+		if a.applyStorePauseOnto(id, next) || next.Paused {
+			return false
+		}
+		m := pickDeferredAIMove(next)
+		if m == nil {
+			return false
 		}
 		aiMover := next.Turn
-		aiMove := ai.ChooseMove(next, next.AISearchDepth)
-		if aiMove == nil {
-			break
-		}
-		if a.applyStorePauseOnto(id, next) {
-			break
-		}
-		aiNext, err := engine.ApplyMove(next, *aiMove)
+		aiNext, err := engine.ApplyMove(next, *m)
 		if err != nil {
-			break
+			return false
 		}
 		next = aiNext
 		if next.MustContinue == nil {
 			engine.GrantClockIncrement(next, aiMover)
 		}
-		if next.MustContinue != nil {
-			for next.MustContinue != nil && engine.GameOutcome(next) == nil {
-				if a.applyStorePauseOnto(id, next) {
-					break
-				}
-				nowMs = time.Now().UnixMilli()
-				if flagged, _ := engine.DebitActiveClock(next, nowMs); flagged {
-					_, _ = a.finishClockFlag(ctx, id, next)
-					return
-				}
-				if a.applyStorePauseOnto(id, next) {
-					break
-				}
-				contMover := next.Turn
-				cont := ai.ChooseMove(next, next.AISearchDepth)
-				if cont == nil {
-					break
-				}
-				if a.applyStorePauseOnto(id, next) {
-					break
-				}
-				contNext, err := engine.ApplyMove(next, *cont)
-				if err != nil {
-					break
-				}
-				next = contNext
-				if next.MustContinue == nil {
-					engine.GrantClockIncrement(next, contMover)
-				}
-			}
+		return true
+	}
+
+	for engine.GameOutcome(next) == nil && next.AIPlayer != nil && next.Turn == *next.AIPlayer {
+		if time.Now().After(deadline) {
+			log.Printf("deferred AI deadline game=%s; fail-open drain", id)
+			break
 		}
+		if !vsAI {
+			break
+		}
+		if !applyOneAI() {
+			break
+		}
+	}
+
+	// Fail-open drain: finish remaining AI seat / multi-jump so clients unlock.
+	// Caps multi-capture chains; never persist with turn still on the computer.
+	for i := 0; i < 32 && !clockFinalized && engine.GameOutcome(next) == nil && next.AIPlayer != nil && next.Turn == *next.AIPlayer && !next.Paused; i++ {
+		if !applyOneAI() {
+			break
+		}
+	}
+
+	// Clock flag already persisted + broadcast inside finishClockFlag.
+	if clockFinalized {
+		return
 	}
 
 	// Last look: do not wipe a pause that landed while AI was thinking.
 	_ = a.applyStorePauseOnto(id, next)
 	if err := a.Store.Update(id, next); err != nil {
+		if errors.Is(err, gamestore.ErrStaleUpdate) {
+			log.Printf("deferred AI stale skip game=%s (tip already advanced)", id)
+			return
+		}
 		log.Printf("deferred AI save failed game=%s: %v", id, err)
 		return
 	}
@@ -827,6 +911,27 @@ func (a *API) completeDeferredAI(id string) {
 	if outcome := engine.GameOutcome(next); outcome != nil {
 		a.scheduleMatchFinalize(id, next, *outcome)
 	}
+}
+
+// kickDeferredAIIfNeeded re-starts VS-AI search when the computer still owns the seat
+// after resume (pause aborts applyOneAI and would otherwise leave every client frozen).
+func (a *API) kickDeferredAIIfNeeded(id string, st *engine.State) {
+	if a == nil || st == nil {
+		return
+	}
+	if st.Mode != "ai" || st.AIPlayer == nil {
+		return
+	}
+	if engine.GameOutcome(st) != nil || st.Paused {
+		return
+	}
+	if st.Turn != *st.AIPlayer {
+		return
+	}
+	if a.Hub != nil {
+		a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": true})
+	}
+	go a.completeDeferredAI(id, st.MoveCount)
 }
 
 // scheduleMatchFinalize records history / career / bracket after the board is already persisted.

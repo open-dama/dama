@@ -542,6 +542,14 @@ export function LivePlayHub({
   const pendingLocalMoveRef = useRef(false);
   /** Sync lock (smart-menu moveLockRef): blocks stale-closure double REST /move. */
   const moveSubmitLockRef = useRef(false);
+  /** smart-menu refreshStateInFlightRef: coalesce overlapping GET /state polls. */
+  const hardResyncInFlightRef = useRef(false);
+  /**
+   * Consecutive await-reply polls that saw a shorter server tip. Used only to
+   * fail-open a permanent freeze when Redis rewound under the optimistic ply
+   * (production log: /move then endless /state with no unlock).
+   */
+  const awaitLowerPlyStrikesRef = useRef(0);
   const moveWaitRef = useRef<{
     resolve: (g: GamePayload) => void;
     reject: (e: Error) => void;
@@ -559,16 +567,23 @@ export function LivePlayHub({
       const gid = (gameId || gameRef.current?.id || gameIdParam || "").trim();
       const tok = (effectiveTokenRef.current || "").trim();
       if (!gid || !tok) return;
-      // Never clobber an in-flight local submit with a racing /state poll.
-      if (!opts?.force && (moveSubmitLockRef.current || pendingLocalMoveRef.current)) {
+      // smart-menu AI poll does NOT skip refresh while moveLock is held - only
+      // single-flight. Blocking on pendingLocalMove/moveSubmitLock here meant
+      // await-reply GET /state never ran during the whole /move RTT (~1s+), so a
+      // half-open WSS left the board on the AI seat until abandon. Ply guards
+      // below already reject tip rewind; do not gate the poll itself.
+      // smart-menu refreshStateInFlightRef: overlapping 500ms polls used to race
+      // (stale tip applied after a newer unlock → felt frozen again).
+      if (hardResyncInFlightRef.current && !opts?.rewindGhost) {
         return;
       }
+      hardResyncInFlightRef.current = true;
       const localPlyBefore =
         gameRef.current?.move_count ?? gameRef.current?.move_history?.length ?? 0;
       // Only failed-submit recovery may rewind. WS reconnect force alone used to
       // treat moveSubmitLock as "ghost" and snap optimistic plies back while
       // REST /move (~1s) was still in flight - classic mid-game snap-back.
-      const rewindGhost = Boolean(opts?.rewindGhost);
+      let rewindGhost = Boolean(opts?.rewindGhost);
       try {
         const { data } = await restClient.get<GamePayload>(`/games/${gid}/state`, {
           headers: authHeaders(tok),
@@ -580,13 +595,60 @@ export function LivePlayHub({
         const plyInflight =
           typeof document !== "undefined" &&
           Boolean(document.querySelector("[data-dama-ply-inflight]"));
-        // Stale GET behind a newer local tip: never rewind unless explicit ghost recovery.
+        // Stale GET behind a newer local tip: never rewind unless explicit ghost recovery
+        // OR await-reply has seen a shorter tip repeatedly (server tip rewind race left
+        // the board on the AI/opponent seat forever - match production /state storm).
         if (incomingPly < tip && !rewindGhost) {
-          return;
+          const live = gameRef.current;
+          const awaitingReply =
+            live != null &&
+            live.outcome == null &&
+            !live.draw &&
+            !live.paused &&
+            (pendingLocalMoveRef.current ||
+              (live.mode === "ai" &&
+                typeof live.ai_player === "number" &&
+                live.turn === live.ai_player));
+          if (awaitingReply) {
+            awaitLowerPlyStrikesRef.current += 1;
+            if (awaitLowerPlyStrikesRef.current < 8) {
+              return;
+            }
+            awaitLowerPlyStrikesRef.current = 0;
+            rewindGhost = true;
+          } else {
+            awaitLowerPlyStrikesRef.current = 0;
+            return;
+          }
+        } else {
+          awaitLowerPlyStrikesRef.current = 0;
         }
         // Mid pick→put: same-ply /state must not churn parent board (2D resting remount).
         // Even force reconnect must not remount resting pieces under an active fly.
+        // Exception: turn/legal may still advance (AI→human unlock) without board replace.
         if (incomingPly <= livePly && plyInflight && !rewindGhost) {
+          const prevTurn = gameRef.current?.turn;
+          if (
+            incomingPly === livePly &&
+            data.turn != null &&
+            prevTurn != null &&
+            data.turn !== prevTurn
+          ) {
+            setGame((prev) => {
+              if (!prev) return prev;
+              const merged = withResolvedOutcome({
+                ...prev,
+                turn: data.turn,
+                legal_moves: data.legal_moves ?? prev.legal_moves,
+                must_continue: data.must_continue ?? prev.must_continue,
+                outcome: data.outcome ?? prev.outcome,
+                draw: data.draw || prev.draw,
+              });
+              gameRef.current = merged;
+              if (merged.id) qc.setQueryData(gameStateQueryKey(merged.id), merged);
+              return merged;
+            });
+          }
           return;
         }
         if (!opts?.force) {
@@ -624,6 +686,8 @@ export function LivePlayHub({
         if (rewindGhost) setSelected(null);
       } catch {
         /* keep painted; sticky ply-safety still applies */
+      } finally {
+        hardResyncInFlightRef.current = false;
       }
     },
     [gameIdParam, qc],
@@ -1645,20 +1709,19 @@ export function LivePlayHub({
 
   // AI/opponent replies arrive on WSS only. Half-open sockets never fire onclose, so
   // after our ply the board sits on their turn forever. Poll GET /state while waiting.
+  // smart-menu: immediate refresh + ~500ms interval while AI thinks (API logs showed
+  // /move then sparse /state → boards felt frozen until abandon).
   useEffect(() => {
     if (phase !== "playing" || replayIndex != null) return;
     const gid = (game?.id || "").trim();
     if (!gid || !effectiveToken) return;
     if (game?.outcome != null || game?.draw || game?.paused) return;
     if (isYourTurn) return;
-    const first = window.setTimeout(() => {
-      void hardResyncGameState(gid);
-    }, 3500);
+    void hardResyncGameState(gid);
     const interval = window.setInterval(() => {
       void hardResyncGameState(gid);
-    }, 4500);
+    }, 500);
     return () => {
-      window.clearTimeout(first);
       window.clearInterval(interval);
     };
   }, [

@@ -3,6 +3,7 @@ package gamestore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -19,6 +20,10 @@ const liveSetKey = "dama:games:live"
 const clockActiveSetKey = "dama:games:clock_active"
 const playingKeyPrefix = "dama:playing:"
 const gameTTL = 24 * time.Hour
+
+// ErrStaleUpdate means Redis (or memory) already holds a higher move_count tip.
+// Callers must never force-write a lower ply (clock debit / sweeper lost-update).
+var ErrStaleUpdate = errors.New("stale game update")
 
 func allowMemoryMode() bool {
 	return os.Getenv("DAMA_ALLOW_MEMORY") == "1"
@@ -100,14 +105,31 @@ func (s *Store) loadRedis(id string) (*GameRecord, bool) {
 	}
 	rec := &GameRecord{ID: id, State: &st}
 	s.mu.Lock()
+	// Slow GET /state started before /move can finish after ApplyMoveCore wrote a
+	// newer tip into memory. Blindly replacing memory with that stale Redis blob
+	// made completeDeferredAI (and later readers) miss Turn==AI → board freeze.
+	if existing, ok := s.games[id]; ok && existing != nil && existing.State != nil {
+		if existing.State.MoveCount > st.MoveCount {
+			out := existing
+			s.mu.Unlock()
+			return out, true
+		}
+	}
 	s.games[id] = rec
 	s.mu.Unlock()
 	return rec, true
 }
 
 func (s *Store) Update(id string, state *engine.State) error {
+	if state == nil {
+		return fmt.Errorf("nil game state")
+	}
 	if s.redisReady() {
-		if err := s.persistErr(id, state); err != nil {
+		// Monotonic move_count: reject blind SETs that rewind a committed ply.
+		// Without this, GET /state + AFK sweeper clock debit race ApplyMoveCore /
+		// completeDeferredAI and leave Redis at tip-1 while HTTP acked tip
+		// (boards freeze waiting for an AI reply that never sees Turn==AI).
+		if err := s.persistMonotonic(id, state); err != nil {
 			return err
 		}
 		s.indexLive(id, state)
@@ -121,9 +143,51 @@ func (s *Store) Update(id string, state *engine.State) error {
 		return fmt.Errorf("service temporarily unavailable")
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.games[id]; ok && existing != nil && existing.State != nil {
+		if state.MoveCount < existing.State.MoveCount {
+			return ErrStaleUpdate
+		}
+	}
 	s.games[id] = &GameRecord{ID: id, State: state}
-	s.mu.Unlock()
 	return nil
+}
+
+// persistMonotonic SETs only when incoming move_count >= Redis tip (WATCH/MULTI).
+func (s *Store) persistMonotonic(id string, state *engine.State) error {
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	key := gameKeyPrefix + id
+	ctx := context.Background()
+	incomingMC := state.MoveCount
+	for attempt := 0; attempt < 16; attempt++ {
+		err := s.rdb.RDB.Watch(ctx, func(tx *redis.Tx) error {
+			cur, gerr := tx.Get(ctx, key).Bytes()
+			if gerr != nil && gerr != redis.Nil {
+				return gerr
+			}
+			if gerr == nil && len(cur) > 0 {
+				var existing engine.State
+				if uerr := json.Unmarshal(cur, &existing); uerr == nil {
+					if incomingMC < existing.MoveCount {
+						return ErrStaleUpdate
+					}
+				}
+			}
+			_, perr := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Set(ctx, key, raw, gameTTL)
+				return nil
+			})
+			return perr
+		}, key)
+		if err == redis.TxFailedErr {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("game update conflict")
 }
 
 // LiveGameSummary is a compact row for the Watch rail.
