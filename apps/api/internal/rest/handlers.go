@@ -717,21 +717,49 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 		return humanPayload, nil
 	}
 
-	// Non-monetary VS-AI reply after the human ply is already live on clients.
+	// Reference (backend game_deferred_ai): ack the human ply on HTTP immediately and
+	// deliver the computer reply on WSS. Holding /move for ChooseMove (~0.6–2.5s)
+	// left a stale-closure race where a second REST submit hit "illegal move" /
+	// "not your turn" and the board toasted "Move failed".
 	if a.Hub != nil {
 		a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": true})
 	}
+	go a.completeDeferredAI(id)
+	return humanPayload, nil
+}
+
+// completeDeferredAI runs VS-AI search after the human ply is already persisted + acked.
+func (a *API) completeDeferredAI(id string) {
+	defer func() {
+		if a.Hub != nil {
+			a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": false})
+		}
+	}()
+	rec, ok := a.Store.GetAuthoritative(id)
+	if !ok || rec.State == nil {
+		return
+	}
+	next := rec.State
+	if engine.GameOutcome(next) != nil {
+		return
+	}
+	if next.Mode != "ai" || next.AIPlayer == nil || next.MustContinue != nil || next.Turn != *next.AIPlayer {
+		return
+	}
+	if a.Flags == nil || !a.Flags.Get(context.Background()).VSAIEnabled {
+		return
+	}
+
+	ctx := context.Background()
 	for engine.GameOutcome(next) == nil && next.MustContinue == nil && next.Turn == *next.AIPlayer {
 		// Concurrent pause (other tab / seat) wins: keep human ply, stop AI replies.
 		if a.applyStorePauseOnto(id, next) {
 			break
 		}
-		nowMs = time.Now().UnixMilli()
+		nowMs := time.Now().UnixMilli()
 		if flagged, _ := engine.DebitActiveClock(next, nowMs); flagged {
-			if a.Hub != nil {
-				a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": false})
-			}
-			return a.finishClockFlag(ctx, id, next)
+			_, _ = a.finishClockFlag(ctx, id, next)
+			return
 		}
 		// Pause may land after debit; do not spend an AI ply under freeze.
 		if a.applyStorePauseOnto(id, next) {
@@ -760,10 +788,8 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 				}
 				nowMs = time.Now().UnixMilli()
 				if flagged, _ := engine.DebitActiveClock(next, nowMs); flagged {
-					if a.Hub != nil {
-						a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": false})
-					}
-					return a.finishClockFlag(ctx, id, next)
+					_, _ = a.finishClockFlag(ctx, id, next)
+					return
 				}
 				if a.applyStorePauseOnto(id, next) {
 					break
@@ -787,14 +813,12 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 			}
 		}
 	}
-	if a.Hub != nil {
-		a.Hub.BroadcastGame(id, map[string]any{"type": "ai_thinking", "thinking": false})
-	}
 
 	// Last look: do not wipe a pause that landed while AI was thinking.
 	_ = a.applyStorePauseOnto(id, next)
 	if err := a.Store.Update(id, next); err != nil {
-		return nil, fmt.Errorf("unable to save move")
+		log.Printf("deferred AI save failed game=%s: %v", id, err)
+		return
 	}
 	payload := a.gamePayload(id, next)
 	if a.Hub != nil {
@@ -803,7 +827,6 @@ func (a *API) ApplyMoveCore(ctx context.Context, id, userID string, from, to [2]
 	if outcome := engine.GameOutcome(next); outcome != nil {
 		a.scheduleMatchFinalize(id, next, *outcome)
 	}
-	return payload, nil
 }
 
 // scheduleMatchFinalize records history / career / bracket after the board is already persisted.
@@ -982,7 +1005,13 @@ func assertSeatMayMove(state *engine.State, userID string) error {
 		return fmt.Errorf("invalid turn")
 	}
 	if seat == nil || *seat == "" {
-		// Practice bootstrap: seat not bound yet; authenticated actor may move.
+		// VS-AI computer seat has no user id - never accept a human POST while
+		// it is the AI's turn (stale double-submit used to pass seat check then
+		// fail as "illegal move" → client "Move failed").
+		if state.Mode == "ai" && state.AIPlayer != nil && state.Turn == *state.AIPlayer {
+			return fmt.Errorf("not your turn")
+		}
+		// Practice bootstrap: human seat not bound yet; authenticated actor may move.
 		return nil
 	}
 	if *seat != userID {

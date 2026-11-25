@@ -163,6 +163,10 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
   /// AI/opponent ply only arrives on WSS; half-open sockets never deliver → poll /state.
   Timer? _awaitingReplyWatch;
+
+  /// Sync lock (web moveSubmitLockRef / smart-menu moveLockRef): blocks a second
+  /// REST `/move` from a stale double-tap before turn flips.
+  bool _moveSubmitLock = false;
   bool _abandoning = false;
 
   /// True while Stop confirm dialog is open (dismiss if official pause lands).
@@ -610,6 +614,36 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       ..addAll(next));
   }
 
+  Future<void> _showMatchIntroAfterSeats(String gameId) async {
+    final gid = gameId.trim();
+    if (gid.isEmpty) return;
+    await _hydrateSeatPlayers();
+    if (!mounted) return;
+    if (_matchIntroSeenGameId == gid) return;
+    if (_matchIntroPendingGameId != gid) return;
+    // Wait for rail chrome so VS intro duration/labels are DB-driven (no skip race).
+    for (var i = 0; i < 50 && _railChrome == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      if (!mounted) return;
+      if (_matchIntroPendingGameId != gid) return;
+    }
+    if (_railChrome == null) {
+      // Fail closed: do not invent intro without chrome; mark seen so we don't loop.
+      _matchIntroSeenGameId = gid;
+      _matchIntroPendingGameId = null;
+      return;
+    }
+    if (!mounted) return;
+    if (_matchIntroSeenGameId == gid) return;
+    if (_matchIntroPendingGameId != gid) return;
+    setState(() {
+      _matchIntroSeenGameId = gid;
+      _matchIntroVisible = true;
+      _matchIntroPendingGameId = null;
+    });
+    _armMatchIntroFailOpen();
+  }
+
   List<List<dynamic>>? get _displayBoard {
     if (_replayIndex == null) return _board;
     if (_replayIndex! <= 0) return _liveBoard ?? _board;
@@ -702,10 +736,9 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         if (payload.moveCount > 0) {
           _matchIntroSeenGameId = gid;
         } else {
-          // Never mount timed VS board cover (web LivePlayHub parity).
-          // Covers correlated with start→abandon and zero /move; pause/result stay.
-          _matchIntroSeenGameId = gid;
-          unawaited(GameNotify.play('game_start'));
+          // Wait for seat bios (web LivePlayHub parity) before starting the VS intro.
+          _matchIntroPendingGameId = gid;
+          unawaited(_showMatchIntroAfterSeats(gid));
         }
       }
     }
@@ -1492,6 +1525,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
     if (_board == null || _gameId == null || _replayIndex != null) return;
     final yp = _yourPlayer;
     if (yp == null || _turn != yp) return;
+    if (_moveSubmitLock) return;
     final cell = _board![row][col];
     if (_selectedRow == null || _selectedCol == null) {
       if (cell is Map && cell['p'] == yp && _canSelectPiece(row, col)) {
@@ -1548,6 +1582,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       toR: row,
       toC: col,
     );
+    _moveSubmitLock = true;
     setState(() {
       _selectedRow = null;
       _selectedCol = null;
@@ -1560,6 +1595,11 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         _moveCount = optimistic.moveCount;
         _moveHistory = optimistic.moveHistory;
         if (optimistic.outcome != null) _outcome = optimistic.outcome;
+        if (widget.mode == 'ai' &&
+            optimistic.mustContinue == null &&
+            optimistic.outcome == null) {
+          _aiThinking = true;
+        }
         // Keep `_board` frozen; scene commits board_after on put-down.
       }
     });
@@ -1579,7 +1619,11 @@ class _MatchBoardPageState extends State<MatchBoardPage>
   Future<void> _submitMoveViaRest(
       int fromR, int fromC, int toR, int toC) async {
     final id = (_gameId ?? '').trim();
-    if (id.isEmpty || !mounted) return;
+    if (id.isEmpty || !mounted) {
+      _moveSubmitLock = false;
+      return;
+    }
+    final submittedPly = _moveCount;
     try {
       final res = await authPost(
         Uri.parse('${ApiConfig.baseUrl}/api/v1/games/$id/move'),
@@ -1591,7 +1635,13 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       ).timeout(const Duration(seconds: 45));
       if (!mounted) return;
       if (res.statusCode >= 300) {
-        final label = (_chrome?.toastWsConnectionError ?? '').trim();
+        await _resyncAfterWsReconnect();
+        if (!mounted) return;
+        // Duplicate / stale submit after our ply already landed - stay quiet.
+        if (_moveCount >= submittedPly) return;
+        final label =
+            (_chrome?.toastMoveFailed ?? _chrome?.toastWsConnectionError ?? '')
+                .trim();
         setState(() {
           _aiThinking = false;
           if (label.isNotEmpty) _error = label;
@@ -1600,22 +1650,32 @@ class _MatchBoardPageState extends State<MatchBoardPage>
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(label)));
         }
-        await _resyncAfterWsReconnect();
         return;
       }
       final payload = GameStatePayload.fromJson(
         jsonDecode(res.body) as Map<String, dynamic>,
       );
+      // Deferred AI: human ack may still leave the computer seat on turn.
+      final yp = _yourPlayer;
+      final thinking = widget.mode == 'ai' &&
+          yp != null &&
+          payload.turn != yp &&
+          payload.outcome == null &&
+          !payload.draw &&
+          !payload.paused;
       setState(() {
-        _aiThinking = false;
+        _aiThinking = thinking;
         _busy = false;
         _applyBoardPayload(payload);
       });
       _armPlySyncSafety();
       _scheduleGameOverIfNeeded();
+      _armAwaitingReplyWatch();
     } catch (_) {
       if (!mounted) return;
       await _resyncAfterWsReconnect();
+    } finally {
+      _moveSubmitLock = false;
     }
   }
 
@@ -2312,14 +2372,22 @@ class _MatchBoardPageState extends State<MatchBoardPage>
             envName.isNotEmpty ? envName : _pauseActorDisplayName,
           );
         }
+        final yp = _yourPlayer;
+        final thinking = widget.mode == 'ai' &&
+            yp != null &&
+            payload.turn != yp &&
+            payload.outcome == null &&
+            !payload.draw &&
+            !payload.paused;
         setState(() {
-          _aiThinking = false;
+          _aiThinking = thinking;
           _applyBoardPayload(payload);
           _busy = false;
           _status =
               '${_chrome?.statusSyncedMovesPrefix ?? ''}${payload.moveCount}';
         });
         _scheduleGameOverIfNeeded();
+        _armAwaitingReplyWatch();
       }
     }
   }
@@ -3209,8 +3277,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
 
     if (_matchIntroVisible && (widget.mode == 'pvp' || widget.mode == 'ai')) {
       // Hard fail-open: intro cover must never outlive its cap (stuck active → freeze).
-      // Arm via `_armMatchIntroFailOpen` whenever this flag is set true (sound-only
-      // cold open never mounts; pause/result covers stay on their own paths).
+      // Overlay is IgnorePointer (timed) so the board stays tappable under the VS design.
       final introVs = rail.matchIntroVsLabel.trim().isNotEmpty
           ? rail.matchIntroVsLabel.trim()
           : chrome.matchIntroVsLabel.trim();

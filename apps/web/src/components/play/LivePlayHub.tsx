@@ -540,6 +540,8 @@ export function LivePlayHub({
     () => false,
   );
   const pendingLocalMoveRef = useRef(false);
+  /** Sync lock (smart-menu moveLockRef): blocks stale-closure double REST /move. */
+  const moveSubmitLockRef = useRef(false);
   const moveWaitRef = useRef<{
     resolve: (g: GamePayload) => void;
     reject: (e: Error) => void;
@@ -577,7 +579,16 @@ export function LivePlayHub({
   /** Apply server ack after local optimistic (WS move_ack or REST /move). */
   const applyMoveServerAck = useCallback(
     (incoming: GamePayload) => {
-      setAiThinking(false);
+      // Deferred AI: human /move ack can still leave the computer seat on turn.
+      const aiSeat = incoming.ai_player;
+      const thinking =
+        incoming.mode === "ai" &&
+        typeof aiSeat === "number" &&
+        incoming.turn === aiSeat &&
+        incoming.outcome == null &&
+        !incoming.draw &&
+        !incoming.paused;
+      setAiThinking(thinking);
       pendingLocalMoveRef.current = false;
       setGame((prev) => {
         const merged = mergeBoardStateAfterPlayerMove(prev, incoming);
@@ -1200,9 +1211,22 @@ export function LivePlayHub({
             return;
           }
           if ((msg.type === "move_ack" || msg.type === "game_state") && msg.game) {
-            setAiThinking(false);
-            const wasLocal = pendingLocalMoveRef.current || Boolean(moveWaitRef.current);
+            const wasLocal =
+              pendingLocalMoveRef.current ||
+              moveSubmitLockRef.current ||
+              Boolean(moveWaitRef.current);
             const incoming = msg.game;
+            // Keep ai_thinking true while the computer seat still owns the turn
+            // (human game_state ack must not clear the indicator before AI lands).
+            const aiSeat = incoming.ai_player;
+            const thinking =
+              incoming.mode === "ai" &&
+              typeof aiSeat === "number" &&
+              incoming.turn === aiSeat &&
+              incoming.outcome == null &&
+              !incoming.draw &&
+              !incoming.paused;
+            setAiThinking(thinking);
             const prevSnap = gameRef.current;
             const envRole =
               typeof (msg as { actor_role?: string }).actor_role === "string"
@@ -1821,6 +1845,9 @@ export function LivePlayHub({
       }
       if (yourPlayer == null || game.turn !== yourPlayer) return;
       if (game.mode === "ai" && game.ai_player != null && game.turn === game.ai_player) return;
+      // Sync lock before any setState - React closures otherwise re-fire the same
+      // legal put and POST a second /move → "Move failed" (smart-menu moveLockRef).
+      if (moveSubmitLockRef.current || pendingLocalMoveRef.current) return;
 
       const cell = game.board[row]?.[col];
       // Partial WS/merge payloads can omit legal_moves - never throw (that froze the board).
@@ -1877,7 +1904,9 @@ export function LivePlayHub({
               : game.turn;
       const from = selected;
       const to: [number, number] = [row, col];
+      const submittedPly = (game.move_count ?? game.move_history?.length ?? 0) + 1;
       void unlockGameAudio();
+      moveSubmitLockRef.current = true;
       const optimistic = applyOptimisticDraughtsMove(game, selected, to, seat);
       if (optimistic) {
         pendingLocalMoveRef.current = true;
@@ -1887,6 +1916,9 @@ export function LivePlayHub({
         // Persist freeze-merged optimistic so remount mid pick→put cannot seed board_after.
         if (optimistic.id) qc.setQueryData(gameStateQueryKey(optimistic.id), optimistic);
         setSelected(null);
+        if (game.mode === "ai" && !optimistic.must_continue && optimistic.outcome == null) {
+          setAiThinking(true);
+        }
         // Place SFX on board land phase only (not when the piece starts moving).
       } else {
         setSelected(null);
@@ -1896,14 +1928,24 @@ export function LivePlayHub({
       // accepted writes with no ack and left optimistic AI/opponent turns forever.
       // WSS still receives BroadcastGame for opponents/spectate; do not dual-send
       // (second ApplyMoveCore → false "illegal" / ghost interactive freeze).
-      void submitMoveViaRest(game.id, from, to).catch(() => {
-        pendingLocalMoveRef.current = false;
-        setAiThinking(false);
-        const live = gameRef.current;
-        if (live?.outcome != null || live?.draw) return;
-        toast.error(chrome.toast_move_failed || chrome.toast_live_required);
-        void hardResyncGameState(game.id);
-      });
+      void submitMoveViaRest(game.id, from, to)
+        .catch(() => {
+          pendingLocalMoveRef.current = false;
+          const live = gameRef.current;
+          if (live?.outcome != null || live?.draw) return;
+          const livePly = live?.move_count ?? live?.move_history?.length ?? 0;
+          // Duplicate submit after the first ply already landed - resync quietly.
+          if (livePly >= submittedPly) {
+            void hardResyncGameState(game.id);
+            return;
+          }
+          setAiThinking(false);
+          toast.error(chrome.toast_move_failed || chrome.toast_live_required);
+          void hardResyncGameState(game.id);
+        })
+        .finally(() => {
+          moveSubmitLockRef.current = false;
+        });
     },
     [
       chrome,
@@ -1955,11 +1997,11 @@ export function LivePlayHub({
       void playGameNotify("game_start");
       return;
     }
-    // Never mount a timed VS board cover on a live seat. Opaque/light covers
-    // both correlated with start→abandon and zero POST /move (guest AI logs).
-    // Sound-only; pause/result covers still mount when needed.
+    // Full VS cinematic (player vs player). Overlay is pointer-events-none so the
+    // board stays tappable under the timed design (freeze-safe).
     matchIntroSeenRef.current = id;
-    void playGameNotify("game_start");
+    setMatchResultActive(false);
+    setMatchIntroActive(true);
   }, [
     game?.id,
     game?.mode,
@@ -1983,14 +2025,6 @@ export function LivePlayHub({
     const t = window.setTimeout(() => setMatchIntroActive(false), 5500);
     return () => window.clearTimeout(t);
   }, [matchIntroActive]);
-
-  // Your-turn fail-open: opaque VS cinematic over a live seat read as a frozen
-  // board → start→abandon with zero /move. Keep a brief brand flash, then clear.
-  useEffect(() => {
-    if (!matchIntroActive || !boardInputEnabled) return;
-    const t = window.setTimeout(() => setMatchIntroActive(false), 400);
-    return () => window.clearTimeout(t);
-  }, [matchIntroActive, boardInputEnabled]);
 
   // Radix/popover can leave body { pointer-events: none } - clear when play starts.
   // Mid-match Depth/Time/rail teardown used to re-lock body and freeze the plane
