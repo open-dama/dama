@@ -1,10 +1,18 @@
+import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
 import { consoleAdCampaignsQueryKey } from "@/hooks/query/useConsoleAdCampaignsQuery";
 import { restClient } from "@/lib/api";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage } from "@/lib/ads-chrome-error";
 import { getConsoleAdCampaignsChrome } from "@/lib/console-ad-campaigns-cache";
-import type { ConsoleAdCampaign } from "@/types/ad-runtime";
+import type { AdPlaybackConsolePayload, ConsoleAdCampaign } from "@/types/ad-runtime";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+function runtimeChrome(qc: ReturnType<typeof useQueryClient>, token: string | null | undefined) {
+  return (
+    getConsoleAdCampaignsChrome(qc, token) ??
+    qc.getQueryData<AdPlaybackConsolePayload>(adPlaybackQueryKey(token))?.chrome
+  );
+}
 
 export type CampaignScheduleInput = {
   schedule_enabled: boolean;
@@ -29,13 +37,13 @@ export function useSaveCampaignScheduleMutation(token: string | null | undefined
       return data;
     },
     onSuccess: () => {
-      const chrome = getConsoleAdCampaignsChrome(qc, token);
+      const chrome = runtimeChrome(qc, token);
       void qc.invalidateQueries({ queryKey: consoleAdCampaignsQueryKey(token) });
       if (chrome?.toast_schedule_saved) toast.success(chrome.toast_schedule_saved);
     },
     onError: (err) => {
-      const chrome = getConsoleAdCampaignsChrome(qc, token);
-      const msg = apiToastMessage(err, chrome?.toast_save_failed || "");
+      const chrome = runtimeChrome(qc, token);
+      const msg = adsChromeErrorMessage(err, chrome, chrome?.toast_save_failed || "");
       if (msg) toast.error(msg);
     },
   });

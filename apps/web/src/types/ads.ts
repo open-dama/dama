@@ -34,6 +34,12 @@ export type AdCampaign = {
   ends_at?: string | null;
   closed_at?: string | null;
   auto_closed?: boolean;
+  buying_type?: string;
+  bid_cpm?: number | null;
+  reserved_cpm?: number | null;
+  package_code?: string;
+  agency_managed?: boolean;
+  advertiser_tier_code?: string;
 };
 
 export type AdCampaignAnalyticsRow = {
@@ -53,6 +59,33 @@ export type AdPricing = {
   impression_unit_cost: number;
   campaign_create_fee_amount: number;
   campaign_create_fee_currency: string;
+  country_code?: string;
+  marketplace_enabled?: boolean;
+  auction_enabled?: boolean;
+  reservation_enabled?: boolean;
+  default_buying_type?: string;
+  floor_cpm?: number;
+  advertiser_tier_code?: string;
+  advertiser_tier_label?: string;
+  advertiser_tier_blurb?: string;
+  media_daily_min?: number;
+  unlock_packages?: boolean;
+  agency_enabled?: boolean;
+};
+
+export type AdPackage = {
+  code: string;
+  title: string;
+  blurb?: string;
+  buying_type: string;
+  fixed_cpm: number;
+  flight_fee: number;
+  min_tier: string;
+  placement?: string;
+  enabled: boolean;
+  sort_order: number;
+  exclusive?: boolean;
+  exclusive_category?: string;
 };
 
 /** GraphQL `publisherDashboard` selection (codegen). */
@@ -70,6 +103,11 @@ export type CreateCampaignInput = {
   dailySpendCap: string;
   endsAt?: string;
   countryCode?: string;
+  buyingType?: string;
+  bidCpm?: string;
+  reservedCpm?: string;
+  packageCode?: string;
+  agencyManaged?: boolean;
 };
 
 export type ServedAd = {

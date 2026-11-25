@@ -194,6 +194,7 @@ export function InMatchAdOverlay({ active, gameStartedAtMs, moveCount = 0 }: Pro
               campaignId: campaign.id,
               viewerKey: viewerKey(),
               placement,
+              viewport: slot,
             });
           },
           PLY_IDLE_FAIL_OPEN_MS,

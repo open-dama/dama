@@ -11,6 +11,7 @@ import { EntityMediaEditor } from "@/components/media/EntityMediaEditor";
 import { GalleryCarousel } from "@/components/media/GalleryCarousel";
 import { AmountInput } from "@/components/ui/amount-input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DateTimeField } from "@/components/ui/date-time-field";
 import {
   Dialog,
@@ -51,6 +52,7 @@ import { useUpdateCampaignTitleMutation } from "@/hooks/mutation/useUpdateCampai
 import { useUploadCampaignGalleryMutation } from "@/hooks/mutation/useUploadCampaignGalleryMutation";
 import { useUploadCampaignThumbnailMutation } from "@/hooks/mutation/useUploadCampaignThumbnailMutation";
 import { useAdCampaignsQuery } from "@/hooks/query/useAdCampaignsQuery";
+import { useAdPackagesQuery } from "@/hooks/query/useAdPackagesQuery";
 import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { useAdPricingQuery } from "@/hooks/query/useAdPricingQuery";
 import { useClientEnumsQuery } from "@/hooks/query/useClientEnumsQuery";
@@ -82,6 +84,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 const STATUS_ALL = "__all__";
+const PACKAGE_NONE = "__none__";
+const BUYING_LEGACY = "legacy";
+const BUYING_AUCTION = "auction";
+const BUYING_RESERVATION = "reservation";
 
 type AdMediaChrome = AdScheduleChrome &
   Required<
@@ -131,6 +137,11 @@ export default function AdsCampaignsPage() {
   const [geoResolving, setGeoResolving] = useState(false);
   const [dailySpendCap, setDailySpendCap] = useState("");
   const [endsAt, setEndsAt] = useState("");
+  const [buyingType, setBuyingType] = useState("");
+  const [bidCpm, setBidCpm] = useState("");
+  const [reservedCpm, setReservedCpm] = useState("");
+  const [packageCode, setPackageCode] = useState(PACKAGE_NONE);
+  const [agencyManaged, setAgencyManaged] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [rowSelection, setRowSelection] = useState<OpsRowSelectionState>({});
   const [bulkStatus, setBulkStatus] = useState("");
@@ -193,7 +204,26 @@ export default function AdsCampaignsPage() {
     viewportCreativesChrome,
   ]);
   const mapChrome = isAdMapChromeReady(pageChrome) ? pageChrome : undefined;
-  const pricingQuery = useAdPricingQuery(geoLat, geoLng);
+  const pricingQuery = useAdPricingQuery(geoLat, geoLng, agencyManaged);
+  const pricing = pricingQuery.data;
+  const marketplaceOn = Boolean(pricing?.marketplace_enabled);
+  const pinReady =
+    geoLat != null &&
+    geoLng != null &&
+    Number.isFinite(geoLat) &&
+    Number.isFinite(geoLng) &&
+    !(geoLat === 0 && geoLng === 0);
+  const packagesQuery = useAdPackagesQuery(
+    token,
+    Boolean(
+      marketplaceOn &&
+        ((createDialog.open &&
+          pinReady &&
+          buyingType === BUYING_RESERVATION &&
+          pricing?.reservation_enabled) ||
+          detailDialog.open),
+    ),
+  );
   const createFee =
     typeof pricingQuery.data?.campaign_create_fee_amount === "number"
       ? pricingQuery.data.campaign_create_fee_amount
@@ -591,14 +621,66 @@ export default function AdsCampaignsPage() {
     setGeoResolving(false);
     setDailySpendCap("");
     setEndsAt("");
+    setBuyingType("");
+    setBidCpm("");
+    setReservedCpm("");
+    setPackageCode(PACKAGE_NONE);
+    setAgencyManaged(false);
   }
 
-  const hasMapPin =
-    geoLat != null &&
-    geoLng != null &&
-    Number.isFinite(geoLat) &&
-    Number.isFinite(geoLng) &&
-    !(geoLat === 0 && geoLng === 0);
+  const hasMapPin = pinReady;
+
+  useEffect(() => {
+    if (!createDialog.open) return;
+    if (!marketplaceOn) {
+      setBuyingType("");
+      return;
+    }
+    setBuyingType((prev) => {
+      if (prev === BUYING_AUCTION && pricing?.auction_enabled) return prev;
+      if (prev === BUYING_RESERVATION && pricing?.reservation_enabled) return prev;
+      const def = (pricing?.default_buying_type || "").trim();
+      if (def === BUYING_AUCTION && pricing?.auction_enabled) return def;
+      if (def === BUYING_RESERVATION && pricing?.reservation_enabled) return def;
+      if (pricing?.auction_enabled) return BUYING_AUCTION;
+      if (pricing?.reservation_enabled) return BUYING_RESERVATION;
+      return "";
+    });
+  }, [
+    createDialog.open,
+    marketplaceOn,
+    pricing?.default_buying_type,
+    pricing?.auction_enabled,
+    pricing?.reservation_enabled,
+  ]);
+
+  const floorCpm = typeof pricing?.floor_cpm === "number" ? pricing.floor_cpm : null;
+  const mediaDailyMin = typeof pricing?.media_daily_min === "number" ? pricing.media_daily_min : 0;
+  const bidParsed = Number(bidCpm.trim());
+  const reservedParsed = Number(reservedCpm.trim());
+  const auctionBidOk =
+    !marketplaceOn ||
+    buyingType !== BUYING_AUCTION ||
+    (Number.isFinite(bidParsed) &&
+      bidParsed > 0 &&
+      (floorCpm == null || bidParsed + 1e-9 >= floorCpm));
+  const reservationCpmOk =
+    !marketplaceOn ||
+    buyingType !== BUYING_RESERVATION ||
+    packageCode !== PACKAGE_NONE ||
+    (Number.isFinite(reservedParsed) &&
+      reservedParsed > 0 &&
+      (floorCpm == null || reservedParsed + 1e-9 >= floorCpm));
+  const mediaMinOk =
+    !marketplaceOn || mediaDailyMin <= 0 || (dailyCapOk && dailyCapParsed + 1e-9 >= mediaDailyMin);
+  const buyingTypeOk =
+    !marketplaceOn ||
+    (buyingType === BUYING_AUCTION && Boolean(pricing?.auction_enabled)) ||
+    (buyingType === BUYING_RESERVATION && Boolean(pricing?.reservation_enabled));
+  const reservationPackages =
+    packagesQuery.data?.packages?.filter(
+      (p) => p.enabled && (p.buying_type || "").trim() === BUYING_RESERVATION,
+    ) ?? [];
 
   if (!hydrated) {
     return <CampaignListSkeleton columns={7} />;
@@ -887,6 +969,248 @@ export default function AdsCampaignsPage() {
                 placeholder={pageChrome.ph_district}
               />
             </Field>
+            {marketplaceOn && hasMapPin && (pageChrome.marketplace_section_title || "").trim() ? (
+              <div className="sm:col-span-2 space-y-4 rounded-md border border-[var(--dama-border)] p-3 text-sm">
+                <div>
+                  <p className="font-medium">{pageChrome.marketplace_section_title}</p>
+                  {(pageChrome.marketplace_section_blurb || "").trim() ? (
+                    <p className="mt-1 text-[var(--dama-muted)]">
+                      {pageChrome.marketplace_section_blurb}
+                    </p>
+                  ) : null}
+                  {(pageChrome.marketplace_fields_locked_blurb || "").trim() ? (
+                    <p className="mt-1 text-xs text-[var(--dama-muted)]">
+                      {pageChrome.marketplace_fields_locked_blurb}
+                    </p>
+                  ) : null}
+                </div>
+                {pricingQuery.isError ? (
+                  <p className="text-[var(--dama-danger)]" role="alert">
+                    {(pageChrome.marketplace_unavailable || "").trim()}
+                  </p>
+                ) : pricingQuery.isSuccess ? (
+                  <>
+                    {(pageChrome.tier_label || "").trim() ? (
+                      <div>
+                        <p className="font-medium">{pageChrome.tier_label}</p>
+                        {(pricing?.advertiser_tier_label || "").trim() ? (
+                          <p className="mt-0.5 font-medium text-[var(--dama-gold)]">
+                            {pricing?.advertiser_tier_label}
+                          </p>
+                        ) : null}
+                        {(pageChrome.tier_blurb || "").trim() ? (
+                          <p className="mt-1 text-[var(--dama-muted)]">{pageChrome.tier_blurb}</p>
+                        ) : null}
+                        {(pricing?.advertiser_tier_blurb || "").trim() ? (
+                          <p className="mt-1 text-[var(--dama-muted)]">
+                            {pricing?.advertiser_tier_blurb}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {floorCpm != null &&
+                    floorCpm > 0 &&
+                    (pageChrome.floor_cpm_label || "").trim() ? (
+                      <div>
+                        <p className="font-medium">{pageChrome.floor_cpm_label}</p>
+                        {(pageChrome.floor_cpm_blurb || "").trim() ? (
+                          <p className="mt-1 text-[var(--dama-muted)]">
+                            {pageChrome.floor_cpm_blurb}
+                          </p>
+                        ) : null}
+                        {createFeeCurrency &&
+                        chromeSeparatorPresent(pageChrome.amount_currency_separator) ? (
+                          <p className="mt-1 font-mono tabular-nums text-[var(--dama-gold)]">
+                            {floorCpm}
+                            {chromeSeparator(pageChrome.amount_currency_separator)}
+                            {createFeeCurrency}
+                          </p>
+                        ) : (
+                          <p className="mt-1 font-mono tabular-nums">{floorCpm}</p>
+                        )}
+                      </div>
+                    ) : null}
+                    {(pageChrome.buying_type_label || "").trim() ? (
+                      <Field
+                        id="create-buying-type"
+                        label={(pageChrome.buying_type_label || "").trim()}
+                      >
+                        <Select
+                          value={buyingType || undefined}
+                          onValueChange={(v) => {
+                            setBuyingType(v);
+                            setBidCpm("");
+                            setReservedCpm("");
+                            setPackageCode(PACKAGE_NONE);
+                          }}
+                        >
+                          <SelectTrigger id="create-buying-type">
+                            <SelectValue placeholder={pageChrome.buying_type_label} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {pricing?.auction_enabled &&
+                            (pageChrome.buying_type_auction_label || "").trim() ? (
+                              <SelectItem value={BUYING_AUCTION}>
+                                {pageChrome.buying_type_auction_label}
+                              </SelectItem>
+                            ) : null}
+                            {pricing?.reservation_enabled &&
+                            (pageChrome.buying_type_reservation_label || "").trim() ? (
+                              <SelectItem value={BUYING_RESERVATION}>
+                                {pageChrome.buying_type_reservation_label}
+                              </SelectItem>
+                            ) : null}
+                            {!marketplaceOn &&
+                            (pageChrome.platform_default_placeholder || "").trim() ? (
+                              <SelectItem value={BUYING_LEGACY}>
+                                {pageChrome.platform_default_placeholder}
+                              </SelectItem>
+                            ) : null}
+                          </SelectContent>
+                        </Select>
+                        {buyingType === BUYING_AUCTION &&
+                        (pageChrome.buying_type_auction_blurb || "").trim() ? (
+                          <p className="mt-2 text-xs text-[var(--dama-muted)]">
+                            {pageChrome.buying_type_auction_blurb}
+                          </p>
+                        ) : null}
+                        {buyingType === BUYING_RESERVATION &&
+                        (pageChrome.buying_type_reservation_blurb || "").trim() ? (
+                          <p className="mt-2 text-xs text-[var(--dama-muted)]">
+                            {pageChrome.buying_type_reservation_blurb}
+                          </p>
+                        ) : null}
+                      </Field>
+                    ) : null}
+                    {buyingType === BUYING_AUCTION && (pageChrome.bid_cpm_label || "").trim() ? (
+                      <Field
+                        id="create-bid-cpm"
+                        label={(pageChrome.bid_cpm_label || "").trim()}
+                        description={(pageChrome.bid_cpm_blurb || "").trim() || undefined}
+                      >
+                        <AmountInput
+                          id="create-bid-cpm"
+                          value={bidCpm}
+                          onValueChange={setBidCpm}
+                          placeholder={(pageChrome.bid_cpm_label || "").trim()}
+                        />
+                      </Field>
+                    ) : null}
+                    {buyingType === BUYING_RESERVATION ? (
+                      <div className="space-y-4">
+                        {pricing?.unlock_packages &&
+                        reservationPackages.length > 0 &&
+                        (pageChrome.packages_section_title || "").trim() ? (
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              {pageChrome.packages_section_title}
+                            </p>
+                            {(pageChrome.packages_section_blurb || "").trim() ? (
+                              <p className="text-xs text-[var(--dama-muted)]">
+                                {pageChrome.packages_section_blurb}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {pricing?.unlock_packages &&
+                        reservationPackages.length > 0 &&
+                        (pageChrome.package_label || "").trim() ? (
+                          <Field
+                            id="create-package"
+                            label={(pageChrome.package_label || "").trim()}
+                          >
+                            <Select value={packageCode} onValueChange={setPackageCode}>
+                              <SelectTrigger id="create-package">
+                                <SelectValue placeholder={pageChrome.package_label} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(pageChrome.package_none_label || "").trim() ? (
+                                  <SelectItem value={PACKAGE_NONE}>
+                                    {pageChrome.package_none_label}
+                                  </SelectItem>
+                                ) : null}
+                                {reservationPackages.map((pkg) => (
+                                  <SelectItem key={pkg.code} value={pkg.code}>
+                                    {(pkg.title || "").trim() || pkg.code}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {packageCode !== PACKAGE_NONE
+                              ? (() => {
+                                  const picked = reservationPackages.find(
+                                    (p) => p.code === packageCode,
+                                  );
+                                  if (!picked) return null;
+                                  const blurb = (picked.blurb || "").trim();
+                                  const exclusiveLabel =
+                                    picked.exclusive &&
+                                    (pageChrome.package_exclusive_label || "").trim()
+                                      ? (pageChrome.package_exclusive_label || "").trim()
+                                      : "";
+                                  const exclusiveNote =
+                                    picked.exclusive &&
+                                    (pageChrome.package_exclusive_blurb || "").trim()
+                                      ? (pageChrome.package_exclusive_blurb || "").trim()
+                                      : "";
+                                  if (!blurb && !exclusiveLabel && !exclusiveNote) return null;
+                                  return (
+                                    <div className="mt-2 space-y-1 text-xs text-[var(--dama-muted)]">
+                                      {blurb ? <p>{blurb}</p> : null}
+                                      {exclusiveLabel ? (
+                                        <p className="font-medium text-[var(--dama-text)]">
+                                          {exclusiveLabel}
+                                        </p>
+                                      ) : null}
+                                      {exclusiveNote ? <p>{exclusiveNote}</p> : null}
+                                    </div>
+                                  );
+                                })()
+                              : null}
+                          </Field>
+                        ) : null}
+                        {packageCode === PACKAGE_NONE &&
+                        (pageChrome.reserved_cpm_label || "").trim() ? (
+                          <Field
+                            id="create-reserved-cpm"
+                            label={(pageChrome.reserved_cpm_label || "").trim()}
+                            description={(pageChrome.reserved_cpm_blurb || "").trim() || undefined}
+                          >
+                            <AmountInput
+                              id="create-reserved-cpm"
+                              value={reservedCpm}
+                              onValueChange={setReservedCpm}
+                              placeholder={(pageChrome.reserved_cpm_label || "").trim()}
+                            />
+                          </Field>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {pricing?.agency_enabled && (pageChrome.agency_managed_label || "").trim() ? (
+                      <label
+                        htmlFor="create-agency-managed"
+                        className="flex items-start gap-2 text-sm"
+                      >
+                        <Checkbox
+                          id="create-agency-managed"
+                          checked={agencyManaged}
+                          onCheckedChange={(v) => setAgencyManaged(v === true)}
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <span className="font-medium">{pageChrome.agency_managed_label}</span>
+                          {(pageChrome.agency_managed_blurb || "").trim() ? (
+                            <span className="mt-0.5 block text-xs text-[var(--dama-muted)]">
+                              {pageChrome.agency_managed_blurb}
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             <Field
               id="create-cap"
               label={pageChrome.ph_daily_spend_cap}
@@ -981,8 +1305,15 @@ export default function AdsCampaignsPage() {
                 !defaultCreativeType ||
                 !dailyCapOk ||
                 needsTopUp ||
-                !(createFee != null && createFee > 0) ||
-                !createFeeCurrency
+                !(createFee != null && createFee >= 0) ||
+                !createFeeCurrency ||
+                (marketplaceOn &&
+                  (!buyingTypeOk ||
+                    !buyingType.trim() ||
+                    !auctionBidOk ||
+                    !reservationCpmOk ||
+                    !mediaMinOk ||
+                    pricingQuery.isError))
               }
               isLoading={create.isPending}
               pendingLabel={pageChrome.create_pending}
@@ -1000,6 +1331,47 @@ export default function AdsCampaignsPage() {
                   if (req) toast.error(req);
                   return;
                 }
+                if (marketplaceOn) {
+                  if (!buyingType.trim()) {
+                    const req = (pageChrome.err_buying_type_required || "").trim();
+                    if (req) toast.error(req);
+                    return;
+                  }
+                  if (!buyingTypeOk) {
+                    if (buyingType === BUYING_AUCTION) {
+                      const req = (pageChrome.err_buying_type_locked || "").trim();
+                      if (req) toast.error(req);
+                    } else if (buyingType === BUYING_RESERVATION) {
+                      const req = (pageChrome.err_reservation_locked || "").trim();
+                      if (req) toast.error(req);
+                    }
+                    return;
+                  }
+                  if (!mediaMinOk) {
+                    const req = (pageChrome.err_media_daily_min || "").trim();
+                    if (req) toast.error(req);
+                    return;
+                  }
+                  if (buyingType === BUYING_AUCTION && !auctionBidOk) {
+                    const req = (
+                      bidParsed > 0 && floorCpm != null && bidParsed + 1e-9 < floorCpm
+                        ? pageChrome.err_bid_below_floor
+                        : pageChrome.err_bid_cpm_required
+                    )?.trim();
+                    if (req) toast.error(req);
+                    return;
+                  }
+                  if (buyingType === BUYING_RESERVATION && !reservationCpmOk) {
+                    const req = (
+                      reservedParsed > 0 && floorCpm != null && reservedParsed + 1e-9 < floorCpm
+                        ? pageChrome.err_bid_below_floor
+                        : pageChrome.err_reserved_cpm_required || pageChrome.err_bid_cpm_required
+                    )?.trim();
+                    if (req) toast.error(req);
+                    return;
+                  }
+                }
+                const pickedPackage = packageCode !== PACKAGE_NONE ? packageCode.trim() : undefined;
                 create.mutate(
                   {
                     title,
@@ -1012,6 +1384,24 @@ export default function AdsCampaignsPage() {
                     dailySpendCap,
                     endsAt: endsAt ? new Date(endsAt).toISOString() : undefined,
                     countryCode: geoCountry.trim().toUpperCase(),
+                    ...(marketplaceOn
+                      ? {
+                          buyingType: buyingType.trim(),
+                          bidCpm:
+                            buyingType === BUYING_AUCTION && bidCpm.trim()
+                              ? bidCpm.trim()
+                              : undefined,
+                          reservedCpm:
+                            buyingType === BUYING_RESERVATION &&
+                            packageCode === PACKAGE_NONE &&
+                            reservedCpm.trim()
+                              ? reservedCpm.trim()
+                              : undefined,
+                          packageCode:
+                            buyingType === BUYING_RESERVATION ? pickedPackage : undefined,
+                          agencyManaged: agencyManaged || undefined,
+                        }
+                      : {}),
                   },
                   {
                     onSuccess: (created) => {
@@ -1072,6 +1462,80 @@ export default function AdsCampaignsPage() {
                   ? `${pageChrome.meta_separator}${pageChrome.video_attached_suffix}`
                   : ""}
               </p>
+              {(() => {
+                const bt = (detailLive.buying_type || "").trim();
+                if (!bt && !detailLive.agency_managed && !(detailLive.package_code || "").trim()) {
+                  return null;
+                }
+                const title = (pageChrome.detail_marketplace_title || "").trim();
+                if (!title) return null;
+                let buyLabel = (pageChrome.detail_standard_buying_label || "").trim();
+                if (bt === BUYING_AUCTION) {
+                  buyLabel = (pageChrome.buying_type_auction_label || "").trim() || buyLabel;
+                } else if (bt === BUYING_RESERVATION) {
+                  buyLabel = (pageChrome.buying_type_reservation_label || "").trim() || buyLabel;
+                } else if (bt === BUYING_LEGACY || !bt) {
+                  buyLabel =
+                    (pageChrome.platform_default_placeholder || "").trim() ||
+                    (pageChrome.detail_standard_buying_label || "").trim();
+                }
+                const rateSuffix = (pageChrome.detail_rate_suffix || "").trim();
+                let rateText = "";
+                if (bt === BUYING_AUCTION && detailLive.bid_cpm != null && detailLive.bid_cpm > 0) {
+                  rateText = `${detailLive.bid_cpm}${rateSuffix ? ` ${rateSuffix}` : ""}`;
+                } else if (
+                  bt === BUYING_RESERVATION &&
+                  detailLive.reserved_cpm != null &&
+                  detailLive.reserved_cpm > 0
+                ) {
+                  rateText = `${detailLive.reserved_cpm}${rateSuffix ? ` ${rateSuffix}` : ""}`;
+                }
+                const pkgCode = (detailLive.package_code || "").trim();
+                return (
+                  <div className="space-y-1 rounded-md border border-[var(--dama-border)] p-3">
+                    <p className="font-medium">{title}</p>
+                    {buyLabel ? (
+                      <p className="text-[var(--dama-muted)]">
+                        {(pageChrome.buying_type_label || "").trim()
+                          ? `${pageChrome.buying_type_label}: ${buyLabel}`
+                          : buyLabel}
+                      </p>
+                    ) : null}
+                    {rateText ? (
+                      <p className="text-[var(--dama-muted)]">
+                        {bt === BUYING_AUCTION
+                          ? (pageChrome.bid_cpm_label || "").trim()
+                          : (pageChrome.reserved_cpm_label || "").trim()}
+                        {": "}
+                        {rateText}
+                      </p>
+                    ) : null}
+                    {pkgCode && (pageChrome.package_label || "").trim()
+                      ? (() => {
+                          const pkgTitle =
+                            (packagesQuery.data?.packages || []).find(
+                              (p) => (p.code || "").trim() === pkgCode,
+                            )?.title || "";
+                          const shown = (pkgTitle || "").trim();
+                          if (!shown) return null;
+                          return (
+                            <p className="text-[var(--dama-muted)]">
+                              {pageChrome.package_label}: {shown}
+                            </p>
+                          );
+                        })()
+                      : null}
+                    {detailLive.agency_managed && (pageChrome.agency_managed_label || "").trim() ? (
+                      <p className="text-[var(--dama-muted)]">{pageChrome.agency_managed_label}</p>
+                    ) : null}
+                    {(pageChrome.marketplace_fields_locked_blurb || "").trim() ? (
+                      <p className="text-xs text-[var(--dama-muted)]">
+                        {pageChrome.marketplace_fields_locked_blurb}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })()}
               {(() => {
                 const mediaBlock =
                   !detailLive.auto_closed &&

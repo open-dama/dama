@@ -1,5 +1,5 @@
 import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage } from "@/lib/ads-chrome-error";
 import type { AdPlayback } from "@/types/ad-playback";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ export function useReplaceCampaignCreativeMutation(token: string | null | undefi
     },
     onError: (err) => {
       const chrome = qc.getQueryData<AdPlayback>(adPlaybackQueryKey())?.schedule_chrome;
-      const msg = apiToastMessage(err, chrome?.toast_save_failed || "");
+      const msg = adsChromeErrorMessage(err, chrome, chrome?.toast_save_failed || "");
       if (msg) toast.error(msg);
     },
   });

@@ -1,5 +1,5 @@
 import { consoleAdCampaignsQueryKey } from "@/hooks/query/useConsoleAdCampaignsQuery";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage, throwAdsFetchError } from "@/lib/ads-chrome-error";
 import { getConsoleAdCampaignsChrome } from "@/lib/console-ad-campaigns-cache";
 import { apiRestUrl } from "@/lib/env";
 import type { AdRuntimeChrome } from "@/types/ad-runtime";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 type UploadResult = {
   thumbnail_url?: string;
   error?: string;
+  error_key?: string;
 };
 
 export function useUploadCampaignThumbnailMutation(token: string | null | undefined) {
@@ -26,9 +27,10 @@ export function useUploadCampaignThumbnailMutation(token: string | null | undefi
         headers: { Authorization: `Bearer ${token}` },
         body,
       });
-      const json = (await res.json()) as UploadResult;
+      const json = (await res.json().catch(() => ({}))) as UploadResult;
       if (!res.ok) {
-        throw new Error((json.error || media?.media_upload_failed || "").trim());
+        if (json.error_key) throwAdsFetchError(res.status, json);
+        throw new Error((media?.media_upload_failed || "").trim());
       }
       return json;
     },
@@ -39,7 +41,7 @@ export function useUploadCampaignThumbnailMutation(token: string | null | undefi
     },
     onError: (err) => {
       const chrome = getConsoleAdCampaignsChrome(qc, token);
-      const msg = apiToastMessage(err, chrome?.media_upload_failed || "");
+      const msg = adsChromeErrorMessage(err, chrome, chrome?.media_upload_failed || "");
       if (msg) toast.error(msg);
     },
   });

@@ -3,6 +3,7 @@ package rest
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"dama/apps/api/internal/auth"
@@ -47,6 +48,20 @@ func (a *InvoiceAPI) invoicePDFChrome() (invoices.PDFChrome, bool) {
 	return ch, true
 }
 
+func (a *InvoiceAPI) buyingLabel(buyingType string) string {
+	if a.Settings == nil {
+		return ""
+	}
+	switch strings.TrimSpace(buyingType) {
+	case store.BuyingTypeAuction:
+		return strings.TrimSpace(a.Settings.AdRuntimeChromeString("buying_type_auction_label"))
+	case store.BuyingTypeReservation:
+		return strings.TrimSpace(a.Settings.AdRuntimeChromeString("buying_type_reservation_label"))
+	default:
+		return strings.TrimSpace(a.Settings.AdRuntimeChromeString("invoice_pdf_buying_standard_label"))
+	}
+}
+
 func (a *InvoiceAPI) PublisherPDF(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	if userID == "" {
@@ -78,6 +93,18 @@ func (a *InvoiceAPI) PublisherPDF(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_invoice_currency_unavailable")
 		return
 	}
+	unitCost := 0.0
+	agencyPct := 0.0
+	if pricing := a.Settings.AdPricing(); pricing.Source == "database" {
+		if pricing.ImpressionUnitCost > 0 {
+			unitCost = pricing.ImpressionUnitCost
+		}
+		pricing.MarketplaceDefaults()
+		if pricing.AgencyEnabled && pricing.AgencySpendPercent > 0 {
+			agencyPct = pricing.AgencySpendPercent
+		}
+	}
+	pkgs, _ := a.Settings.AdPackages(r.Context())
 	enums := a.Settings.ClientEnums()
 	lines := make([]invoices.CampaignLine, 0, len(list))
 	for _, c := range list {
@@ -90,11 +117,52 @@ func (a *InvoiceAPI) PublisherPDF(w http.ResponseWriter, r *http.Request) {
 		if title == "" {
 			continue
 		}
+		buying := a.buyingLabel(c.BuyingType)
+		rate := ""
+		switch strings.TrimSpace(c.BuyingType) {
+		case store.BuyingTypeAuction:
+			if c.BidCPM != nil && *c.BidCPM > 0 {
+				rate = strconv.FormatFloat(*c.BidCPM, 'f', 4, 64)
+			}
+		case store.BuyingTypeReservation:
+			if c.ReservedCPM != nil && *c.ReservedCPM > 0 {
+				rate = strconv.FormatFloat(*c.ReservedCPM, 'f', 4, 64)
+			}
+		default:
+			if unitCost > 0 {
+				rate = strconv.FormatFloat(unitCost, 'f', 4, 64)
+			}
+		}
+		est := store.EstimateCampaignMediaSpend(&c, unitCost, agencyPct)
+		estSpend := ""
+		if est > 0 {
+			estSpend = strconv.FormatFloat(est, 'f', 2, 64)
+		}
+		pkg := ""
+		code := strings.TrimSpace(c.PackageCode)
+		if code != "" {
+			if p, ok := store.PackageByCode(pkgs, code); ok && strings.TrimSpace(p.Title) != "" {
+				pkg = strings.TrimSpace(p.Title)
+			}
+		}
+		agency := strings.TrimSpace(a.Settings.AdRuntimeChromeString("invoice_pdf_agency_no"))
+		if c.AgencyManaged {
+			if yes := strings.TrimSpace(a.Settings.AdRuntimeChromeString("invoice_pdf_agency_yes")); yes != "" {
+				agency = yes
+			} else if lab := strings.TrimSpace(a.Settings.AdRuntimeChromeString("agency_managed_label")); lab != "" {
+				agency = lab
+			}
+		}
 		lines = append(lines, invoices.CampaignLine{
 			Title:       title,
 			Status:      statusDisp,
 			Impressions: c.Impressions,
 			Clicks:      c.Clicks,
+			Buying:      buying,
+			Rate:        rate,
+			Package:     pkg,
+			Agency:      agency,
+			EstSpend:    estSpend,
 		})
 	}
 	pdf := invoices.BuildSimplePDF(invoices.InvoiceInput{

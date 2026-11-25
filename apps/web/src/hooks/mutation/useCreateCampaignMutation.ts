@@ -1,6 +1,6 @@
 import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
 import { restClient } from "@/lib/api";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage } from "@/lib/ads-chrome-error";
 import { invalidateAdPublisher } from "@/lib/invalidate";
 import type { AdPlayback } from "@/types/ad-playback";
 import type { AdCampaign, CreateCampaignInput } from "@/types/ads";
@@ -43,6 +43,31 @@ export function useCreateCampaignMutation(token: string | null | undefined) {
       if (input.endsAt?.trim()) {
         body.ends_at = input.endsAt.trim();
       }
+      const buyingType = (input.buyingType || "").trim();
+      if (buyingType) {
+        body.buying_type = buyingType;
+      }
+      if (buyingType === "auction" && input.bidCpm?.trim()) {
+        const bid = Number(input.bidCpm.trim());
+        if (Number.isFinite(bid)) {
+          body.bid_cpm = bid;
+        }
+      }
+      if (buyingType === "reservation") {
+        if (input.reservedCpm?.trim()) {
+          const reserved = Number(input.reservedCpm.trim());
+          if (Number.isFinite(reserved)) {
+            body.reserved_cpm = reserved;
+          }
+        }
+        const packageCode = (input.packageCode || "").trim();
+        if (packageCode) {
+          body.package_code = packageCode;
+        }
+      }
+      if (input.agencyManaged === true) {
+        body.agency_managed = true;
+      }
 
       const { data } = await restClient.post<AdCampaign>("/ads/campaigns", body, {
         headers: { Authorization: `Bearer ${token}` },
@@ -56,7 +81,7 @@ export function useCreateCampaignMutation(token: string | null | undefined) {
     },
     onError: (err) => {
       const chrome = qc.getQueryData<AdPlayback>(adPlaybackQueryKey())?.schedule_chrome;
-      const msg = apiToastMessage(err, chrome?.toast_save_failed || "");
+      const msg = adsChromeErrorMessage(err, chrome, chrome?.toast_save_failed || "");
       if (msg) toast.error(msg);
     },
   });

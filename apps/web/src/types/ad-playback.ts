@@ -211,6 +211,49 @@ export type AdScheduleChrome = {
   toast_viewport_video_queued?: string;
   clear_legacy_video_action?: string;
   toast_legacy_video_cleared?: string;
+  marketplace_section_title?: string;
+  marketplace_section_blurb?: string;
+  buying_type_label?: string;
+  buying_type_auction_label?: string;
+  buying_type_auction_blurb?: string;
+  buying_type_reservation_label?: string;
+  buying_type_reservation_blurb?: string;
+  bid_cpm_label?: string;
+  bid_cpm_blurb?: string;
+  reserved_cpm_label?: string;
+  reserved_cpm_blurb?: string;
+  floor_cpm_label?: string;
+  floor_cpm_blurb?: string;
+  tier_label?: string;
+  tier_blurb?: string;
+  packages_section_title?: string;
+  packages_section_blurb?: string;
+  package_label?: string;
+  package_none_label?: string;
+  agency_managed_label?: string;
+  agency_managed_blurb?: string;
+  err_buying_type_required?: string;
+  err_buying_type_locked?: string;
+  err_bid_cpm_required?: string;
+  err_reserved_cpm_required?: string;
+  err_bid_below_floor?: string;
+  err_reservation_locked?: string;
+  err_package_locked?: string;
+  err_package_invalid?: string;
+  err_media_daily_min?: string;
+  marketplace_unavailable?: string;
+  package_exclusive_label?: string;
+  package_exclusive_blurb?: string;
+  err_package_exclusive_taken?: string;
+  err_impression_wallet_insufficient?: string;
+  marketplace_fields_locked_blurb?: string;
+  detail_marketplace_title?: string;
+  detail_rate_suffix?: string;
+  detail_standard_buying_label?: string;
+  err_invalid_status?: string;
+  err_campaign_cannot_reopen?: string;
+  err_cannot_reopen?: string;
+  err_campaign_auto_closed?: string;
 };
 
 const AD_MEDIA_CHROME_KEYS = [
@@ -272,6 +315,11 @@ const VIEWPORT_CREATIVES_CHROME_KEYS = [
   "toast_viewport_creative_cleared",
   "toast_viewport_video_queued",
   "media_upload_failed",
+  "err_viewport_slot_required",
+  "err_viewport_ratio_mismatch",
+  "err_viewport_video_required",
+  "err_viewport_video_type",
+  "err_viewport_video_too_large",
 ] as const;
 
 /** Fail closed: per-viewport campaign creative upload chrome from ad_runtime_chrome. */

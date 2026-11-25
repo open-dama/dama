@@ -592,6 +592,63 @@ function CampaignDetailReadonly({
     },
   ].filter((r) => Boolean(r.label));
 
+  const buyingType = (campaign.buying_type || "").trim();
+  const packageCode = (campaign.package_code || "").trim();
+  const agencyManaged = campaign.agency_managed === true;
+  const tierCode = (campaign.advertiser_tier_code || "").trim();
+  const showMarketplace =
+    Boolean(buyingType) || agencyManaged || Boolean(packageCode) || Boolean(tierCode);
+  let buyLabel = (chrome.detail_standard_buying_label || "").trim();
+  if (buyingType === "auction") {
+    buyLabel = (chrome.buying_type_auction_label || "").trim() || buyLabel;
+  } else if (buyingType === "reservation") {
+    buyLabel = (chrome.buying_type_reservation_label || "").trim() || buyLabel;
+  } else if (buyingType === "legacy" || !buyingType) {
+    buyLabel =
+      (chrome.platform_default_placeholder || "").trim() ||
+      (chrome.detail_standard_buying_label || "").trim();
+  }
+  const rateSuffix = (chrome.detail_rate_suffix || "").trim();
+  let rateLabel = "";
+  let rateValue = "";
+  if (buyingType === "auction" && campaign.bid_cpm != null && campaign.bid_cpm > 0) {
+    rateLabel = (chrome.bid_cpm_label || "").trim();
+    rateValue = `${campaign.bid_cpm}${rateSuffix ? ` ${rateSuffix}` : ""}`;
+  } else if (
+    buyingType === "reservation" &&
+    campaign.reserved_cpm != null &&
+    campaign.reserved_cpm > 0
+  ) {
+    rateLabel = (chrome.reserved_cpm_label || "").trim();
+    rateValue = `${campaign.reserved_cpm}${rateSuffix ? ` ${rateSuffix}` : ""}`;
+  }
+  const marketplaceTitle = (chrome.detail_marketplace_title || "").trim();
+  const marketplaceRows: { label: string; value: string }[] = [];
+  if (showMarketplace) {
+    if ((chrome.buying_type_label || "").trim() && buyLabel) {
+      marketplaceRows.push({
+        label: (chrome.buying_type_label || "").trim(),
+        value: buyLabel,
+      });
+    }
+    if (rateLabel && rateValue) {
+      marketplaceRows.push({ label: rateLabel, value: rateValue });
+    }
+    if ((chrome.package_label || "").trim() && packageCode) {
+      marketplaceRows.push({
+        label: (chrome.package_label || "").trim(),
+        value: packageCode,
+      });
+    }
+    if ((chrome.tier_label || "").trim() && tierCode) {
+      marketplaceRows.push({
+        label: (chrome.tier_label || "").trim(),
+        value: tierCode,
+      });
+    }
+  }
+  const agencyLabel = agencyManaged ? (chrome.agency_managed_label || "").trim() : "";
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-[var(--dama-muted)]">
@@ -611,6 +668,27 @@ function CampaignDetailReadonly({
         <GalleryCarousel images={preview} ariaLabel={galleryAria} />
       ) : preview.length === 0 && galleryEmpty ? (
         <p className="text-xs text-[var(--dama-muted)]">{galleryEmpty}</p>
+      ) : null}
+      {showMarketplace && marketplaceTitle && (marketplaceRows.length > 0 || agencyLabel) ? (
+        <div className="space-y-2 rounded-md border border-[var(--dama-border)] p-3">
+          <p className="text-sm font-medium">{marketplaceTitle}</p>
+          {marketplaceRows.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {marketplaceRows.map((r) => (
+                <div key={`${r.label}-${r.value}`} className="min-w-0">
+                  <p className="text-xs text-[var(--dama-muted)]">{r.label}</p>
+                  <p className="break-all text-sm">{r.value}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {agencyLabel ? <p className="text-sm text-[var(--dama-muted)]">{agencyLabel}</p> : null}
+          {(chrome.marketplace_fields_locked_blurb || "").trim() ? (
+            <p className="text-xs text-[var(--dama-muted)]">
+              {(chrome.marketplace_fields_locked_blurb || "").trim()}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       <Field id={`${campaign.id}-schedule-enabled-ro`} label={chrome.schedule_enabled_label}>
         <div className="flex min-h-10 items-center gap-2 pt-1">

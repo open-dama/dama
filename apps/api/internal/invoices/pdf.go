@@ -13,6 +13,12 @@ type CampaignLine struct {
 	Status      string
 	Impressions int64
 	Clicks      int64
+	// Marketplace fields (public labels only). Empty when legacy / unavailable.
+	Buying   string
+	Rate     string
+	Package  string
+	Agency   string
+	EstSpend string
 }
 
 // PDFChrome holds DB-backed invoice PDF copy (ad_runtime_chrome). Fail closed when empty.
@@ -69,6 +75,7 @@ func BuildSimplePDF(in InvoiceInput) []byte {
 		return []byte("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")
 	}
 	var impressions, clicks int64
+	var estSpendTotal float64
 	var b strings.Builder
 	ch := in.Chrome
 	b.WriteString(ch.Title)
@@ -92,12 +99,40 @@ func BuildSimplePDF(in InvoiceInput) []byte {
 	for _, line := range in.Lines {
 		impressions += line.Impressions
 		clicks += line.Clicks
+		if v, err := strconv.ParseFloat(strings.TrimSpace(line.EstSpend), 64); err == nil {
+			estSpendTotal += v
+		}
+		buying := strings.TrimSpace(line.Buying)
+		if buying == "" {
+			buying = "-"
+		}
+		rate := strings.TrimSpace(line.Rate)
+		if rate == "" {
+			rate = "-"
+		}
+		pkg := strings.TrimSpace(line.Package)
+		if pkg == "" {
+			pkg = "-"
+		}
+		agency := strings.TrimSpace(line.Agency)
+		if agency == "" {
+			agency = "-"
+		}
+		spend := strings.TrimSpace(line.EstSpend)
+		if spend == "" {
+			spend = "-"
+		}
 		b.WriteString(applyTpl(ch.LineTemplate, map[string]string{
 			"title":       sanitize(line.Title),
 			"status":      sanitize(line.Status),
 			"impressions": strconv.FormatInt(line.Impressions, 10),
 			"clicks":      strconv.FormatInt(line.Clicks, 10),
 			"ctr":         formatCTR(line.Impressions, line.Clicks),
+			"buying":      sanitize(buying),
+			"rate":        sanitize(rate),
+			"package":     sanitize(pkg),
+			"agency":      sanitize(agency),
+			"est_spend":   sanitize(spend),
 		}))
 		b.WriteString("\n")
 	}
@@ -106,6 +141,7 @@ func BuildSimplePDF(in InvoiceInput) []byte {
 		"impressions": strconv.FormatInt(impressions, 10),
 		"clicks":      strconv.FormatInt(clicks, 10),
 		"ctr":         formatCTR(impressions, clicks),
+		"est_spend":   strconv.FormatFloat(estSpendTotal, 'f', 2, 64),
 	}))
 	b.WriteString("\n\n")
 	b.WriteString(ch.SettleBlurb)

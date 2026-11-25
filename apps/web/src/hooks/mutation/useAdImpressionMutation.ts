@@ -9,18 +9,22 @@ export function useAdImpressionMutation() {
       campaignId: string;
       viewerKey: string;
       placement: string;
+      viewport?: string;
     }) => {
       if (!vars.placement.trim()) {
         throw new Error("placement required");
       }
-      await restClient.post(
-        `/ads/campaigns/${vars.campaignId}/impression`,
-        {
-          viewer_key: vars.viewerKey,
-          placement: vars.placement,
-        },
-        { headers: { "X-Device-Id": vars.viewerKey } },
-      );
+      const body: Record<string, string> = {
+        viewer_key: vars.viewerKey,
+        placement: vars.placement,
+      };
+      const viewport = (vars.viewport || "").trim();
+      if (viewport) {
+        body.viewport = viewport;
+      }
+      await restClient.post(`/ads/campaigns/${vars.campaignId}/impression`, body, {
+        headers: { "X-Device-Id": vars.viewerKey },
+      });
     },
     onSuccess: () => {
       void invalidateAdPublisher(qc);

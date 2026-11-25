@@ -36,6 +36,7 @@ const (
 	LedgerKindEventEntryRefund          = "event_entry_refund"
 	LedgerKindEventEntryClawback        = "event_entry_clawback"
 	LedgerKindCampaignCreateFee         = "campaign_create_fee"
+	LedgerKindCampaignImpression        = "campaign_impression"
 	LedgerKindPrizePoolGuaranteeHold    = "prize_pool_guarantee_hold"
 	LedgerKindPrizePoolGuaranteeRelease = "prize_pool_guarantee_release"
 	LedgerKindPrizePoolGuaranteeCapture = "prize_pool_guarantee_capture"
@@ -1642,6 +1643,59 @@ func (s *Service) SettleCampaignCreateFee(ctx context.Context, publisherID strin
 		INSERT INTO wallet_ledger (user_id, kind, amount, currency, status, reference, provider)
 		VALUES ($1,$2,$3,$4,'posted',$5,'wallet')`,
 		publisherID, LedgerKindCampaignCreateFee, amount, currency, ref); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// SettleCampaignImpression debits the publisher for one recorded view.
+// Amount uses the same per-view unit as marketplace pacing / daily spend caps (not /1000).
+// Idempotent on reference. Callers should pre-check balance when settle is required for delivery.
+func (s *Service) SettleCampaignImpression(ctx context.Context, publisherID string, amount float64, currency, reference string) error {
+	publisherID = strings.TrimSpace(publisherID)
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	reference = strings.TrimSpace(reference)
+	amount = RoundMoney2(amount)
+	if publisherID == "" || currency == "" || amount <= 0 || reference == "" {
+		return fmt.Errorf("invalid campaign impression settle")
+	}
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	if s.db == nil || !s.db.Ready() {
+		return s.requireDB()
+	}
+	tx, err := s.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var already bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM wallet_ledger WHERE reference = $1 AND kind = $2
+		)`, reference, LedgerKindCampaignImpression).Scan(&already); err != nil {
+		return err
+	}
+	if already {
+		return tx.Commit(ctx)
+	}
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE wallets SET balance = balance - $3, updated_at=NOW()
+		WHERE user_id=$1 AND currency=$2 AND balance >= $3
+	`, publisherID, currency, amount)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("insufficient wallet balance in %s", currency)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO wallet_ledger (user_id, kind, amount, currency, status, reference, provider)
+		VALUES ($1,$2,$3,$4,'posted',$5,'wallet')`,
+		publisherID, LedgerKindCampaignImpression, amount, currency, reference); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

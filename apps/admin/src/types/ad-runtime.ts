@@ -127,8 +127,41 @@ export type AdRuntimeChrome = {
   toast_viewport_creative_saved?: string;
   toast_viewport_creative_cleared?: string;
   toast_viewport_video_queued?: string;
+  err_viewport_slot_required?: string;
+  err_viewport_ratio_mismatch?: string;
+  err_viewport_video_required?: string;
+  err_viewport_video_type?: string;
+  err_viewport_video_too_large?: string;
   clear_legacy_video_action?: string;
   toast_legacy_video_cleared?: string;
+  err_buying_type_required?: string;
+  err_buying_type_locked?: string;
+  err_bid_cpm_required?: string;
+  err_reserved_cpm_required?: string;
+  err_bid_below_floor?: string;
+  err_reservation_locked?: string;
+  err_package_locked?: string;
+  err_package_invalid?: string;
+  err_media_daily_min?: string;
+  marketplace_unavailable?: string;
+  err_package_exclusive_taken?: string;
+  err_impression_wallet_insufficient?: string;
+  err_invalid_status?: string;
+  err_campaign_cannot_reopen?: string;
+  err_cannot_reopen?: string;
+  err_campaign_auto_closed?: string;
+  detail_marketplace_title?: string;
+  detail_standard_buying_label?: string;
+  detail_rate_suffix?: string;
+  buying_type_label?: string;
+  buying_type_auction_label?: string;
+  buying_type_reservation_label?: string;
+  bid_cpm_label?: string;
+  reserved_cpm_label?: string;
+  package_label?: string;
+  agency_managed_label?: string;
+  marketplace_fields_locked_blurb?: string;
+  tier_label?: string;
 };
 
 export type ViewportCreativeSlot = "desktop" | "tablet" | "mobile";
@@ -251,6 +284,11 @@ const VIEWPORT_CREATIVES_CHROME_KEYS = [
   "toast_viewport_creative_cleared",
   "toast_viewport_video_queued",
   "media_upload_failed",
+  "err_viewport_slot_required",
+  "err_viewport_ratio_mismatch",
+  "err_viewport_video_required",
+  "err_viewport_video_type",
+  "err_viewport_video_too_large",
 ] as const;
 
 /** Fail closed: per-viewport campaign creative upload chrome from ad_runtime_chrome. */
@@ -326,6 +364,12 @@ export type ConsoleAdCampaign = {
   monthly_impression_cap?: number | null;
   yearly_impression_cap?: number | null;
   created_at: string;
+  buying_type?: string;
+  bid_cpm?: number | null;
+  reserved_cpm?: number | null;
+  package_code?: string;
+  agency_managed?: boolean;
+  advertiser_tier_code?: string;
 };
 
 export type AdPlaybackBounds = {

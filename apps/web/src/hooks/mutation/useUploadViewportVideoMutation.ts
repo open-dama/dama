@@ -1,5 +1,5 @@
 import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage, throwAdsFetchError } from "@/lib/ads-chrome-error";
 import { apiRestUrl } from "@/lib/env";
 import { invalidateAdPublisher } from "@/lib/invalidate";
 import type { AdPlayback } from "@/types/ad-playback";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 type UploadResult = {
   error?: string;
+  error_key?: string;
 };
 
 export function useUploadViewportVideoMutation(token: string | null | undefined) {
@@ -39,9 +40,10 @@ export function useUploadViewportVideoMutation(token: string | null | undefined)
           body,
         },
       );
-      const json = (await res.json()) as UploadResult;
+      const json = (await res.json().catch(() => ({}))) as UploadResult;
       if (!res.ok) {
-        throw new Error((json.error || media.media_upload_failed || "").trim());
+        if (json.error_key) throwAdsFetchError(res.status, json);
+        throw new Error((media.media_upload_failed || "").trim());
       }
       return json;
     },
@@ -55,7 +57,7 @@ export function useUploadViewportVideoMutation(token: string | null | undefined)
     onError: (err) => {
       const chrome = qc.getQueryData<AdPlayback>(adPlaybackQueryKey())?.schedule_chrome;
       const media = isViewportCreativesChromeReady(chrome) ? chrome : undefined;
-      const msg = apiToastMessage(err, (media?.media_upload_failed || "").trim());
+      const msg = adsChromeErrorMessage(err, chrome, (media?.media_upload_failed || "").trim());
       if (msg) toast.error(msg);
     },
   });

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +44,7 @@ type AdsAPI struct {
 
 // writeAdsErr writes a DB chrome error for ads APIs (fail closed).
 func writeAdsErr(w http.ResponseWriter, settings *store.SettingsStore, status int, key string) {
+	key = strings.TrimSpace(key)
 	msg := ""
 	if settings != nil {
 		msg = settings.AdRuntimeChromeString(key)
@@ -53,10 +56,79 @@ func writeAdsErr(w http.ResponseWriter, settings *store.SettingsStore, status in
 		}
 	}
 	if msg == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": ""})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "", "error_key": key})
 		return
 	}
-	writeJSON(w, status, map[string]string{"error": msg})
+	writeJSON(w, status, map[string]string{"error": msg, "error_key": key})
+}
+
+// beginExclusivePackageGuard locks an exclusive package bucket through the caller's mutation.
+// Caller must defer unlock when ok is true. Archived nextStatus skips the guard.
+// On conflict / error, writes a response and returns ok=false with a no-op unlock.
+func (a *AdsAPI) beginExclusivePackageGuard(w http.ResponseWriter, r *http.Request, camp *store.AdCampaign, nextStatus string) (ok bool, unlock func()) {
+	noop := func() {}
+	if a == nil || a.Ads == nil || a.Settings == nil || camp == nil {
+		return true, noop
+	}
+	nextStatus = strings.TrimSpace(nextStatus)
+	enums := a.Settings.ClientEnums()
+	if enums.Source != "database" {
+		return true, noop
+	}
+	archived := strings.TrimSpace(enums.ArchivedCampaignStatus)
+	if archived != "" && nextStatus == archived {
+		return true, noop
+	}
+	code := strings.TrimSpace(camp.PackageCode)
+	if code == "" {
+		return true, noop
+	}
+	pkgs, err := a.Settings.AdPackages(r.Context())
+	if err != nil {
+		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+		return false, noop
+	}
+	pkg, found := store.PackageByCode(pkgs, code)
+	if !found || !pkg.Enabled {
+		return true, noop
+	}
+	exclKey := store.PackageExclusiveKey(pkg)
+	if exclKey == "" {
+		return true, noop
+	}
+	heldUnlock, lockErr := a.Ads.LockExclusivePackage(r.Context(), exclKey)
+	if lockErr != nil {
+		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+		return false, noop
+	}
+	open, listErr := a.Ads.ListOpenPackagedCampaigns(r.Context(), archived)
+	if listErr != nil {
+		heldUnlock()
+		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+		return false, noop
+	}
+	if store.ExclusiveBucketTaken(open, pkgs, exclKey, camp.ID) {
+		heldUnlock()
+		writeAdsErr(w, a.Settings, http.StatusConflict, "err_package_exclusive_taken")
+		return false, noop
+	}
+	return true, heldUnlock
+}
+
+// viewerRating returns the authenticated viewer's rating when known (0 = unknown / guest).
+func (a *AdsAPI) viewerRating(r *http.Request) int {
+	if a == nil || a.Users == nil || r == nil {
+		return 0
+	}
+	uid := auth.UserIDFromContext(r.Context())
+	if uid == "" {
+		return 0
+	}
+	u, err := a.Users.GetByID(r.Context(), uid)
+	if err != nil || u == nil {
+		return 0
+	}
+	return u.Rating
 }
 
 func (a *AdsAPI) impressionUnitCost() (float64, bool) {
@@ -159,6 +231,19 @@ func stampAdGeoTargetsCountry(raw []any, payerCC string) []any {
 	return out
 }
 
+// adCampaignGeoCountry reads the first ISO country from stored geo_targets JSON (public targeting only).
+func adCampaignGeoCountry(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var targets []map[string]any
+	if err := json.Unmarshal(raw, &targets); err != nil || len(targets) == 0 {
+		return ""
+	}
+	cc, _ := targets[0]["country"].(string)
+	return strings.ToUpper(strings.TrimSpace(cc))
+}
+
 // campaignCreateFee returns the Ethiopia or global create-fee pair for the payer country.
 func (a *AdsAPI) campaignCreateFee(r *http.Request) (amount float64, currency string, ok bool) {
 	return a.campaignCreateFeeAt(r, 0, 0)
@@ -197,11 +282,96 @@ func (a *AdsAPI) Pricing(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	cfg := a.Settings.AdPricing()
+	cfg.MarketplaceDefaults()
+	fill := 0.0
+	if a.Ads != nil {
+		fill = a.Ads.InventoryFillPctApprox(r.Context())
+	}
+	now := time.Now().UTC()
+	payerCC := resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, lat, lng)
+	floor := cfg.EffectiveFloorCPMForCountry(payerCC, now, fill)
+	tierCode := "starter"
+	tierLabel := "Starter"
+	tierBlurb := ""
+	monthlySpend := 0.0
+	userID := auth.UserIDFromContext(r.Context())
+	if userID != "" && a.Ads != nil {
+		if sp, err := a.Ads.PublisherMonthlyVirtualSpend(r.Context(), userID, cost); err == nil {
+			monthlySpend = sp
+		}
+	}
+	tier := cfg.ResolveAdvertiserTier(monthlySpend)
+	tierCode = tier.Code
+	tierLabel = tier.Label
+	tierBlurb = tier.Blurb
+	// Apply tier create-fee multiplier (0 = waived create fee for enterprise-style tiers).
+	feeOut := fee
+	if cfg.MarketplaceEnabled && tier.CreateFeeMultiplier >= 0 {
+		feeOut = fee * tier.CreateFeeMultiplier
+	}
+	// Optional agency_managed query mirrors Create debit without exposing agency_spend_percent.
+	agencyQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("agency_managed")))
+	agencyPreview := agencyQ == "1" || agencyQ == "true" || agencyQ == "yes"
+	if cfg.MarketplaceEnabled {
+		feeOut = cfg.ApplyAgencyCreateFee(feeOut, agencyPreview)
+	}
+	out := map[string]any{
 		"impression_unit_cost":         cost,
-		"campaign_create_fee_amount":   fee,
+		"campaign_create_fee_amount":   feeOut,
 		"campaign_create_fee_currency": currency,
-		"country_code":                 resolvePayerCountryFromRequest(r, a.Locate, a.Settings, a.Flags, lat, lng),
+		"country_code":                 payerCC,
+		"marketplace_enabled":          cfg.MarketplaceEnabled,
+		"auction_enabled":              cfg.AuctionEnabled,
+		"reservation_enabled":          cfg.ReservationEnabled && tier.UnlockReservation,
+		"default_buying_type":          cfg.DefaultBuyingType,
+		"floor_cpm":                    floor,
+		"advertiser_tier_code":         tierCode,
+		"advertiser_tier_label":        tierLabel,
+		"advertiser_tier_blurb":        tierBlurb,
+		"media_daily_min":              tier.MediaDailyMin,
+		"unlock_packages":              tier.UnlockPackages,
+		"agency_enabled":               cfg.AgencyEnabled,
+		// agency_spend_percent stays admin-only (progression). Publishers see agency_managed_blurb.
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// Packages lists enabled public packages (no internal admin-only fields beyond catalog).
+func (a *AdsAPI) Packages(w http.ResponseWriter, r *http.Request) {
+	if a.Settings == nil {
+		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+		return
+	}
+	all, err := a.Settings.AdPackages(r.Context())
+	if err != nil {
+		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+		return
+	}
+	cfg := a.Settings.AdPricing()
+	cfg.MarketplaceDefaults()
+	cost, _ := a.impressionUnitCost()
+	monthlySpend := 0.0
+	userID := auth.UserIDFromContext(r.Context())
+	if userID != "" && a.Ads != nil && cost > 0 {
+		if sp, err := a.Ads.PublisherMonthlyVirtualSpend(r.Context(), userID, cost); err == nil {
+			monthlySpend = sp
+		}
+	}
+	tier := cfg.ResolveAdvertiserTier(monthlySpend)
+	pub := store.SanitizePackageBuyingTypes(store.PublicPackages(all), cfg.MarketplaceEnabled)
+	visible := make([]store.AdPackage, 0, len(pub))
+	for _, p := range pub {
+		if !cfg.MarketplaceEnabled || !tier.UnlockPackages {
+			continue
+		}
+		if cfg.TierMeetsMin(tier.Code, p.MinTier) {
+			visible = append(visible, p)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"packages":             visible,
+		"advertiser_tier_code": tier.Code,
 	})
 }
 
@@ -213,6 +383,11 @@ type createAdBody struct {
 	CreativeURL   string   `json:"creative_url"`
 	EndsAt        *string  `json:"ends_at"`
 	CountryCode   string   `json:"country_code"`
+	BuyingType    string   `json:"buying_type"`
+	BidCPM        *float64 `json:"bid_cpm"`
+	ReservedCPM   *float64 `json:"reserved_cpm"`
+	PackageCode   string   `json:"package_code"`
+	AgencyManaged bool     `json:"agency_managed"`
 }
 
 func parseCampaignListFilter(r *http.Request) store.CampaignListFilter {
@@ -319,7 +494,8 @@ func (a *AdsAPI) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	createFee, createCur, feeOK := a.campaignCreateFeeAt(r, pinLat, pinLng)
-	if !feeOK || a.Payments == nil || createFee <= 0 || strings.TrimSpace(createCur) == "" {
+	// createFee may become 0 after tier waiver; currency + payments still required for settle path.
+	if !feeOK || a.Payments == nil || createFee < 0 || strings.TrimSpace(createCur) == "" {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
 		return
 	}
@@ -334,6 +510,155 @@ func (a *AdsAPI) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !requireCashGate(w, r, a.Cash, a.Users, a.Settings, payerCC) {
 		return
+	}
+	pricingCfg := a.Settings.AdPricing()
+	pricingCfg.MarketplaceDefaults()
+	unitCost, unitOK := a.impressionUnitCost()
+	monthlySpend := 0.0
+	if unitOK && a.Ads != nil {
+		if sp, err := a.Ads.PublisherMonthlyVirtualSpend(r.Context(), userID, unitCost); err == nil {
+			monthlySpend = sp
+		}
+	}
+	tier := pricingCfg.ResolveAdvertiserTier(monthlySpend)
+	buyingType := strings.TrimSpace(body.BuyingType)
+	if buyingType == "" {
+		if pricingCfg.MarketplaceEnabled {
+			buyingType = strings.TrimSpace(pricingCfg.DefaultBuyingType)
+			if buyingType == "" || buyingType == store.BuyingTypeLegacy {
+				if pricingCfg.AuctionEnabled {
+					buyingType = store.BuyingTypeAuction
+				} else if pricingCfg.ReservationEnabled {
+					buyingType = store.BuyingTypeReservation
+				}
+			}
+		} else {
+			buyingType = store.BuyingTypeLegacy
+		}
+	}
+	var bidCPM, reservedCPM *float64
+	packageCode := strings.TrimSpace(body.PackageCode)
+	var releaseExclusiveLock func()
+	defer func() {
+		if releaseExclusiveLock != nil {
+			releaseExclusiveLock()
+		}
+	}()
+	fill := 0.0
+	if a.Ads != nil {
+		fill = a.Ads.InventoryFillPctApprox(r.Context())
+	}
+	floor := pricingCfg.EffectiveFloorCPMForCountry(payerCC, time.Now().UTC(), fill)
+	if pricingCfg.MarketplaceEnabled {
+		switch buyingType {
+		case store.BuyingTypeAuction:
+			packageCode = ""
+			if !pricingCfg.AuctionEnabled {
+				writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_buying_type_locked")
+				return
+			}
+			if body.BidCPM == nil || *body.BidCPM <= 0 {
+				writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_bid_cpm_required")
+				return
+			}
+			if *body.BidCPM+1e-9 < floor {
+				writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_bid_below_floor")
+				return
+			}
+			bidCPM = body.BidCPM
+		case store.BuyingTypeReservation:
+			if !pricingCfg.ReservationEnabled || !tier.UnlockReservation {
+				writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_reservation_locked")
+				return
+			}
+			if packageCode != "" {
+				pkgs, err := a.Settings.AdPackages(r.Context())
+				if err != nil {
+					writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+					return
+				}
+				pkg, ok := store.PackageByCode(pkgs, packageCode)
+				if !ok || !pkg.Enabled {
+					writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_package_invalid")
+					return
+				}
+				if !pricingCfg.TierMeetsMin(tier.Code, pkg.MinTier) || !tier.UnlockPackages {
+					writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_package_locked")
+					return
+				}
+				if exclKey := store.PackageExclusiveKey(pkg); exclKey != "" && a.Ads != nil {
+					archived := ""
+					if enums := a.Settings.ClientEnums(); enums.Source == "database" {
+						archived = enums.ArchivedCampaignStatus
+					}
+					if archived == "" {
+						writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_campaign_defaults_unavailable")
+						return
+					}
+					unlock, lockErr := a.Ads.LockExclusivePackage(r.Context(), exclKey)
+					if lockErr != nil {
+						writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+						return
+					}
+					releaseExclusiveLock = unlock
+					open, listErr := a.Ads.ListOpenPackagedCampaigns(r.Context(), archived)
+					if listErr != nil {
+						writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "marketplace_unavailable")
+						return
+					}
+					if store.ExclusiveBucketTaken(open, pkgs, exclKey, "") {
+						writeAdsErr(w, a.Settings, http.StatusConflict, "err_package_exclusive_taken")
+						return
+					}
+				}
+				rc := pkg.FixedCPM
+				if rc <= 0 {
+					writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_package_invalid")
+					return
+				}
+				if rc+1e-9 < floor {
+					writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_bid_below_floor")
+					return
+				}
+				reservedCPM = &rc
+				if pkg.FlightFee > 0 {
+					createFee += pkg.FlightFee
+				}
+			} else {
+				// Non-package reservation requires an explicit reserved rate (parity with auction bid).
+				if body.ReservedCPM == nil || *body.ReservedCPM <= 0 {
+					writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_reserved_cpm_required")
+					return
+				}
+				if *body.ReservedCPM+1e-9 < floor {
+					writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_bid_below_floor")
+					return
+				}
+				reservedCPM = body.ReservedCPM
+			}
+		case store.BuyingTypeLegacy:
+			// Marketplace on: new campaigns must use auction or reservation.
+			// Existing DB legacy rows still serve via CampaignEffectiveUnitCost.
+			writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_buying_type_locked")
+			return
+		default:
+			writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_buying_type_required")
+			return
+		}
+		if *body.DailySpendCap+1e-9 < tier.MediaDailyMin {
+			writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_media_daily_min")
+			return
+		}
+		if tier.CreateFeeMultiplier >= 0 {
+			createFee = createFee * tier.CreateFeeMultiplier
+		}
+		createFee = pricingCfg.ApplyAgencyCreateFee(createFee, body.AgencyManaged)
+	} else {
+		buyingType = store.BuyingTypeLegacy
+		packageCode = ""
+	}
+	if createFee < 0 {
+		createFee = 0
 	}
 	var endsAt *time.Time
 	if body.EndsAt != nil {
@@ -355,39 +680,48 @@ func (a *AdsAPI) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := a.Ads.Create(r.Context(), store.CreateAdInput{
-		PublisherID:   userID,
-		Title:         body.Title,
-		Status:        status,
-		DailySpendCap: body.DailySpendCap,
-		GeoTargets:    geoTargets,
-		CreativeType:  creativeType,
-		CreativeURL:   body.CreativeURL,
-		EndsAt:        endsAt,
+		PublisherID:        userID,
+		Title:              body.Title,
+		Status:             status,
+		DailySpendCap:      body.DailySpendCap,
+		GeoTargets:         geoTargets,
+		CreativeType:       creativeType,
+		CreativeURL:        body.CreativeURL,
+		EndsAt:             endsAt,
+		BuyingType:         buyingType,
+		BidCPM:             bidCPM,
+		ReservedCPM:        reservedCPM,
+		PackageCode:        packageCode,
+		AgencyManaged:      body.AgencyManaged && pricingCfg.AgencyEnabled,
+		AdvertiserTierCode: tier.Code,
 	})
 	if err != nil {
 		writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_create_failed")
 		return
 	}
-	if err := a.Payments.SettleCampaignCreateFee(r.Context(), userID, createFee, createCur, c.ID); err != nil {
-		if delErr := a.Ads.DeleteOwned(r.Context(), c.ID, userID); delErr != nil {
-			writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_rollback_failed")
+	if createFee > 0 {
+		if err := a.Payments.SettleCampaignCreateFee(r.Context(), userID, createFee, createCur, c.ID); err != nil {
+			if delErr := a.Ads.DeleteOwned(r.Context(), c.ID, userID); delErr != nil {
+				writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_rollback_failed")
+				return
+			}
+			msg := ""
+			if a.Settings != nil {
+				rt := a.Settings.AdRuntimeChrome()
+				msg = strings.TrimSpace(rt.InsufficientCampaignCreateFee)
+			}
+			if msg == "" {
+				writeWalletChromeError(w, a.Settings, r.Context(), http.StatusPaymentRequired, "wallet_insufficient_balance")
+				return
+			}
+			writeJSON(w, http.StatusPaymentRequired, map[string]any{
+				"error":     msg,
+				"error_key": "insufficient_campaign_create_fee",
+				"balance":   a.Payments.WalletBalance(r.Context(), userID, createCur),
+				"currency":  createCur,
+			})
 			return
 		}
-		msg := ""
-		if a.Settings != nil {
-			rt := a.Settings.AdRuntimeChrome()
-			msg = strings.TrimSpace(rt.InsufficientCampaignCreateFee)
-		}
-		if msg == "" {
-			writeWalletChromeError(w, a.Settings, r.Context(), http.StatusPaymentRequired, "wallet_insufficient_balance")
-			return
-		}
-		writeJSON(w, http.StatusPaymentRequired, map[string]any{
-			"error":    msg,
-			"balance":  a.Payments.WalletBalance(r.Context(), userID, createCur),
-			"currency": createCur,
-		})
-		return
 	}
 	if a.DB != nil && a.DB.Ready() && userID != "" {
 		if statusLabel := a.campaignStatusDisplay(c.Status); statusLabel != "" {
@@ -420,15 +754,7 @@ func (a *AdsAPI) UpdateTitle(w http.ResponseWriter, r *http.Request) {
 	c, err := a.Ads.UpdateTitle(r.Context(), id, userID, body.Title, archived)
 	if err != nil {
 		if err == store.ErrCampaignTitleLocked {
-			msg := ""
-			if a.Settings != nil {
-				msg = strings.TrimSpace(a.Settings.AdRuntimeChromeString("patch_title_locked"))
-			}
-			if msg == "" {
-				writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "playback_unavailable")
-				return
-			}
-			writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+			writeAdsErr(w, a.Settings, http.StatusConflict, "patch_title_locked")
 			return
 		}
 		writeAdsErr(w, a.Settings, http.StatusNotFound, "err_campaign_not_found")
@@ -449,6 +775,16 @@ func (a *AdsAPI) SetStatus(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_status")
 		return
 	}
+	cur, getErr := a.Ads.GetForPublisher(r.Context(), id, userID)
+	if getErr != nil || cur == nil {
+		writeAdsErr(w, a.Settings, http.StatusNotFound, "err_campaign_not_found")
+		return
+	}
+	exclOK, exclUnlock := a.beginExclusivePackageGuard(w, r, cur, body.Status)
+	if !exclOK {
+		return
+	}
+	defer exclUnlock()
 	c, err := a.Ads.SetStatus(r.Context(), id, userID, body.Status)
 	if err != nil {
 		if err == store.ErrInvalidAdStatus {
@@ -579,6 +915,16 @@ func (a *AdsAPI) Reopen(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_campaign_defaults_unavailable")
 		return
 	}
+	cur, getErr := a.Ads.GetForPublisher(r.Context(), id, userID)
+	if getErr != nil || cur == nil {
+		writeAdsErr(w, a.Settings, http.StatusNotFound, "err_campaign_not_found")
+		return
+	}
+	exclOK, exclUnlock := a.beginExclusivePackageGuard(w, r, cur, reopenTo)
+	if !exclOK {
+		return
+	}
+	defer exclUnlock()
 	c, err := a.Ads.ReopenForPublisher(r.Context(), id, userID, archived, reopenTo)
 	if err != nil {
 		if err == store.ErrCampaignCannotReopen {
@@ -737,17 +1083,57 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
 		return
 	}
+	_ = unitCost // base cost required for fail-closed pricing load
+	pricingCfg := a.Settings.AdPricing()
+	pricingCfg.MarketplaceDefaults()
+	fill := a.Ads.InventoryFillPctApprox(r.Context())
+	pkgs, _ := a.Settings.AdPackages(r.Context())
 	eligible := make([]store.AdCampaign, 0, len(campaigns))
 	now := time.Now().UTC()
+	const servePlacement = "lobby"
+	type ranked struct {
+		c     store.AdCampaign
+		score float64
+	}
+	viewerRating := a.viewerRating(r)
+	rankedList := make([]ranked, 0, len(campaigns))
 	for _, c := range campaigns {
+		if !store.CampaignFitsServePlacement(&c, pkgs, servePlacement) {
+			continue
+		}
 		counts, err := a.Ads.CountImpressionsByPeriod(r.Context(), c.ID, now)
 		if err != nil {
 			continue
 		}
-		if c.WithinDailySpendCap(unitCost, counts.Day) {
-			eligible = append(eligible, c)
+		tier, _ := pricingCfg.TierByCode(c.AdvertiserTierCode)
+		if tier.Code == "" {
+			tier = pricingCfg.ResolveAdvertiserTier(0)
 		}
+		// Conservative pacing viewport so mobile/tablet multipliers cannot overrun daily caps.
+		paceViewport := pricingCfg.PacingViewportSlot()
+		eff := pricingCfg.CampaignEffectiveUnitCost(&c, servePlacement, paceViewport, now, fill, tier)
+		eff = pricingCfg.ApplyAgencyMediaMultiplier(eff, c.AgencyManaged)
+		eff = pricingCfg.ApplyAudienceMultiplier(eff, viewerRating)
+		if !c.WithinDailySpendCap(eff, counts.Day) {
+			continue
+		}
+		if !c.WithinPeriodCaps(counts) {
+			continue
+		}
+		// Rank on inventory+bid only. Audience premium is charged on impress/settle (eff above).
+		score := pricingCfg.CampaignRankScore(&c, servePlacement, now, fill, tier)
+		rankedList = append(rankedList, ranked{c: c, score: score})
 	}
+	sort.SliceStable(rankedList, func(i, j int) bool {
+		if rankedList[i].score == rankedList[j].score {
+			return rankedList[i].c.CreatedAt.After(rankedList[j].c.CreatedAt)
+		}
+		return rankedList[i].score > rankedList[j].score
+	})
+	for _, row := range rankedList {
+		eligible = append(eligible, row.c)
+	}
+	eligible = store.ApplyPackageExclusivity(eligible, pkgs)
 	// Public ad serve: creative only. No publisher ids, spend caps, or geo targeting internals.
 	public := make([]map[string]any, 0, len(eligible))
 	for _, c := range eligible {
@@ -764,6 +1150,8 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 type impressionBody struct {
 	ViewerKey string `json:"viewer_key"`
 	Placement string `json:"placement"`
+	// Viewport is optional (desktop|tablet|mobile). Empty uses desktop multiplier.
+	Viewport string `json:"viewport"`
 }
 
 func (a *AdsAPI) Impression(w http.ResponseWriter, r *http.Request) {
@@ -810,9 +1198,57 @@ func (a *AdsAPI) Impression(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requireSchedule := placement == pc.PlacementInMatch
-	if err := a.Ads.RecordImpressionWithPlacement(r.Context(), id, unitCost, viewerKey, placement, servable, requireSchedule); err != nil {
+	camp, getErr := a.Ads.Get(r.Context(), id)
+	if getErr != nil || camp == nil {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_validation_failed")
 		return
+	}
+	pricingCfg := a.Settings.AdPricing()
+	pricingCfg.MarketplaceDefaults()
+	fill := a.Ads.InventoryFillPctApprox(r.Context())
+	tier, _ := pricingCfg.TierByCode(camp.AdvertiserTierCode)
+	if tier.Code == "" {
+		tier = pricingCfg.ResolveAdvertiserTier(0)
+	}
+	viewport := strings.TrimSpace(body.Viewport)
+	eff := pricingCfg.CampaignEffectiveUnitCost(camp, placement, viewport, time.Now().UTC(), fill, tier)
+	if eff <= 0 {
+		eff = unitCost
+	}
+	// Agency media percent applies to pacing + optional wallet settle (create fee already adjusted at create).
+	eff = pricingCfg.ApplyAgencyMediaMultiplier(eff, camp.AgencyManaged)
+	eff = pricingCfg.ApplyAudienceMultiplier(eff, a.viewerRating(r))
+	// Optional wallet settle (admin flag; off by default). Units match pacing (per-view rate, same as daily cap).
+	var settleCur string
+	var settleAmt float64
+	if pricingCfg.ImpressionWalletSettleEnabled {
+		if a.Payments == nil || strings.TrimSpace(camp.PublisherID) == "" {
+			writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
+			return
+		}
+		cc := adCampaignGeoCountry(camp.GeoTargets)
+		_, cur, feeOK := a.Settings.CampaignCreateFeeForCountry(cc)
+		settleAmt = payments.RoundMoney2(eff)
+		if !feeOK || settleAmt <= 0 || strings.TrimSpace(cur) == "" {
+			writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
+			return
+		}
+		settleCur = cur
+		if bal := a.Payments.WalletBalance(r.Context(), camp.PublisherID, settleCur); bal+1e-9 < settleAmt {
+			writeAdsErr(w, a.Settings, http.StatusPaymentRequired, "err_impression_wallet_insufficient")
+			return
+		}
+	}
+	if err := a.Ads.RecordImpressionWithPlacement(r.Context(), id, eff, viewerKey, placement, servable, requireSchedule); err != nil {
+		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_validation_failed")
+		return
+	}
+	if pricingCfg.ImpressionWalletSettleEnabled {
+		ref := "ad_impression:" + id + ":" + uuid.NewString()
+		if err := a.Payments.SettleCampaignImpression(r.Context(), camp.PublisherID, settleAmt, settleCur, ref); err != nil {
+			// Rare race after pre-check: impression already counted; do not double-fail the client path.
+			log.Printf("ads: impression wallet settle soft-fail campaign=%s amt=%v cur=%s: %v", id, settleAmt, settleCur, err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
 }
@@ -1000,6 +1436,29 @@ func (a *AdsAPI) Playback(w http.ResponseWriter, r *http.Request) {
 		"map_listings_count_fmt":              rt.MapListingsCountFmt,
 		"map_locate_failed":                   rt.MapLocateFailed,
 	}
+	// Publisher marketplace copy (public). Seeded on ad_runtime_chrome; fail-closed clients require these.
+	for _, key := range []string{
+		"marketplace_section_title", "marketplace_section_blurb",
+		"buying_type_label", "buying_type_auction_label", "buying_type_auction_blurb",
+		"buying_type_reservation_label", "buying_type_reservation_blurb",
+		"bid_cpm_label", "bid_cpm_blurb", "reserved_cpm_label", "reserved_cpm_blurb",
+		"floor_cpm_label", "floor_cpm_blurb", "tier_label", "tier_blurb",
+		"packages_section_title", "packages_section_blurb", "package_label", "package_none_label",
+		"agency_managed_label", "agency_managed_blurb",
+		"err_buying_type_required", "err_buying_type_locked", "err_bid_cpm_required", "err_reserved_cpm_required", "err_bid_below_floor",
+		"err_reservation_locked", "err_package_locked", "err_package_invalid", "err_media_daily_min",
+		"marketplace_unavailable",
+		"package_exclusive_label", "package_exclusive_blurb", "err_package_exclusive_taken",
+		"err_impression_wallet_insufficient",
+		"marketplace_fields_locked_blurb", "detail_marketplace_title", "detail_rate_suffix",
+		"detail_standard_buying_label",
+		"err_invalid_status", "err_campaign_cannot_reopen", "err_cannot_reopen",
+		"err_campaign_auto_closed",
+	} {
+		if v := strings.TrimSpace(a.Settings.AdRuntimeChromeString(key)); v != "" {
+			scheduleChrome[key] = v
+		}
+	}
 	for k, v := range viewportChromeKeys(a.Settings) {
 		scheduleChrome[k] = v
 	}
@@ -1132,9 +1591,30 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 		minRetry = 5
 	}
 
+	pricingCfg := a.Settings.AdPricing()
+	pricingCfg.MarketplaceDefaults()
+	fill := a.Ads.InventoryFillPctApprox(r.Context())
+	pkgs, _ := a.Settings.AdPackages(r.Context())
+	const servePlacement = "in_match"
+	_ = unitCost // fail-closed load above; pacing uses effective CPM below
+
+	type inMatchCandidate struct {
+		c        store.AdCampaign
+		score    float64
+		nonSkip  int
+		first    int
+		interval int
+		counts   store.PeriodImpressionCounts
+	}
+	candidates := make([]inMatchCandidate, 0, 8)
+	viewerRating := a.viewerRating(r)
+
 	for _, matched := range geoMatched {
 		c, ok := schedIDs[matched.ID]
 		if !ok {
+			continue
+		}
+		if !store.CampaignFitsServePlacement(&c, pkgs, servePlacement) {
 			continue
 		}
 		nonSkip, firstShow, interval, err := a.Settings.EffectiveAdTiming(&c)
@@ -1179,7 +1659,15 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 			writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_caps_failed")
 			return
 		}
-		if !c.WithinDailySpendCap(unitCost, counts.Day) {
+		tier, _ := pricingCfg.TierByCode(c.AdvertiserTierCode)
+		if tier.Code == "" {
+			tier = pricingCfg.ResolveAdvertiserTier(0)
+		}
+		paceViewport := pricingCfg.PacingViewportSlot()
+		eff := pricingCfg.CampaignEffectiveUnitCost(&c, servePlacement, paceViewport, now, fill, tier)
+		eff = pricingCfg.ApplyAgencyMediaMultiplier(eff, c.AgencyManaged)
+		eff = pricingCfg.ApplyAudienceMultiplier(eff, viewerRating)
+		if !c.WithinDailySpendCap(eff, counts.Day) {
 			continue
 		}
 		if !c.WithinPeriodCaps(counts) {
@@ -1194,16 +1682,51 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		campaign := campaignPublicCreativeFields(c)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"show":                     true,
-			"campaign":                 campaign,
-			"non_skippable_seconds":    nonSkip,
-			"interval_seconds":         interval,
-			"first_show_after_seconds": firstShow,
-			"period_counts":            counts,
+		// Rank on inventory+bid only. Audience premium is charged on impress/settle (eff above).
+		score := pricingCfg.CampaignRankScore(&c, servePlacement, now, fill, tier)
+		candidates = append(candidates, inMatchCandidate{
+			c:        c,
+			score:    score,
+			nonSkip:  nonSkip,
+			first:    firstShow,
+			interval: interval,
+			counts:   counts,
 		})
-		return
+	}
+
+	if len(candidates) > 0 {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			if candidates[i].score == candidates[j].score {
+				return candidates[i].c.CreatedAt.After(candidates[j].c.CreatedAt)
+			}
+			return candidates[i].score > candidates[j].score
+		})
+		rankedCamps := make([]store.AdCampaign, 0, len(candidates))
+		for _, cand := range candidates {
+			rankedCamps = append(rankedCamps, cand.c)
+		}
+		rankedCamps = store.ApplyPackageExclusivity(rankedCamps, pkgs)
+		if len(rankedCamps) == 0 {
+			// All candidates filtered by exclusivity; fall through to retry response.
+		} else {
+			winnerID := rankedCamps[0].ID
+			var best inMatchCandidate
+			for _, cand := range candidates {
+				if cand.c.ID == winnerID {
+					best = cand
+					break
+				}
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"show":                     true,
+				"campaign":                 campaignPublicCreativeFields(best.c),
+				"non_skippable_seconds":    best.nonSkip,
+				"interval_seconds":         best.interval,
+				"first_show_after_seconds": best.first,
+				"period_counts":            best.counts,
+			})
+			return
+		}
 	}
 
 	if blockReason == "no_eligible_campaign" && soonestRetry < minRetry {
@@ -1238,6 +1761,12 @@ func (a *AdsAPI) ConsolePlaybackGet(w http.ResponseWriter, r *http.Request) {
 	raw, _ := json.Marshal(chrome)
 	_ = json.Unmarshal(raw, &chromeDoc)
 	for k, v := range viewportChromeKeys(a.Settings) {
+		chromeDoc[k] = v
+	}
+	for k, v := range marketplaceDetailChromeKeys(a.Settings) {
+		chromeDoc[k] = v
+	}
+	for k, v := range marketplaceErrChromeKeys(a.Settings) {
 		chromeDoc[k] = v
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1330,6 +1859,7 @@ func (a *AdsAPI) ConsoleGetCampaign(w http.ResponseWriter, r *http.Request) {
 		"auto_closed":              c.AutoClosed,
 		"created_at":               c.CreatedAt,
 	}
+	appendConsoleMarketplaceFields(row, c)
 	enums := a.Settings.ClientEnums()
 	if label := store.StatusLabel(enums.CampaignStatusLabels, c.Status); label != "" {
 		row["status_label"] = label
@@ -1401,6 +1931,7 @@ func (a *AdsAPI) ConsoleListCampaigns(w http.ResponseWriter, r *http.Request) {
 			"auto_closed":              c.AutoClosed,
 			"created_at":               c.CreatedAt,
 		}
+		appendConsoleMarketplaceFields(row, &c)
 		if a.Settings != nil {
 			enums := a.Settings.ClientEnums()
 			if label := store.StatusLabel(enums.CampaignStatusLabels, c.Status); label != "" {
@@ -1418,10 +1949,23 @@ func (a *AdsAPI) ConsoleListCampaigns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	meta := pagination.BuildMeta(params, total, skipCap, labels)
+	chromeDoc := map[string]any{}
+	if raw, err := json.Marshal(a.Settings.AdRuntimeChrome()); err == nil {
+		_ = json.Unmarshal(raw, &chromeDoc)
+	}
+	for k, v := range viewportChromeKeys(a.Settings) {
+		chromeDoc[k] = v
+	}
+	for k, v := range marketplaceDetailChromeKeys(a.Settings) {
+		chromeDoc[k] = v
+	}
+	for k, v := range marketplaceErrChromeKeys(a.Settings) {
+		chromeDoc[k] = v
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"campaigns": rows,
 		"meta":      meta,
-		"chrome":    a.Settings.AdRuntimeChrome(),
+		"chrome":    chromeDoc,
 		"bounds": map[string]any{
 			"non_skippable_min":  pb.NonSkippableMin,
 			"non_skippable_max":  pb.NonSkippableMax,
@@ -1535,6 +2079,16 @@ func (a *AdsAPI) ConsoleSetStatus(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_status")
 		return
 	}
+	cur, getErr := a.Ads.Get(r.Context(), id)
+	if getErr != nil || cur == nil {
+		writeAdsErr(w, a.Settings, http.StatusNotFound, "err_campaign_not_found")
+		return
+	}
+	exclOK, exclUnlock := a.beginExclusivePackageGuard(w, r, cur, body.Status)
+	if !exclOK {
+		return
+	}
+	defer exclUnlock()
 	c, err := a.Ads.SetStatusAdmin(r.Context(), id, body.Status)
 	if err != nil {
 		if err == store.ErrCampaignCannotReopen {

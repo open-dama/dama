@@ -41,7 +41,9 @@ func (s *AdStore) scanCampaignCols() string {
 		COALESCE(schedule_enabled,false), first_show_after_seconds, interval_seconds,
 		non_skippable_seconds, daily_impression_cap, weekly_impression_cap,
 		monthly_impression_cap, yearly_impression_cap,
-		ends_at, closed_at, COALESCE(auto_closed,false)
+		ends_at, closed_at, COALESCE(auto_closed,false),
+		COALESCE(buying_type,'legacy'), bid_cpm, reserved_cpm,
+		COALESCE(package_code,''), COALESCE(agency_managed,false), COALESCE(advertiser_tier_code,'')
 	`
 }
 
@@ -60,6 +62,8 @@ func scanAdCampaign(scan func(dest ...any) error) (*AdCampaign, error) {
 		&c.NonSkippableSeconds, &c.DailyImpressionCap, &c.WeeklyImpressionCap,
 		&c.MonthlyImpressionCap, &c.YearlyImpressionCap,
 		&c.EndsAt, &c.ClosedAt, &c.AutoClosed,
+		&c.BuyingType, &c.BidCPM, &c.ReservedCPM,
+		&c.PackageCode, &c.AgencyManaged, &c.AdvertiserTierCode,
 	)
 	if err != nil {
 		return nil, err
@@ -67,6 +71,9 @@ func scanAdCampaign(scan func(dest ...any) error) (*AdCampaign, error) {
 	c.GeoTargets = geo
 	c.Gallery = []string{}
 	_ = json.Unmarshal(galleryRaw, &c.Gallery)
+	if strings.TrimSpace(c.BuyingType) == "" {
+		c.BuyingType = BuyingTypeLegacy
+	}
 	return &c, nil
 }
 

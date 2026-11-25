@@ -118,6 +118,69 @@ func viewportChromeKeys(settings *store.SettingsStore) map[string]any {
 	return out
 }
 
+// marketplaceErrChromeKeys are public marketplace error strings (parity with publisher Playback).
+func marketplaceErrChromeKeys(settings *store.SettingsStore) map[string]any {
+	if settings == nil {
+		return map[string]any{}
+	}
+	keys := []string{
+		"err_buying_type_required", "err_buying_type_locked", "err_bid_cpm_required", "err_reserved_cpm_required", "err_bid_below_floor",
+		"err_reservation_locked", "err_package_locked", "err_package_invalid", "err_media_daily_min",
+		"marketplace_unavailable", "err_package_exclusive_taken", "err_impression_wallet_insufficient",
+		"err_invalid_status", "err_campaign_cannot_reopen", "err_cannot_reopen", "err_campaign_auto_closed",
+	}
+	out := make(map[string]any, len(keys))
+	for _, k := range keys {
+		if v := strings.TrimSpace(settings.AdRuntimeChromeString(k)); v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// marketplaceDetailChromeKeys are public marketplace detail labels for console and publisher chrome.
+func marketplaceDetailChromeKeys(settings *store.SettingsStore) map[string]any {
+	if settings == nil {
+		return map[string]any{}
+	}
+	keys := []string{
+		"detail_marketplace_title", "detail_standard_buying_label", "detail_rate_suffix",
+		"buying_type_label", "buying_type_auction_label", "buying_type_reservation_label",
+		"bid_cpm_label", "reserved_cpm_label", "package_label", "agency_managed_label",
+		"marketplace_fields_locked_blurb", "tier_label",
+	}
+	out := make(map[string]any, len(keys))
+	for _, k := range keys {
+		if v := strings.TrimSpace(settings.AdRuntimeChromeString(k)); v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// appendConsoleMarketplaceFields adds read-only marketplace fields for admin console campaign rows.
+func appendConsoleMarketplaceFields(row map[string]any, c *store.AdCampaign) {
+	if row == nil || c == nil {
+		return
+	}
+	if bt := strings.TrimSpace(c.BuyingType); bt != "" {
+		row["buying_type"] = bt
+	}
+	if c.BidCPM != nil {
+		row["bid_cpm"] = *c.BidCPM
+	}
+	if c.ReservedCPM != nil {
+		row["reserved_cpm"] = *c.ReservedCPM
+	}
+	if pkg := strings.TrimSpace(c.PackageCode); pkg != "" {
+		row["package_code"] = pkg
+	}
+	row["agency_managed"] = c.AgencyManaged
+	if tier := strings.TrimSpace(c.AdvertiserTierCode); tier != "" {
+		row["advertiser_tier_code"] = tier
+	}
+}
+
 func (a *AdsAPI) publisherCampaignMutable(w http.ResponseWriter, r *http.Request, id, userID string) (*store.AdCampaign, bool) {
 	c, err := a.Ads.Get(r.Context(), id)
 	if err != nil || c == nil || c.PublisherID != userID {

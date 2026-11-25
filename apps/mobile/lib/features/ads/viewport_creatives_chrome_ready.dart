@@ -28,6 +28,11 @@ const _viewportCreativesChromeKeys = [
   'toast_viewport_creative_cleared',
   'toast_viewport_video_queued',
   'media_upload_failed',
+  'err_viewport_slot_required',
+  'err_viewport_ratio_mismatch',
+  'err_viewport_video_required',
+  'err_viewport_video_type',
+  'err_viewport_video_too_large',
 ];
 
 /// Fail closed: per-viewport campaign creative upload chrome from schedule_chrome.

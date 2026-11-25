@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"dama/apps/api/internal/auth"
 	"dama/apps/api/internal/store"
@@ -71,7 +72,33 @@ type progressionPutBody struct {
 		CampaignCreateFeeEthiopiaCurrency string  `json:"campaign_create_fee_ethiopia_currency"`
 		CampaignCreateFeeGlobalAmount     float64 `json:"campaign_create_fee_global_amount"`
 		CampaignCreateFeeGlobalCurrency   string  `json:"campaign_create_fee_global_currency"`
+		// Marketplace (optional on PUT; omitted fields keep stored values).
+		MarketplaceEnabled            *bool                   `json:"marketplace_enabled"`
+		AuctionEnabled                *bool                   `json:"auction_enabled"`
+		ReservationEnabled            *bool                   `json:"reservation_enabled"`
+		DefaultBuyingType             *string                 `json:"default_buying_type"`
+		FloorCPM                      *float64                `json:"floor_cpm"`
+		FloorCPMEthiopia              *float64                `json:"floor_cpm_ethiopia"`
+		FloorCPMGlobal                *float64                `json:"floor_cpm_global"`
+		PlacementLobbyMultiplier      *float64                `json:"placement_lobby_multiplier"`
+		PlacementInMatchMultiplier    *float64                `json:"placement_in_match_multiplier"`
+		ViewportDesktopMultiplier     *float64                `json:"viewport_desktop_multiplier"`
+		ViewportTabletMultiplier      *float64                `json:"viewport_tablet_multiplier"`
+		ViewportMobileMultiplier      *float64                `json:"viewport_mobile_multiplier"`
+		PeakHourMultiplier            *float64                `json:"peak_hour_multiplier"`
+		PeakHoursUTCStart             *int                    `json:"peak_hours_utc_start"`
+		PeakHoursUTCEnd               *int                    `json:"peak_hours_utc_end"`
+		DynamicFloorEnabled           *bool                   `json:"dynamic_floor_enabled"`
+		DynamicFloorFillPct           *float64                `json:"dynamic_floor_fill_pct"`
+		DynamicFloorBoost             *float64                `json:"dynamic_floor_boost"`
+		AgencyEnabled                 *bool                   `json:"agency_enabled"`
+		AgencySpendPercent            *float64                `json:"agency_spend_percent"`
+		ImpressionWalletSettleEnabled *bool                   `json:"impression_wallet_settle_enabled"`
+		AudienceHighRatingMin         *int                    `json:"audience_high_rating_min"`
+		AudienceHighRatingMultiplier  *float64                `json:"audience_high_rating_multiplier"`
+		Tiers                         *[]store.AdvertiserTier `json:"tiers"`
 	} `json:"ad_pricing"`
+	AdPackages   *[]store.AdPackage `json:"ad_packages"`
 	MatchRewards *struct {
 		WinXP          int `json:"win_xp"`
 		DrawXP         int `json:"draw_xp"`
@@ -96,8 +123,8 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if body.XPLevels == nil && body.MatchClock == nil && body.AdPricing == nil && body.MatchRewards == nil && body.WebAppOrigin == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "xp_levels, match_clock, match_rewards, ad_pricing, or web_app_origin required"})
+	if body.XPLevels == nil && body.MatchClock == nil && body.AdPricing == nil && body.AdPackages == nil && body.MatchRewards == nil && body.WebAppOrigin == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "xp_levels, match_clock, match_rewards, ad_pricing, ad_packages, or web_app_origin required"})
 		return
 	}
 	changed := map[string]any{}
@@ -148,18 +175,109 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.AdPricing != nil {
-		cfg := store.AdPricingConfig{
-			ImpressionUnitCost:                body.AdPricing.ImpressionUnitCost,
-			CampaignCreateFeeEthiopiaAmount:   body.AdPricing.CampaignCreateFeeEthiopiaAmount,
-			CampaignCreateFeeEthiopiaCurrency: body.AdPricing.CampaignCreateFeeEthiopiaCurrency,
-			CampaignCreateFeeGlobalAmount:     body.AdPricing.CampaignCreateFeeGlobalAmount,
-			CampaignCreateFeeGlobalCurrency:   body.AdPricing.CampaignCreateFeeGlobalCurrency,
+		cfg := a.Settings.AdPricing()
+		cfg.ImpressionUnitCost = body.AdPricing.ImpressionUnitCost
+		cfg.CampaignCreateFeeEthiopiaAmount = body.AdPricing.CampaignCreateFeeEthiopiaAmount
+		cfg.CampaignCreateFeeEthiopiaCurrency = body.AdPricing.CampaignCreateFeeEthiopiaCurrency
+		cfg.CampaignCreateFeeGlobalAmount = body.AdPricing.CampaignCreateFeeGlobalAmount
+		cfg.CampaignCreateFeeGlobalCurrency = body.AdPricing.CampaignCreateFeeGlobalCurrency
+		if body.AdPricing.MarketplaceEnabled != nil {
+			cfg.MarketplaceEnabled = *body.AdPricing.MarketplaceEnabled
+		}
+		if body.AdPricing.AuctionEnabled != nil {
+			cfg.AuctionEnabled = *body.AdPricing.AuctionEnabled
+		}
+		if body.AdPricing.ReservationEnabled != nil {
+			cfg.ReservationEnabled = *body.AdPricing.ReservationEnabled
+		}
+		if body.AdPricing.DefaultBuyingType != nil {
+			cfg.DefaultBuyingType = strings.TrimSpace(*body.AdPricing.DefaultBuyingType)
+		}
+		// Clamp default to enabled modes (empty when marketplace on and both modes off).
+		// SetAdPricing also runs MarketplaceDefaults; keep this so invalid defaults never persist mid-handler.
+		cfg.MarketplaceDefaults()
+		if body.AdPricing.FloorCPM != nil {
+			cfg.FloorCPM = *body.AdPricing.FloorCPM
+		}
+		if body.AdPricing.FloorCPMEthiopia != nil {
+			cfg.FloorCPMEthiopia = *body.AdPricing.FloorCPMEthiopia
+		}
+		if body.AdPricing.FloorCPMGlobal != nil {
+			cfg.FloorCPMGlobal = *body.AdPricing.FloorCPMGlobal
+		}
+		if body.AdPricing.PlacementLobbyMultiplier != nil {
+			cfg.PlacementLobbyMultiplier = *body.AdPricing.PlacementLobbyMultiplier
+		}
+		if body.AdPricing.PlacementInMatchMultiplier != nil {
+			cfg.PlacementInMatchMultiplier = *body.AdPricing.PlacementInMatchMultiplier
+		}
+		if body.AdPricing.ViewportDesktopMultiplier != nil {
+			cfg.ViewportDesktopMultiplier = *body.AdPricing.ViewportDesktopMultiplier
+		}
+		if body.AdPricing.ViewportTabletMultiplier != nil {
+			cfg.ViewportTabletMultiplier = *body.AdPricing.ViewportTabletMultiplier
+		}
+		if body.AdPricing.ViewportMobileMultiplier != nil {
+			cfg.ViewportMobileMultiplier = *body.AdPricing.ViewportMobileMultiplier
+		}
+		if body.AdPricing.PeakHourMultiplier != nil {
+			cfg.PeakHourMultiplier = *body.AdPricing.PeakHourMultiplier
+		}
+		if body.AdPricing.PeakHoursUTCStart != nil {
+			cfg.PeakHoursUTCStart = *body.AdPricing.PeakHoursUTCStart
+		}
+		if body.AdPricing.PeakHoursUTCEnd != nil {
+			cfg.PeakHoursUTCEnd = *body.AdPricing.PeakHoursUTCEnd
+		}
+		if body.AdPricing.DynamicFloorEnabled != nil {
+			cfg.DynamicFloorEnabled = *body.AdPricing.DynamicFloorEnabled
+		}
+		if body.AdPricing.DynamicFloorFillPct != nil {
+			cfg.DynamicFloorFillPct = *body.AdPricing.DynamicFloorFillPct
+		}
+		if body.AdPricing.DynamicFloorBoost != nil {
+			cfg.DynamicFloorBoost = *body.AdPricing.DynamicFloorBoost
+		}
+		if body.AdPricing.AgencyEnabled != nil {
+			cfg.AgencyEnabled = *body.AdPricing.AgencyEnabled
+		}
+		if body.AdPricing.AgencySpendPercent != nil {
+			cfg.AgencySpendPercent = *body.AdPricing.AgencySpendPercent
+		}
+		if body.AdPricing.ImpressionWalletSettleEnabled != nil {
+			cfg.ImpressionWalletSettleEnabled = *body.AdPricing.ImpressionWalletSettleEnabled
+		}
+		if body.AdPricing.AudienceHighRatingMin != nil {
+			cfg.AudienceHighRatingMin = *body.AdPricing.AudienceHighRatingMin
+		}
+		if body.AdPricing.AudienceHighRatingMultiplier != nil {
+			cfg.AudienceHighRatingMultiplier = *body.AdPricing.AudienceHighRatingMultiplier
+		}
+		if body.AdPricing.Tiers != nil {
+			cfg.Tiers = append([]store.AdvertiserTier{}, (*body.AdPricing.Tiers)...)
 		}
 		if err := a.Settings.SetAdPricing(r.Context(), cfg); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		changed["ad_pricing"] = true
+	}
+	if body.AdPackages != nil {
+		pkgs := append([]store.AdPackage{}, (*body.AdPackages)...)
+		mktOn := a.Settings.AdPricing().MarketplaceEnabled
+		if body.AdPricing != nil && body.AdPricing.MarketplaceEnabled != nil {
+			mktOn = *body.AdPricing.MarketplaceEnabled
+		}
+		pkgs = store.SanitizePackageBuyingTypes(pkgs, mktOn)
+		if err := store.ValidateAdPackageRates(pkgs, mktOn); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := a.Settings.SetAdPackages(r.Context(), pkgs); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		changed["ad_packages"] = true
 	}
 	if body.MatchRewards != nil {
 		cfg := store.MatchRewardsConfig{
@@ -247,12 +365,42 @@ func progressionPayload(levels store.XPLevelsConfig, clock store.MatchClockConfi
 func consolePlatformPayload(ctx context.Context, settings *store.SettingsStore) map[string]any {
 	out := progressionPayload(settings.XPLevels(), settings.MatchClock(), settings.MatchRewards(), true)
 	ads := settings.AdPricing()
+	ads.MarketplaceDefaults()
 	out["ad_pricing"] = map[string]any{
 		"impression_unit_cost":                  ads.ImpressionUnitCost,
 		"campaign_create_fee_ethiopia_amount":   ads.CampaignCreateFeeEthiopiaAmount,
 		"campaign_create_fee_ethiopia_currency": ads.CampaignCreateFeeEthiopiaCurrency,
 		"campaign_create_fee_global_amount":     ads.CampaignCreateFeeGlobalAmount,
 		"campaign_create_fee_global_currency":   ads.CampaignCreateFeeGlobalCurrency,
+		"marketplace_enabled":                   ads.MarketplaceEnabled,
+		"auction_enabled":                       ads.AuctionEnabled,
+		"reservation_enabled":                   ads.ReservationEnabled,
+		"default_buying_type":                   ads.DefaultBuyingType,
+		"floor_cpm":                             ads.FloorCPM,
+		"floor_cpm_ethiopia":                    ads.FloorCPMEthiopia,
+		"floor_cpm_global":                      ads.FloorCPMGlobal,
+		"placement_lobby_multiplier":            ads.PlacementLobbyMultiplier,
+		"placement_in_match_multiplier":         ads.PlacementInMatchMultiplier,
+		"viewport_desktop_multiplier":           ads.ViewportDesktopMultiplier,
+		"viewport_tablet_multiplier":            ads.ViewportTabletMultiplier,
+		"viewport_mobile_multiplier":            ads.ViewportMobileMultiplier,
+		"peak_hour_multiplier":                  ads.PeakHourMultiplier,
+		"peak_hours_utc_start":                  ads.PeakHoursUTCStart,
+		"peak_hours_utc_end":                    ads.PeakHoursUTCEnd,
+		"dynamic_floor_enabled":                 ads.DynamicFloorEnabled,
+		"dynamic_floor_fill_pct":                ads.DynamicFloorFillPct,
+		"dynamic_floor_boost":                   ads.DynamicFloorBoost,
+		"agency_enabled":                        ads.AgencyEnabled,
+		"agency_spend_percent":                  ads.AgencySpendPercent,
+		"impression_wallet_settle_enabled":      ads.ImpressionWalletSettleEnabled,
+		"audience_high_rating_min":              ads.AudienceHighRatingMin,
+		"audience_high_rating_multiplier":       ads.AudienceHighRatingMultiplier,
+		"tiers":                                 ads.Tiers,
+	}
+	if pkgs, err := settings.AdPackages(ctx); err == nil {
+		out["ad_packages"] = store.SanitizePackageBuyingTypes(pkgs, ads.MarketplaceEnabled)
+	} else {
+		out["ad_packages"] = []store.AdPackage{}
 	}
 	origin, _ := settings.PlayRailWebAppOrigin(ctx)
 	out["web_app_origin"] = origin // may be empty - admin must set for Flutter share

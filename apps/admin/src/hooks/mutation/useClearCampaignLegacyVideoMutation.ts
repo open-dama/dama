@@ -1,6 +1,6 @@
 import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
 import { consoleAdCampaignsQueryKey } from "@/hooks/query/useConsoleAdCampaignsQuery";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage, throwAdsFetchError } from "@/lib/ads-chrome-error";
 import { getConsoleAdCampaignsChrome } from "@/lib/console-ad-campaigns-cache";
 import { apiRestUrl } from "@/lib/env";
 import type { AdPlaybackConsolePayload, AdRuntimeChrome } from "@/types/ad-runtime";
@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 type UploadResult = {
   error?: string;
+  error_key?: string;
 };
 
 function runtimeChrome(qc: ReturnType<typeof useQueryClient>, token: string | null | undefined) {
@@ -28,9 +29,10 @@ export function useClearCampaignLegacyVideoMutation(token: string | null | undef
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const json = (await res.json()) as UploadResult;
+      const json = (await res.json().catch(() => ({}))) as UploadResult;
       if (!res.ok) {
-        throw new Error((json.error || chrome?.media_upload_failed || "").trim());
+        if (json.error_key) throwAdsFetchError(res.status, json);
+        throw new Error((chrome?.media_upload_failed || "").trim());
       }
       return json;
     },
@@ -41,7 +43,7 @@ export function useClearCampaignLegacyVideoMutation(token: string | null | undef
     },
     onError: (err) => {
       const chrome = runtimeChrome(qc, token);
-      const msg = apiToastMessage(err, chrome?.media_upload_failed || "");
+      const msg = adsChromeErrorMessage(err, chrome, chrome?.media_upload_failed || "");
       if (msg) toast.error(msg);
     },
   });

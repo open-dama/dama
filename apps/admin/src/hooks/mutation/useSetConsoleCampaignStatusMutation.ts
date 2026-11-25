@@ -1,9 +1,18 @@
+import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
 import { consoleAdCampaignsQueryKey } from "@/hooks/query/useConsoleAdCampaignsQuery";
 import { restClient } from "@/lib/api";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage } from "@/lib/ads-chrome-error";
 import { getConsoleAdCampaignsChrome } from "@/lib/console-ad-campaigns-cache";
+import type { AdPlaybackConsolePayload } from "@/types/ad-runtime";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+function runtimeChrome(qc: ReturnType<typeof useQueryClient>, token: string | null | undefined) {
+  return (
+    getConsoleAdCampaignsChrome(qc, token) ??
+    qc.getQueryData<AdPlaybackConsolePayload>(adPlaybackQueryKey(token))?.chrome
+  );
+}
 
 export function useSetConsoleCampaignStatusMutation(token: string | null | undefined) {
   const qc = useQueryClient();
@@ -17,13 +26,13 @@ export function useSetConsoleCampaignStatusMutation(token: string | null | undef
       return data;
     },
     onSuccess: () => {
-      const chrome = getConsoleAdCampaignsChrome(qc, token);
+      const chrome = runtimeChrome(qc, token);
       void qc.invalidateQueries({ queryKey: consoleAdCampaignsQueryKey(token) });
       if (chrome?.toast_status_updated) toast.success(chrome.toast_status_updated);
     },
     onError: (err) => {
-      const chrome = getConsoleAdCampaignsChrome(qc, token);
-      const msg = apiToastMessage(err, chrome?.toast_update_failed || "");
+      const chrome = runtimeChrome(qc, token);
+      const msg = adsChromeErrorMessage(err, chrome, chrome?.toast_update_failed || "");
       if (msg) toast.error(msg);
     },
   });

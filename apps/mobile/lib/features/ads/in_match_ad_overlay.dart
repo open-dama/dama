@@ -264,9 +264,10 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
         }
         final width = MediaQuery.maybeSizeOf(context)?.width ??
             bp.tabletMax.toDouble() + 1;
+        final viewportSlot = resolveViewportSlot(width, bp);
         final picked = pickCampaignCreative(
           viewportSourceFromServed(campaign),
-          resolveViewportSlot(width, bp),
+          viewportSlot,
         );
         final videoId =
             isStubVideoId(picked.videoId.trim()) ? '' : picked.videoId.trim();
@@ -302,6 +303,7 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
             body: jsonEncode({
               'viewer_key': viewer,
               'placement': placement,
+              'viewport': viewportSlot.name,
             }),
           ),
         );

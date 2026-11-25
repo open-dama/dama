@@ -55,7 +55,7 @@ import { adminConsoleChromeUnavailable } from "@/lib/chrome-unavailable";
 import { sanitizeIntegerInput } from "@/lib/sanitize-integer-input";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
-import type { MatchClockPreset, XPLevel } from "@/types";
+import type { MatchClockPreset, ProgressionPayload, XPLevel } from "@/types";
 import { isAdminConsoleChromeReady } from "@/types/admin-console-chrome";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -73,7 +73,55 @@ type TcPresetFormMode =
 type XpRow = XPLevel & { id: string };
 type TcPresetRow = MatchClockPreset & { id: string };
 
+type AdAdvertiserTier = NonNullable<NonNullable<ProgressionPayload["ad_pricing"]["tiers"]>[number]>;
+type AdPackageAdmin = NonNullable<NonNullable<ProgressionPayload["ad_packages"]>[number]>;
+type TierEditorRow = AdAdvertiserTier & { rowKey: string };
+type PackageEditorRow = AdPackageAdmin & { rowKey: string };
+
+const BUYING_TYPE_OPTIONS = ["legacy", "auction", "reservation"] as const;
+const MARKETPLACE_BUYING_TYPE_OPTIONS = ["auction", "reservation"] as const;
+
 type ProgressionTab = "platform" | "board";
+
+function newEditorRowKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `row-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function emptyAdvertiserTier(): TierEditorRow {
+  return {
+    rowKey: newEditorRowKey(),
+    code: "",
+    label: "",
+    blurb: "",
+    monthly_spend_min: 0,
+    create_fee_multiplier: 1,
+    media_daily_min: 0,
+    unlock_reservation: false,
+    unlock_packages: false,
+    list_cpm_multiplier: 1,
+  };
+}
+
+function emptyAdPackage(sortOrder: number): PackageEditorRow {
+  return {
+    rowKey: newEditorRowKey(),
+    code: "",
+    title: "",
+    blurb: "",
+    buying_type: "auction",
+    fixed_cpm: 0,
+    flight_fee: 0,
+    min_tier: "",
+    placement: "",
+    enabled: true,
+    sort_order: sortOrder,
+    exclusive: false,
+    exclusive_category: "",
+  };
+}
 
 function sortTcPresets(rows: MatchClockPreset[]): MatchClockPreset[] {
   return [...rows].sort((a, b) => {
@@ -121,6 +169,36 @@ export default function ConsoleProgressionPage() {
   const [unitCost, setUnitCost] = useState<number | null>(null);
   const [ethiopiaCreateFeeAmount, setEthiopiaCreateFeeAmount] = useState<number | null>(null);
   const [globalCreateFeeAmount, setGlobalCreateFeeAmount] = useState<number | null>(null);
+  const [marketplaceEnabled, setMarketplaceEnabled] = useState<boolean | null>(null);
+  const [auctionEnabled, setAuctionEnabled] = useState<boolean | null>(null);
+  const [reservationEnabled, setReservationEnabled] = useState<boolean | null>(null);
+  const [dynamicFloorEnabled, setDynamicFloorEnabled] = useState<boolean | null>(null);
+  const [agencyEnabled, setAgencyEnabled] = useState<boolean | null>(null);
+  const [impressionWalletSettleEnabled, setImpressionWalletSettleEnabled] = useState<
+    boolean | null
+  >(null);
+  const [defaultBuyingType, setDefaultBuyingType] = useState("");
+  const [floorCpm, setFloorCpm] = useState<number | null>(null);
+  const [floorCpmEthiopia, setFloorCpmEthiopia] = useState<number | null>(null);
+  const [floorCpmGlobal, setFloorCpmGlobal] = useState<number | null>(null);
+  const [placementLobbyMultiplier, setPlacementLobbyMultiplier] = useState<number | null>(null);
+  const [placementInMatchMultiplier, setPlacementInMatchMultiplier] = useState<number | null>(null);
+  const [viewportDesktopMultiplier, setViewportDesktopMultiplier] = useState<number | null>(null);
+  const [viewportTabletMultiplier, setViewportTabletMultiplier] = useState<number | null>(null);
+  const [viewportMobileMultiplier, setViewportMobileMultiplier] = useState<number | null>(null);
+  const [peakHourMultiplier, setPeakHourMultiplier] = useState<number | null>(null);
+  const [peakHoursUtcStart, setPeakHoursUtcStart] = useState<number | null>(null);
+  const [peakHoursUtcEnd, setPeakHoursUtcEnd] = useState<number | null>(null);
+  const [dynamicFloorFillPct, setDynamicFloorFillPct] = useState<number | null>(null);
+  const [dynamicFloorBoost, setDynamicFloorBoost] = useState<number | null>(null);
+  const [agencySpendPercent, setAgencySpendPercent] = useState<number | null>(null);
+  const [audienceHighRatingMin, setAudienceHighRatingMin] = useState<number | null>(null);
+  const [audienceHighRatingMultiplier, setAudienceHighRatingMultiplier] = useState<number | null>(
+    null,
+  );
+  const [tiers, setTiers] = useState<TierEditorRow[]>([]);
+  const [adPackages, setAdPackages] = useState<PackageEditorRow[]>([]);
+  const [marketplaceHydrated, setMarketplaceHydrated] = useState(false);
   const [boardSize, setBoardSize] = useState<number | null>(null);
   const [piecesPerSide, setPiecesPerSide] = useState<number | null>(null);
   const [setupRows, setSetupRows] = useState<number | null>(null);
@@ -191,7 +269,155 @@ export default function ConsoleProgressionPage() {
     setUnitCost(data.ad_pricing.impression_unit_cost);
     setEthiopiaCreateFeeAmount(data.ad_pricing.campaign_create_fee_ethiopia_amount);
     setGlobalCreateFeeAmount(data.ad_pricing.campaign_create_fee_global_amount);
+    const ap = data.ad_pricing;
+    setMarketplaceEnabled(ap.marketplace_enabled === true);
+    setAuctionEnabled(ap.auction_enabled === true);
+    setReservationEnabled(ap.reservation_enabled === true);
+    setDynamicFloorEnabled(ap.dynamic_floor_enabled === true);
+    setAgencyEnabled(ap.agency_enabled === true);
+    setImpressionWalletSettleEnabled(ap.impression_wallet_settle_enabled === true);
+    {
+      let raw = (ap.default_buying_type || "").trim();
+      if (ap.marketplace_enabled === true) {
+        if (raw === "legacy" || !raw) {
+          raw =
+            ap.auction_enabled === true
+              ? "auction"
+              : ap.reservation_enabled === true
+                ? "reservation"
+                : "";
+        } else if (raw === "auction" && ap.auction_enabled !== true) {
+          raw = ap.reservation_enabled === true ? "reservation" : "";
+        } else if (raw === "reservation" && ap.reservation_enabled !== true) {
+          raw = ap.auction_enabled === true ? "auction" : "";
+        }
+        setDefaultBuyingType(raw);
+      } else {
+        setDefaultBuyingType(raw || "auction");
+      }
+    }
+    setFloorCpm(typeof ap.floor_cpm === "number" ? ap.floor_cpm : null);
+    setFloorCpmEthiopia(
+      typeof ap.floor_cpm_ethiopia === "number"
+        ? ap.floor_cpm_ethiopia
+        : typeof ap.floor_cpm === "number"
+          ? ap.floor_cpm
+          : null,
+    );
+    setFloorCpmGlobal(
+      typeof ap.floor_cpm_global === "number"
+        ? ap.floor_cpm_global
+        : typeof ap.floor_cpm === "number"
+          ? ap.floor_cpm
+          : null,
+    );
+    setPlacementLobbyMultiplier(
+      typeof ap.placement_lobby_multiplier === "number" ? ap.placement_lobby_multiplier : null,
+    );
+    setPlacementInMatchMultiplier(
+      typeof ap.placement_in_match_multiplier === "number"
+        ? ap.placement_in_match_multiplier
+        : null,
+    );
+    setViewportDesktopMultiplier(
+      typeof ap.viewport_desktop_multiplier === "number" ? ap.viewport_desktop_multiplier : null,
+    );
+    setViewportTabletMultiplier(
+      typeof ap.viewport_tablet_multiplier === "number" ? ap.viewport_tablet_multiplier : null,
+    );
+    setViewportMobileMultiplier(
+      typeof ap.viewport_mobile_multiplier === "number" ? ap.viewport_mobile_multiplier : null,
+    );
+    setPeakHourMultiplier(
+      typeof ap.peak_hour_multiplier === "number" ? ap.peak_hour_multiplier : null,
+    );
+    setPeakHoursUtcStart(
+      typeof ap.peak_hours_utc_start === "number" ? ap.peak_hours_utc_start : null,
+    );
+    setPeakHoursUtcEnd(typeof ap.peak_hours_utc_end === "number" ? ap.peak_hours_utc_end : null);
+    setDynamicFloorFillPct(
+      typeof ap.dynamic_floor_fill_pct === "number" ? ap.dynamic_floor_fill_pct : null,
+    );
+    setDynamicFloorBoost(
+      typeof ap.dynamic_floor_boost === "number" ? ap.dynamic_floor_boost : null,
+    );
+    setAgencySpendPercent(
+      typeof ap.agency_spend_percent === "number" ? ap.agency_spend_percent : null,
+    );
+    setAudienceHighRatingMin(
+      typeof ap.audience_high_rating_min === "number" ? ap.audience_high_rating_min : 1600,
+    );
+    setAudienceHighRatingMultiplier(
+      typeof ap.audience_high_rating_multiplier === "number"
+        ? ap.audience_high_rating_multiplier
+        : 1.15,
+    );
+    setTiers(
+      Array.isArray(ap.tiers)
+        ? ap.tiers.map((t) => ({
+            rowKey: newEditorRowKey(),
+            code: t.code || "",
+            label: t.label || "",
+            blurb: t.blurb || "",
+            monthly_spend_min: t.monthly_spend_min ?? 0,
+            create_fee_multiplier: t.create_fee_multiplier ?? 1,
+            media_daily_min: t.media_daily_min ?? 0,
+            unlock_reservation: t.unlock_reservation === true,
+            unlock_packages: t.unlock_packages === true,
+            list_cpm_multiplier: t.list_cpm_multiplier ?? 1,
+          }))
+        : [],
+    );
+    setAdPackages(
+      Array.isArray(data.ad_packages)
+        ? data.ad_packages.map((p, i) => ({
+            rowKey: newEditorRowKey(),
+            code: p.code || "",
+            title: p.title || "",
+            blurb: p.blurb || "",
+            buying_type: (p.buying_type || "auction").trim(),
+            fixed_cpm: p.fixed_cpm ?? 0,
+            flight_fee: p.flight_fee ?? 0,
+            min_tier: p.min_tier || "",
+            placement: p.placement || "",
+            enabled: p.enabled !== false,
+            sort_order: typeof p.sort_order === "number" ? p.sort_order : i,
+            exclusive: p.exclusive === true,
+            exclusive_category: p.exclusive_category || "",
+          }))
+        : [],
+    );
+    setMarketplaceHydrated(true);
   }, [data]);
+
+  useEffect(() => {
+    if (marketplaceEnabled !== true) return;
+    let next = (defaultBuyingType || "").trim();
+    if (next === "legacy" || !next) {
+      next = auctionEnabled === true ? "auction" : reservationEnabled === true ? "reservation" : "";
+    } else if (next === "auction" && auctionEnabled !== true) {
+      next = reservationEnabled === true ? "reservation" : "";
+    } else if (next === "reservation" && reservationEnabled !== true) {
+      next = auctionEnabled === true ? "auction" : "";
+    }
+    if (next !== defaultBuyingType) setDefaultBuyingType(next);
+  }, [marketplaceEnabled, auctionEnabled, reservationEnabled, defaultBuyingType]);
+
+  useEffect(() => {
+    if (marketplaceEnabled !== true) return;
+    setAdPackages((prev) => {
+      let changed = false;
+      const next = prev.map((p) => {
+        const buy = (p.buying_type || "").trim();
+        if (buy === "legacy" || !buy) {
+          changed = true;
+          return { ...p, buying_type: "reservation" };
+        }
+        return p;
+      });
+      return changed ? next : prev;
+    });
+  }, [marketplaceEnabled]);
 
   useEffect(() => {
     if (!boardQuery.data) return;
@@ -1010,6 +1236,966 @@ export default function ConsoleProgressionPage() {
                     </div>
                   </div>
 
+                  <div className="space-y-3 border-t border-[var(--dama-border)] pt-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[var(--dama-text)]">
+                        {chrome.marketplace_section_title}
+                      </h3>
+                      {(chrome.marketplace_section_blurb || "").trim() ? (
+                        <p className="mt-1 text-sm text-[var(--dama-muted)]">
+                          {chrome.marketplace_section_blurb}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    {!marketplaceHydrated ? (
+                      <ShimmerBlock className="h-32 w-full rounded-md" />
+                    ) : (
+                      <>
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          <Field
+                            id="progression-marketplace-enabled"
+                            label={chrome.marketplace_enabled_label}
+                          >
+                            <div className="flex min-h-10 items-center gap-2 pt-1">
+                              <Checkbox
+                                id="progression-marketplace-enabled"
+                                checked={marketplaceEnabled === true}
+                                onCheckedChange={(v) => setMarketplaceEnabled(v === true)}
+                                disabled={!isAdmin || save.isPending}
+                              />
+                            </div>
+                          </Field>
+                          <Field
+                            id="progression-auction-enabled"
+                            label={chrome.auction_enabled_label}
+                          >
+                            <div className="flex min-h-10 items-center gap-2 pt-1">
+                              <Checkbox
+                                id="progression-auction-enabled"
+                                checked={auctionEnabled === true}
+                                onCheckedChange={(v) => setAuctionEnabled(v === true)}
+                                disabled={!isAdmin || save.isPending}
+                              />
+                            </div>
+                          </Field>
+                          <Field
+                            id="progression-reservation-enabled"
+                            label={chrome.reservation_enabled_label}
+                          >
+                            <div className="flex min-h-10 items-center gap-2 pt-1">
+                              <Checkbox
+                                id="progression-reservation-enabled"
+                                checked={reservationEnabled === true}
+                                onCheckedChange={(v) => setReservationEnabled(v === true)}
+                                disabled={!isAdmin || save.isPending}
+                              />
+                            </div>
+                          </Field>
+                          <Field
+                            id="progression-dynamic-floor-enabled"
+                            label={chrome.dynamic_floor_enabled_label}
+                          >
+                            <div className="flex min-h-10 items-center gap-2 pt-1">
+                              <Checkbox
+                                id="progression-dynamic-floor-enabled"
+                                checked={dynamicFloorEnabled === true}
+                                onCheckedChange={(v) => setDynamicFloorEnabled(v === true)}
+                                disabled={!isAdmin || save.isPending}
+                              />
+                            </div>
+                          </Field>
+                          <Field
+                            id="progression-agency-enabled"
+                            label={chrome.agency_enabled_label}
+                          >
+                            <div className="flex min-h-10 items-center gap-2 pt-1">
+                              <Checkbox
+                                id="progression-agency-enabled"
+                                checked={agencyEnabled === true}
+                                onCheckedChange={(v) => setAgencyEnabled(v === true)}
+                                disabled={!isAdmin || save.isPending}
+                              />
+                            </div>
+                          </Field>
+                          <Field
+                            id="progression-impression-wallet-settle"
+                            label={chrome.impression_wallet_settle_label}
+                            description={chrome.impression_wallet_settle_blurb}
+                            descriptionWrap
+                          >
+                            <div className="flex min-h-10 items-center gap-2 pt-1">
+                              <Checkbox
+                                id="progression-impression-wallet-settle"
+                                checked={impressionWalletSettleEnabled === true}
+                                onCheckedChange={(v) =>
+                                  setImpressionWalletSettleEnabled(v === true)
+                                }
+                                disabled={!isAdmin || save.isPending}
+                              />
+                            </div>
+                          </Field>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <Field
+                            id="progression-default-buying-type"
+                            label={chrome.default_buying_type_label}
+                          >
+                            <Select
+                              value={defaultBuyingType || undefined}
+                              onValueChange={setDefaultBuyingType}
+                              disabled={!isAdmin || save.isPending}
+                            >
+                              <SelectTrigger id="progression-default-buying-type">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(marketplaceEnabled === true
+                                  ? MARKETPLACE_BUYING_TYPE_OPTIONS
+                                  : BUYING_TYPE_OPTIONS
+                                ).map((opt) => (
+                                  <SelectItem key={opt} value={opt}>
+                                    {opt}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                          <Field id="progression-floor-cpm" label={chrome.floor_cpm_label}>
+                            <AmountInput
+                              id="progression-floor-cpm"
+                              value={floorCpm == null ? "" : String(floorCpm)}
+                              onValueChange={(next) => {
+                                setFloorCpm(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || floorCpm == null}
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-floor-cpm-ethiopia"
+                            label={chrome.floor_cpm_ethiopia_label}
+                            description={
+                              (chrome.floor_cpm_ethiopia_blurb || "").trim() || undefined
+                            }
+                          >
+                            <AmountInput
+                              id="progression-floor-cpm-ethiopia"
+                              value={floorCpmEthiopia == null ? "" : String(floorCpmEthiopia)}
+                              onValueChange={(next) => {
+                                setFloorCpmEthiopia(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || floorCpmEthiopia == null}
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-floor-cpm-global"
+                            label={chrome.floor_cpm_global_label}
+                            description={(chrome.floor_cpm_global_blurb || "").trim() || undefined}
+                          >
+                            <AmountInput
+                              id="progression-floor-cpm-global"
+                              value={floorCpmGlobal == null ? "" : String(floorCpmGlobal)}
+                              onValueChange={(next) => {
+                                setFloorCpmGlobal(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || floorCpmGlobal == null}
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-placement-lobby"
+                            label={chrome.placement_lobby_multiplier_label}
+                          >
+                            <AmountInput
+                              id="progression-placement-lobby"
+                              value={
+                                placementLobbyMultiplier == null
+                                  ? ""
+                                  : String(placementLobbyMultiplier)
+                              }
+                              onValueChange={(next) => {
+                                setPlacementLobbyMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={
+                                !isAdmin || save.isPending || placementLobbyMultiplier == null
+                              }
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-placement-in-match"
+                            label={chrome.placement_in_match_multiplier_label}
+                          >
+                            <AmountInput
+                              id="progression-placement-in-match"
+                              value={
+                                placementInMatchMultiplier == null
+                                  ? ""
+                                  : String(placementInMatchMultiplier)
+                              }
+                              onValueChange={(next) => {
+                                setPlacementInMatchMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={
+                                !isAdmin || save.isPending || placementInMatchMultiplier == null
+                              }
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-viewport-desktop"
+                            label={chrome.viewport_desktop_multiplier_label}
+                          >
+                            <AmountInput
+                              id="progression-viewport-desktop"
+                              value={
+                                viewportDesktopMultiplier == null
+                                  ? ""
+                                  : String(viewportDesktopMultiplier)
+                              }
+                              onValueChange={(next) => {
+                                setViewportDesktopMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={
+                                !isAdmin || save.isPending || viewportDesktopMultiplier == null
+                              }
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-viewport-tablet"
+                            label={chrome.viewport_tablet_multiplier_label}
+                          >
+                            <AmountInput
+                              id="progression-viewport-tablet"
+                              value={
+                                viewportTabletMultiplier == null
+                                  ? ""
+                                  : String(viewportTabletMultiplier)
+                              }
+                              onValueChange={(next) => {
+                                setViewportTabletMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={
+                                !isAdmin || save.isPending || viewportTabletMultiplier == null
+                              }
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-viewport-mobile"
+                            label={chrome.viewport_mobile_multiplier_label}
+                          >
+                            <AmountInput
+                              id="progression-viewport-mobile"
+                              value={
+                                viewportMobileMultiplier == null
+                                  ? ""
+                                  : String(viewportMobileMultiplier)
+                              }
+                              onValueChange={(next) => {
+                                setViewportMobileMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={
+                                !isAdmin || save.isPending || viewportMobileMultiplier == null
+                              }
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-peak-hour-mult"
+                            label={chrome.peak_hour_multiplier_label}
+                          >
+                            <AmountInput
+                              id="progression-peak-hour-mult"
+                              value={peakHourMultiplier == null ? "" : String(peakHourMultiplier)}
+                              onValueChange={(next) => {
+                                setPeakHourMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || peakHourMultiplier == null}
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-peak-hours-utc"
+                            label={chrome.peak_hours_utc_label}
+                          >
+                            <div className="flex gap-2">
+                              <Input
+                                id="progression-peak-hours-start"
+                                type="number"
+                                min={0}
+                                max={23}
+                                inputMode="numeric"
+                                value={peakHoursUtcStart ?? ""}
+                                onChange={(e) => {
+                                  const digits = sanitizeIntegerInput(e.target.value);
+                                  setPeakHoursUtcStart(digits === "" ? null : Number(digits));
+                                }}
+                                disabled={!isAdmin || save.isPending || peakHoursUtcStart == null}
+                                aria-label={chrome.peak_hours_utc_label}
+                              />
+                              <Input
+                                id="progression-peak-hours-end"
+                                type="number"
+                                min={0}
+                                max={23}
+                                inputMode="numeric"
+                                value={peakHoursUtcEnd ?? ""}
+                                onChange={(e) => {
+                                  const digits = sanitizeIntegerInput(e.target.value);
+                                  setPeakHoursUtcEnd(digits === "" ? null : Number(digits));
+                                }}
+                                disabled={!isAdmin || save.isPending || peakHoursUtcEnd == null}
+                                aria-label={chrome.peak_hours_utc_label}
+                              />
+                            </div>
+                          </Field>
+                          <Field
+                            id="progression-dynamic-floor-fill"
+                            label={chrome.dynamic_floor_fill_pct_label}
+                          >
+                            <AmountInput
+                              id="progression-dynamic-floor-fill"
+                              value={dynamicFloorFillPct == null ? "" : String(dynamicFloorFillPct)}
+                              onValueChange={(next) => {
+                                setDynamicFloorFillPct(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || dynamicFloorFillPct == null}
+                              maxDecimals={2}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-dynamic-floor-boost"
+                            label={chrome.dynamic_floor_boost_label}
+                          >
+                            <AmountInput
+                              id="progression-dynamic-floor-boost"
+                              value={dynamicFloorBoost == null ? "" : String(dynamicFloorBoost)}
+                              onValueChange={(next) => {
+                                setDynamicFloorBoost(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || dynamicFloorBoost == null}
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-audience-rating-min"
+                            label={chrome.audience_high_rating_min_label}
+                            description={
+                              (chrome.audience_high_rating_min_blurb || "").trim() || undefined
+                            }
+                          >
+                            <AmountInput
+                              id="progression-audience-rating-min"
+                              value={
+                                audienceHighRatingMin == null ? "" : String(audienceHighRatingMin)
+                              }
+                              onValueChange={(next) => {
+                                setAudienceHighRatingMin(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || audienceHighRatingMin == null}
+                              maxDecimals={0}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-audience-rating-mult"
+                            label={chrome.audience_high_rating_multiplier_label}
+                            description={
+                              (chrome.audience_high_rating_multiplier_blurb || "").trim() ||
+                              undefined
+                            }
+                          >
+                            <AmountInput
+                              id="progression-audience-rating-mult"
+                              value={
+                                audienceHighRatingMultiplier == null
+                                  ? ""
+                                  : String(audienceHighRatingMultiplier)
+                              }
+                              onValueChange={(next) => {
+                                setAudienceHighRatingMultiplier(next === "" ? null : Number(next));
+                              }}
+                              disabled={
+                                !isAdmin || save.isPending || audienceHighRatingMultiplier == null
+                              }
+                              maxDecimals={4}
+                            />
+                          </Field>
+                          <Field
+                            id="progression-agency-spend-pct"
+                            label={chrome.agency_spend_percent_label}
+                          >
+                            <AmountInput
+                              id="progression-agency-spend-pct"
+                              value={agencySpendPercent == null ? "" : String(agencySpendPercent)}
+                              onValueChange={(next) => {
+                                setAgencySpendPercent(next === "" ? null : Number(next));
+                              }}
+                              disabled={!isAdmin || save.isPending || agencySpendPercent == null}
+                              maxDecimals={2}
+                            />
+                          </Field>
+                        </div>
+
+                        <div className="space-y-3 border-t border-[var(--dama-border)] pt-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-semibold text-[var(--dama-text)]">
+                                {chrome.tiers_section_title}
+                              </h4>
+                              {(chrome.tiers_section_blurb || "").trim() ? (
+                                <p className="mt-1 text-sm text-[var(--dama-muted)]">
+                                  {chrome.tiers_section_blurb}
+                                </p>
+                              ) : null}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="gold"
+                              disabled={!isAdmin || save.isPending}
+                              onClick={() => setTiers((prev) => [...prev, emptyAdvertiserTier()])}
+                            >
+                              {chrome.xp_add_action}
+                            </Button>
+                          </div>
+                          {tiers.length === 0 ? (
+                            <p className="text-sm text-[var(--dama-muted)]">{chrome.xp_empty}</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {tiers.map((tier, index) => (
+                                <div
+                                  key={tier.rowKey}
+                                  className="space-y-2 rounded-md border border-[var(--dama-border)] p-3"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-sm font-medium text-[var(--dama-text)]">
+                                      {(tier.label || "").trim() ||
+                                        (tier.code || "").trim() ||
+                                        (chrome.empty_value || "").trim()}
+                                    </p>
+                                    {(chrome.xp_delete_action || "").trim() ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        disabled={!isAdmin || save.isPending}
+                                        onClick={() =>
+                                          setTiers((prev) => prev.filter((_, i) => i !== index))
+                                        }
+                                      >
+                                        {(chrome.xp_delete_action || "").trim()}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                    <Field
+                                      id={`tier-code-${index}`}
+                                      label={(chrome.tier_code_label || "").trim()}
+                                    >
+                                      <Input
+                                        id={`tier-code-${index}`}
+                                        value={tier.code}
+                                        onChange={(e) =>
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? {
+                                                    ...row,
+                                                    code: e.target.value.trim().toLowerCase(),
+                                                  }
+                                                : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-label-${index}`}
+                                      label={(chrome.tier_label_label || "").trim()}
+                                    >
+                                      <Input
+                                        id={`tier-label-${index}`}
+                                        value={tier.label}
+                                        onChange={(e) =>
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, label: e.target.value } : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-blurb-${index}`}
+                                      label={(chrome.tiers_section_blurb || "").trim()}
+                                    >
+                                      <Input
+                                        id={`tier-blurb-${index}`}
+                                        value={tier.blurb || ""}
+                                        onChange={(e) =>
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, blurb: e.target.value } : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-monthly-min-${index}`}
+                                      label={(chrome.tier_monthly_spend_min_label || "").trim()}
+                                    >
+                                      <AmountInput
+                                        id={`tier-monthly-min-${index}`}
+                                        value={String(tier.monthly_spend_min)}
+                                        onValueChange={(next) => {
+                                          const n = next === "" ? 0 : Number(next);
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, monthly_spend_min: n } : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                        maxDecimals={2}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-create-fee-mult-${index}`}
+                                      label={(chrome.tier_create_fee_multiplier_label || "").trim()}
+                                    >
+                                      <AmountInput
+                                        id={`tier-create-fee-mult-${index}`}
+                                        value={String(tier.create_fee_multiplier)}
+                                        onValueChange={(next) => {
+                                          const n = next === "" ? 0 : Number(next);
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? { ...row, create_fee_multiplier: n }
+                                                : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                        maxDecimals={4}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-media-daily-${index}`}
+                                      label={(chrome.tier_media_daily_min_label || "").trim()}
+                                    >
+                                      <AmountInput
+                                        id={`tier-media-daily-${index}`}
+                                        value={String(tier.media_daily_min)}
+                                        onValueChange={(next) => {
+                                          const n = next === "" ? 0 : Number(next);
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, media_daily_min: n } : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                        maxDecimals={2}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-list-cpm-mult-${index}`}
+                                      label={(chrome.tier_list_cpm_multiplier_label || "").trim()}
+                                    >
+                                      <AmountInput
+                                        id={`tier-list-cpm-mult-${index}`}
+                                        value={String(tier.list_cpm_multiplier)}
+                                        onValueChange={(next) => {
+                                          const n = next === "" ? 0 : Number(next);
+                                          setTiers((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? { ...row, list_cpm_multiplier: n }
+                                                : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                        maxDecimals={4}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`tier-unlock-reservation-${index}`}
+                                      label={chrome.tier_unlock_reservation_label}
+                                    >
+                                      <div className="flex min-h-10 items-center gap-2 pt-1">
+                                        <Checkbox
+                                          id={`tier-unlock-reservation-${index}`}
+                                          checked={tier.unlock_reservation}
+                                          onCheckedChange={(v) =>
+                                            setTiers((prev) =>
+                                              prev.map((row, i) =>
+                                                i === index
+                                                  ? { ...row, unlock_reservation: v === true }
+                                                  : row,
+                                              ),
+                                            )
+                                          }
+                                          disabled={!isAdmin || save.isPending}
+                                        />
+                                      </div>
+                                    </Field>
+                                    <Field
+                                      id={`tier-unlock-packages-${index}`}
+                                      label={chrome.tier_unlock_packages_label}
+                                    >
+                                      <div className="flex min-h-10 items-center gap-2 pt-1">
+                                        <Checkbox
+                                          id={`tier-unlock-packages-${index}`}
+                                          checked={tier.unlock_packages}
+                                          onCheckedChange={(v) =>
+                                            setTiers((prev) =>
+                                              prev.map((row, i) =>
+                                                i === index
+                                                  ? { ...row, unlock_packages: v === true }
+                                                  : row,
+                                              ),
+                                            )
+                                          }
+                                          disabled={!isAdmin || save.isPending}
+                                        />
+                                      </div>
+                                    </Field>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-3 border-t border-[var(--dama-border)] pt-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-semibold text-[var(--dama-text)]">
+                                {chrome.packages_admin_title}
+                              </h4>
+                              {(chrome.packages_admin_blurb || "").trim() ? (
+                                <p className="mt-1 text-sm text-[var(--dama-muted)]">
+                                  {chrome.packages_admin_blurb}
+                                </p>
+                              ) : null}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="gold"
+                              disabled={!isAdmin || save.isPending}
+                              onClick={() =>
+                                setAdPackages((prev) => [...prev, emptyAdPackage(prev.length)])
+                              }
+                            >
+                              {chrome.xp_add_action}
+                            </Button>
+                          </div>
+                          {adPackages.length === 0 ? (
+                            <p className="text-sm text-[var(--dama-muted)]">{chrome.xp_empty}</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {adPackages.map((pkg, index) => (
+                                <div
+                                  key={pkg.rowKey}
+                                  className="space-y-2 rounded-md border border-[var(--dama-border)] p-3"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-sm font-medium text-[var(--dama-text)]">
+                                      {(pkg.title || "").trim() ||
+                                        (pkg.code || "").trim() ||
+                                        (chrome.empty_value || "").trim()}
+                                    </p>
+                                    {(chrome.xp_delete_action || "").trim() ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        disabled={!isAdmin || save.isPending}
+                                        onClick={() =>
+                                          setAdPackages((prev) =>
+                                            prev.filter((_, i) => i !== index),
+                                          )
+                                        }
+                                      >
+                                        {(chrome.xp_delete_action || "").trim()}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                    <Field
+                                      id={`pkg-code-${index}`}
+                                      label={(chrome.xp_col_label || "").trim()}
+                                    >
+                                      <Input
+                                        id={`pkg-code-${index}`}
+                                        value={pkg.code}
+                                        onChange={(e) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? {
+                                                    ...row,
+                                                    code: e.target.value.trim().toLowerCase(),
+                                                  }
+                                                : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-title-${index}`}
+                                      label={(chrome.xp_label_field || "").trim()}
+                                    >
+                                      <Input
+                                        id={`pkg-title-${index}`}
+                                        value={pkg.title}
+                                        onChange={(e) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, title: e.target.value } : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-blurb-${index}`}
+                                      label={(chrome.packages_admin_blurb || "").trim()}
+                                    >
+                                      <Input
+                                        id={`pkg-blurb-${index}`}
+                                        value={pkg.blurb || ""}
+                                        onChange={(e) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, blurb: e.target.value } : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-buying-type-${index}`}
+                                      label={chrome.default_buying_type_label}
+                                    >
+                                      <Select
+                                        value={pkg.buying_type || undefined}
+                                        onValueChange={(next) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, buying_type: next } : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      >
+                                        <SelectTrigger id={`pkg-buying-type-${index}`}>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {(marketplaceEnabled === true
+                                            ? MARKETPLACE_BUYING_TYPE_OPTIONS
+                                            : BUYING_TYPE_OPTIONS
+                                          ).map((opt) => (
+                                            <SelectItem key={opt} value={opt}>
+                                              {opt}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </Field>
+                                    <Field
+                                      id={`pkg-fixed-cpm-${index}`}
+                                      label={chrome.package_fixed_cpm_label}
+                                    >
+                                      <AmountInput
+                                        id={`pkg-fixed-cpm-${index}`}
+                                        value={String(pkg.fixed_cpm)}
+                                        onValueChange={(next) => {
+                                          const n = next === "" ? 0 : Number(next);
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, fixed_cpm: n } : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                        maxDecimals={4}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-flight-fee-${index}`}
+                                      label={chrome.package_flight_fee_label}
+                                    >
+                                      <AmountInput
+                                        id={`pkg-flight-fee-${index}`}
+                                        value={String(pkg.flight_fee)}
+                                        onValueChange={(next) => {
+                                          const n = next === "" ? 0 : Number(next);
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index ? { ...row, flight_fee: n } : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                        maxDecimals={2}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-min-tier-${index}`}
+                                      label={chrome.package_min_tier_label}
+                                    >
+                                      <Input
+                                        id={`pkg-min-tier-${index}`}
+                                        value={pkg.min_tier}
+                                        onChange={(e) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? { ...row, min_tier: e.target.value }
+                                                : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-placement-${index}`}
+                                      label={chrome.package_placement_label}
+                                    >
+                                      <Input
+                                        id={`pkg-placement-${index}`}
+                                        value={pkg.placement || ""}
+                                        onChange={(e) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? { ...row, placement: e.target.value }
+                                                : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-sort-${index}`}
+                                      label={(chrome.tc_preset_col_sort || "").trim()}
+                                    >
+                                      <Input
+                                        id={`pkg-sort-${index}`}
+                                        inputMode="numeric"
+                                        value={String(pkg.sort_order)}
+                                        onChange={(e) => {
+                                          const digits = sanitizeIntegerInput(e.target.value, {
+                                            allowNegative: true,
+                                          });
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? {
+                                                    ...row,
+                                                    sort_order: digits === "" ? 0 : Number(digits),
+                                                  }
+                                                : row,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={!isAdmin || save.isPending}
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-exclusive-${index}`}
+                                      label={(chrome.package_exclusive_label || "").trim()}
+                                      description={
+                                        (chrome.package_exclusive_blurb || "").trim() || undefined
+                                      }
+                                    >
+                                      <div className="flex min-h-10 items-center gap-2 pt-1">
+                                        <Checkbox
+                                          id={`pkg-exclusive-${index}`}
+                                          checked={pkg.exclusive === true}
+                                          onCheckedChange={(v) =>
+                                            setAdPackages((prev) =>
+                                              prev.map((row, i) =>
+                                                i === index
+                                                  ? { ...row, exclusive: v === true }
+                                                  : row,
+                                              ),
+                                            )
+                                          }
+                                          disabled={!isAdmin || save.isPending}
+                                        />
+                                      </div>
+                                    </Field>
+                                    <Field
+                                      id={`pkg-exclusive-category-${index}`}
+                                      label={(chrome.package_exclusive_category_label || "").trim()}
+                                    >
+                                      <Input
+                                        id={`pkg-exclusive-category-${index}`}
+                                        value={pkg.exclusive_category || ""}
+                                        onChange={(e) =>
+                                          setAdPackages((prev) =>
+                                            prev.map((row, i) =>
+                                              i === index
+                                                ? { ...row, exclusive_category: e.target.value }
+                                                : row,
+                                            ),
+                                          )
+                                        }
+                                        disabled={
+                                          !isAdmin || save.isPending || pkg.exclusive !== true
+                                        }
+                                      />
+                                    </Field>
+                                    <Field
+                                      id={`pkg-enabled-${index}`}
+                                      label={(chrome.package_enabled_label || "").trim()}
+                                    >
+                                      <div className="flex min-h-10 items-center gap-2 pt-1">
+                                        <Checkbox
+                                          id={`pkg-enabled-${index}`}
+                                          checked={pkg.enabled}
+                                          onCheckedChange={(v) =>
+                                            setAdPackages((prev) =>
+                                              prev.map((row, i) =>
+                                                i === index ? { ...row, enabled: v === true } : row,
+                                              ),
+                                            )
+                                          }
+                                          disabled={!isAdmin || save.isPending}
+                                        />
+                                      </div>
+                                    </Field>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
                   <Field id="progression-web-origin" label={chrome.web_app_origin_label}>
                     <Input
                       id="progression-web-origin"
@@ -1037,7 +2223,8 @@ export default function ConsoleProgressionPage() {
                       drawRating == null ||
                       lossRating == null ||
                       ratingFloor == null ||
-                      startingRating == null
+                      startingRating == null ||
+                      !marketplaceHydrated
                     }
                     onClick={() => {
                       try {
@@ -1131,6 +2318,86 @@ export default function ConsoleProgressionPage() {
                         if (!origin || !/^https?:\/\//i.test(origin)) {
                           throw new Error(chrome.err_web_app_origin);
                         }
+                        const multPositive = (n: number | null | undefined) =>
+                          typeof n === "number" && Number.isFinite(n) && n > 0;
+                        const hourOk = (n: number | null | undefined) =>
+                          typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 23;
+                        if (marketplaceEnabled === true) {
+                          if (
+                            !multPositive(floorCpm) ||
+                            !multPositive(floorCpmEthiopia) ||
+                            !multPositive(floorCpmGlobal) ||
+                            !multPositive(placementLobbyMultiplier) ||
+                            !multPositive(placementInMatchMultiplier) ||
+                            !multPositive(viewportDesktopMultiplier) ||
+                            !multPositive(viewportTabletMultiplier) ||
+                            !multPositive(viewportMobileMultiplier) ||
+                            !multPositive(peakHourMultiplier) ||
+                            !hourOk(peakHoursUtcStart) ||
+                            !hourOk(peakHoursUtcEnd) ||
+                            dynamicFloorFillPct == null ||
+                            dynamicFloorFillPct < 0 ||
+                            dynamicFloorFillPct > 100 ||
+                            !multPositive(dynamicFloorBoost) ||
+                            agencySpendPercent == null ||
+                            agencySpendPercent < 0 ||
+                            !Number.isFinite(agencySpendPercent) ||
+                            audienceHighRatingMin == null ||
+                            audienceHighRatingMin < 0 ||
+                            !Number.isFinite(audienceHighRatingMin) ||
+                            !multPositive(audienceHighRatingMultiplier)
+                          ) {
+                            throw new Error((chrome.err_marketplace_invalid || "").trim());
+                          }
+                          const tierOk = tiers.some(
+                            (t) => t.code.trim().length > 0 && t.label.trim().length > 0,
+                          );
+                          if (!tierOk) {
+                            throw new Error((chrome.err_marketplace_invalid || "").trim());
+                          }
+                        }
+                        const tiersOut = tiers.map((t) => ({
+                          code: t.code.trim().toLowerCase(),
+                          label: t.label.trim(),
+                          blurb: (t.blurb || "").trim() || undefined,
+                          monthly_spend_min: t.monthly_spend_min,
+                          create_fee_multiplier: t.create_fee_multiplier,
+                          media_daily_min: t.media_daily_min,
+                          unlock_reservation: t.unlock_reservation,
+                          unlock_packages: t.unlock_packages,
+                          list_cpm_multiplier: t.list_cpm_multiplier,
+                        }));
+                        const packagesOut = adPackages.map((p, i) => {
+                          let buy = (p.buying_type || defaultBuyingType || "auction").trim();
+                          if (marketplaceEnabled === true && (buy === "legacy" || !buy)) {
+                            buy = "reservation";
+                          }
+                          return {
+                            code: p.code.trim().toLowerCase(),
+                            title: p.title.trim(),
+                            blurb: (p.blurb || "").trim() || undefined,
+                            buying_type: buy,
+                            fixed_cpm: p.fixed_cpm,
+                            flight_fee: p.flight_fee,
+                            min_tier: p.min_tier.trim(),
+                            placement: (p.placement || "").trim() || undefined,
+                            enabled: p.enabled,
+                            sort_order: Number.isFinite(p.sort_order) ? p.sort_order : i,
+                            exclusive: p.exclusive === true,
+                            exclusive_category: (p.exclusive_category || "").trim() || undefined,
+                          };
+                        });
+                        if (marketplaceEnabled === true) {
+                          const badPkg = packagesOut.find(
+                            (p) => p.enabled && !(Number(p.fixed_cpm) > 0),
+                          );
+                          if (badPkg) {
+                            throw new Error(
+                              (chrome.err_marketplace_invalid || "").trim() ||
+                                (chrome.package_fixed_cpm_label || "").trim(),
+                            );
+                          }
+                        }
                         save.mutate({
                           xp_levels: levels,
                           match_rewards: {
@@ -1158,7 +2425,51 @@ export default function ConsoleProgressionPage() {
                             campaign_create_fee_ethiopia_currency: ethiopiaCur,
                             campaign_create_fee_global_amount: globalCreateFeeAmount,
                             campaign_create_fee_global_currency: globalCur,
+                            marketplace_enabled: marketplaceEnabled === true,
+                            auction_enabled: auctionEnabled === true,
+                            reservation_enabled: reservationEnabled === true,
+                            default_buying_type: (() => {
+                              let raw = (defaultBuyingType || "").trim();
+                              if (marketplaceEnabled === true) {
+                                if (raw === "legacy" || !raw) {
+                                  raw =
+                                    auctionEnabled === true
+                                      ? "auction"
+                                      : reservationEnabled === true
+                                        ? "reservation"
+                                        : "";
+                                } else if (raw === "auction" && auctionEnabled !== true) {
+                                  raw = reservationEnabled === true ? "reservation" : "";
+                                } else if (raw === "reservation" && reservationEnabled !== true) {
+                                  raw = auctionEnabled === true ? "auction" : "";
+                                }
+                                return raw;
+                              }
+                              return raw || "auction";
+                            })(),
+                            floor_cpm: floorCpm ?? 0,
+                            floor_cpm_ethiopia: floorCpmEthiopia ?? floorCpm ?? 0,
+                            floor_cpm_global: floorCpmGlobal ?? floorCpm ?? 0,
+                            placement_lobby_multiplier: placementLobbyMultiplier ?? 1,
+                            placement_in_match_multiplier: placementInMatchMultiplier ?? 1,
+                            viewport_desktop_multiplier: viewportDesktopMultiplier ?? 1,
+                            viewport_tablet_multiplier: viewportTabletMultiplier ?? 1,
+                            viewport_mobile_multiplier: viewportMobileMultiplier ?? 1,
+                            peak_hour_multiplier: peakHourMultiplier ?? 1,
+                            peak_hours_utc_start: peakHoursUtcStart ?? 0,
+                            peak_hours_utc_end: peakHoursUtcEnd ?? 0,
+                            dynamic_floor_enabled: dynamicFloorEnabled === true,
+                            dynamic_floor_fill_pct: dynamicFloorFillPct ?? 0,
+                            dynamic_floor_boost: dynamicFloorBoost ?? 1,
+                            agency_enabled: agencyEnabled === true,
+                            agency_spend_percent: agencySpendPercent ?? 0,
+                            impression_wallet_settle_enabled:
+                              impressionWalletSettleEnabled === true,
+                            audience_high_rating_min: audienceHighRatingMin ?? 0,
+                            audience_high_rating_multiplier: audienceHighRatingMultiplier ?? 1,
+                            tiers: tiersOut,
                           },
+                          ad_packages: packagesOut,
                           web_app_origin: origin,
                         });
                       } catch (err) {

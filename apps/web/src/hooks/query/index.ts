@@ -2,6 +2,7 @@ export * from "./useAuthProvidersQuery";
 export * from "./useAdAnalyticsQuery";
 export * from "./useAdCampaignsQuery";
 export * from "./useAdPricingQuery";
+export * from "./useAdPackagesQuery";
 export * from "./useBoardRulesQuery";
 export * from "./useClientEnumsQuery";
 export * from "./useClientNavQuery";

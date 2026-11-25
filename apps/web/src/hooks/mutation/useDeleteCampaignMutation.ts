@@ -1,6 +1,6 @@
 import { adPlaybackQueryKey } from "@/hooks/query/useAdPlaybackQuery";
 import { restClient } from "@/lib/api";
-import { apiToastMessage } from "@/lib/api-toast-message";
+import { adsChromeErrorMessage } from "@/lib/ads-chrome-error";
 import { invalidateAdPublisher } from "@/lib/invalidate";
 import type { AdPlayback } from "@/types/ad-playback";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -22,8 +22,9 @@ export function useDeleteCampaignMutation(token: string | null | undefined) {
     },
     onError: (err) => {
       const chrome = qc.getQueryData<AdPlayback>(adPlaybackQueryKey())?.schedule_chrome;
-      const msg = apiToastMessage(
+      const msg = adsChromeErrorMessage(
         err,
+        chrome,
         chrome?.toast_campaign_delete_failed || chrome?.toast_save_failed || "",
       );
       if (msg) toast.error(msg);

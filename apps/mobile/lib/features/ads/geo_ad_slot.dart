@@ -163,14 +163,23 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
     if (placement.isEmpty) return;
     _impressedId = chosen.id;
     final viewer = await _stableViewerKey();
+    String? viewport;
+    if (bp != null && mounted) {
+      final width = MediaQuery.sizeOf(context).width;
+      viewport = resolveViewportSlot(width, bp).name;
+    }
+    final body = <String, dynamic>{
+      'viewer_key': viewer,
+      'placement': placement,
+    };
+    if (viewport != null && viewport.isNotEmpty) {
+      body['viewport'] = viewport;
+    }
     await http.post(
       Uri.parse(
           '${ApiConfig.baseUrl}/api/v1/ads/campaigns/${chosen.id}/impression'),
       headers: {'Content-Type': 'application/json', 'X-Device-Id': viewer},
-      body: jsonEncode({
-        'viewer_key': viewer,
-        'placement': placement,
-      }),
+      body: jsonEncode(body),
     );
   }
 

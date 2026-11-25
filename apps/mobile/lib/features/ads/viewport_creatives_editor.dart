@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dama_mobile/core/ads/resolve_viewport_creative.dart';
 import 'package:dama_mobile/core/lib/chrome_string.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
@@ -75,10 +77,11 @@ class _ViewportCreativesEditorState extends State<ViewportCreativesEditor> {
         }
         await widget.onSaved();
       } else {
-        _showUploadFailed();
+        final body = await streamed.stream.bytesToString();
+        _showUploadFailed(body);
       }
     } catch (_) {
-      if (mounted) _showUploadFailed();
+      if (mounted) _showUploadFailed('');
     } finally {
       if (mounted) {
         setState(() => _busySlot = null);
@@ -105,10 +108,10 @@ class _ViewportCreativesEditorState extends State<ViewportCreativesEditor> {
         }
         await widget.onSaved();
       } else {
-        _showUploadFailed();
+        _showUploadFailed(res.body);
       }
     } catch (_) {
-      if (mounted) _showUploadFailed();
+      if (mounted) _showUploadFailed('');
     } finally {
       if (mounted) {
         setState(() => _busySlot = null);
@@ -143,10 +146,11 @@ class _ViewportCreativesEditorState extends State<ViewportCreativesEditor> {
         }
         await widget.onSaved();
       } else {
-        _showUploadFailed();
+        final body = await streamed.stream.bytesToString();
+        _showUploadFailed(body);
       }
     } catch (_) {
-      if (mounted) _showUploadFailed();
+      if (mounted) _showUploadFailed('');
     } finally {
       if (mounted) {
         setState(() => _busySlot = null);
@@ -173,10 +177,10 @@ class _ViewportCreativesEditorState extends State<ViewportCreativesEditor> {
         }
         await widget.onSaved();
       } else {
-        _showUploadFailed();
+        _showUploadFailed(res.body);
       }
     } catch (_) {
-      if (mounted) _showUploadFailed();
+      if (mounted) _showUploadFailed('');
     } finally {
       if (mounted) {
         setState(() => _busySlot = null);
@@ -184,8 +188,18 @@ class _ViewportCreativesEditorState extends State<ViewportCreativesEditor> {
     }
   }
 
-  void _showUploadFailed() {
-    final msg = _c('media_upload_failed');
+  void _showUploadFailed(String body) {
+    var msg = _c('media_upload_failed');
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final key = decoded['error_key']?.toString().trim() ?? '';
+        if (key.isNotEmpty) {
+          final mapped = _c(key);
+          if (mapped.isNotEmpty) msg = mapped;
+        }
+      }
+    } catch (_) {}
     if (msg.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }

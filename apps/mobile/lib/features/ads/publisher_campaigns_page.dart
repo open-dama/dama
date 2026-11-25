@@ -7,6 +7,7 @@ import 'package:dama_mobile/core/geo/nominatim_reverse.dart';
 import 'package:dama_mobile/core/lib/chrome_string.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
+import 'package:dama_mobile/core/types/ads.dart';
 import 'package:dama_mobile/core/types/media_upload_chrome.dart';
 import 'package:dama_mobile/core/ui/chrome_date_field.dart';
 import 'package:dama_mobile/core/ui/chrome_select_sheet.dart';
@@ -28,6 +29,11 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
+
+const _packageNone = '__none__';
+const _buyingLegacy = 'legacy';
+const _buyingAuction = 'auction';
+const _buyingReservation = 'reservation';
 
 /// Publisher campaigns CRUD - REST `/ads/campaigns` (web parity).
 class PublisherCampaignsPage extends StatefulWidget {
@@ -59,6 +65,12 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
   String _defaultCreativeType = '';
   double? _createFeeAmount;
   String _createFeeCurrency = '';
+  PublisherAdPricing? _pricing;
+  bool _pricingFailed = false;
+  List<AdPackage> _packages = const [];
+  String _buyingType = '';
+  String _packageCode = _packageNone;
+  bool _agencyManaged = false;
   bool _loading = true;
   bool _busy = false;
   bool _createAttempted = false;
@@ -124,6 +136,8 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
   int _locateSeq = 0;
   final _cap = TextEditingController();
   final _endsAt = TextEditingController();
+  final _bidCpm = TextEditingController();
+  final _reservedCpm = TextEditingController();
 
   @override
   void initState() {
@@ -156,25 +170,123 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         lat.isFinite &&
         lng.isFinite &&
         !(lat == 0 && lng == 0);
-    final uri = pinOk
-        ? Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/pricing').replace(
-            queryParameters: {
-              'lat': lat.toString(),
-              'lng': lng.toString(),
-            },
-          )
-        : Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/pricing');
+    final q = <String, String>{};
+    if (pinOk) {
+      q['lat'] = lat.toString();
+      q['lng'] = lng.toString();
+    }
+    if (_agencyManaged) {
+      q['agency_managed'] = '1';
+    }
+    final uri = q.isEmpty
+        ? Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/pricing')
+        : Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/pricing')
+            .replace(queryParameters: q);
     final pricing = await http.get(uri);
-    if (pricing.statusCode != 200 || !mounted) return;
+    if (!mounted) return;
+    if (pricing.statusCode != 200) {
+      setState(() {
+        _pricing = null;
+        _pricingFailed = true;
+        _createFeeAmount = null;
+        _createFeeCurrency = '';
+      });
+      return;
+    }
     final body = jsonDecode(pricing.body) as Map<String, dynamic>;
-    final feeRaw = body['campaign_create_fee_amount'];
+    _applyPricingBody(body);
+  }
+
+  void _applyPricingBody(Map<String, dynamic> body) {
+    final parsed = PublisherAdPricing.tryFromJson(body);
+    if (parsed == null) {
+      setState(() {
+        _pricing = null;
+        _pricingFailed = true;
+        _createFeeAmount = null;
+        _createFeeCurrency = '';
+      });
+      return;
+    }
     setState(() {
-      _createFeeAmount = feeRaw is num ? feeRaw.toDouble() : null;
-      _createFeeCurrency =
-          (body['campaign_create_fee_currency'] as String? ?? '')
-              .trim()
-              .toUpperCase();
+      _pricing = parsed;
+      _pricingFailed = false;
+      _createFeeAmount = parsed.campaignCreateFeeAmount;
+      _createFeeCurrency = parsed.campaignCreateFeeCurrency;
     });
+    _syncDefaultBuyingType();
+    unawaited(_fetchPackagesIfNeeded());
+  }
+
+  void _syncDefaultBuyingType() {
+    final p = _pricing;
+    if (p == null || !p.marketplaceEnabled) {
+      if (_buyingType.isNotEmpty ||
+          _agencyManaged ||
+          _packageCode != _packageNone) {
+        setState(() {
+          _buyingType = '';
+          _bidCpm.clear();
+          _reservedCpm.clear();
+          _packageCode = _packageNone;
+          _agencyManaged = false;
+        });
+      }
+      return;
+    }
+    final def = p.defaultBuyingType.trim();
+    String next = '';
+    if (def == _buyingAuction && p.auctionEnabled) {
+      next = def;
+    } else if (def == _buyingReservation && p.reservationEnabled) {
+      next = def;
+    } else if (p.auctionEnabled) {
+      next = _buyingAuction;
+    } else if (p.reservationEnabled) {
+      next = _buyingReservation;
+    }
+    final cur = _buyingType.trim();
+    if (cur == _buyingAuction && p.auctionEnabled) return;
+    if (cur == _buyingReservation && p.reservationEnabled) return;
+    if (next.isEmpty) {
+      if (cur.isNotEmpty) setState(() => _buyingType = '');
+      return;
+    }
+    setState(() => _buyingType = next);
+  }
+
+  Future<void> _fetchPackagesIfNeeded() async {
+    final p = _pricing;
+    if (p == null ||
+        !p.marketplaceEnabled ||
+        !_pinOk ||
+        _buyingType != _buyingReservation ||
+        !p.reservationEnabled) {
+      if (mounted && _packages.isNotEmpty) {
+        setState(() => _packages = const []);
+      }
+      return;
+    }
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/packages'),
+        headers: _authHeaders(),
+      );
+      if (!mounted) return;
+      if (res.statusCode != 200) {
+        setState(() => _packages = const []);
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final list = (body['packages'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(AdPackage.fromJson)
+          .where((pkg) => pkg.code.isNotEmpty && pkg.enabled)
+          .toList();
+      setState(() => _packages = list);
+    } catch (_) {
+      if (mounted) setState(() => _packages = const []);
+    }
   }
 
   Future<void> _resolvePin(double lat, double lng) async {
@@ -315,6 +427,8 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
     _district.dispose();
     _cap.dispose();
     _endsAt.dispose();
+    _bidCpm.dispose();
+    _reservedCpm.dispose();
     super.dispose();
   }
 
@@ -326,9 +440,629 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
 
   String _c(String key) => chromeMapString(_chrome, key);
 
+  /// Prefer API error_key → chrome; never surface raw API English.
+  String _adsErrFromBody(String body, String fallback) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final key = decoded['error_key']?.toString().trim() ?? '';
+        if (key.isNotEmpty) {
+          final mapped = _c(key);
+          if (mapped.isNotEmpty) return mapped;
+        }
+      }
+    } catch (_) {}
+    return fallback;
+  }
+
   int get _listPageSize {
     final n = int.tryParse(_c('list_page_size'));
     return n != null && n > 0 ? n : 0;
+  }
+
+  bool get _pinOk =>
+      _pinLat != null &&
+      _pinLng != null &&
+      _pinLat!.isFinite &&
+      _pinLng!.isFinite &&
+      !(_pinLat == 0 && _pinLng == 0);
+
+  bool get _marketplaceOn => _pricing?.marketplaceEnabled == true;
+
+  double? get _floorCpm {
+    final f = _pricing?.floorCpm ?? 0;
+    return f > 0 ? f : null;
+  }
+
+  List<AdPackage> get _reservationPackages => _packages
+      .where((p) => p.enabled && p.buyingType.trim() == _buyingReservation)
+      .toList();
+
+  bool get _buyingTypeOk {
+    if (!_marketplaceOn) return true;
+    if (_buyingType == _buyingAuction) {
+      return _pricing?.auctionEnabled == true;
+    }
+    if (_buyingType == _buyingReservation) {
+      return _pricing?.reservationEnabled == true;
+    }
+    return false;
+  }
+
+  bool get _auctionBidOk {
+    if (!_marketplaceOn || _buyingType != _buyingAuction) return true;
+    final bid = num.tryParse(_bidCpm.text.trim());
+    if (bid == null || bid <= 0) return false;
+    final floor = _floorCpm;
+    return floor == null || bid + 1e-9 >= floor;
+  }
+
+  bool get _reservationCpmOk {
+    if (!_marketplaceOn || _buyingType != _buyingReservation) return true;
+    if (_packageCode != _packageNone) return true;
+    final reserved = num.tryParse(_reservedCpm.text.trim());
+    if (reserved == null || reserved <= 0) return false;
+    final floor = _floorCpm;
+    return floor == null || reserved + 1e-9 >= floor;
+  }
+
+  bool get _mediaMinOk {
+    if (!_marketplaceOn) return true;
+    final min = _pricing?.mediaDailyMin ?? 0;
+    if (min <= 0) return true;
+    final cap = num.tryParse(_cap.text.trim());
+    return cap != null && cap > 0 && cap + 1e-9 >= min;
+  }
+
+  bool get _marketplaceCreateOk {
+    if (!_marketplaceOn) return true;
+    if (_pricingFailed || _pricing == null) return false;
+    if (_buyingType.trim().isEmpty ||
+        !_buyingTypeOk ||
+        !_auctionBidOk ||
+        !_reservationCpmOk ||
+        !_mediaMinOk) {
+      return false;
+    }
+    return true;
+  }
+
+  String _buyingTypeLabel(String type) {
+    switch (type) {
+      case _buyingAuction:
+        return _c('buying_type_auction_label');
+      case _buyingReservation:
+        return _c('buying_type_reservation_label');
+      case _buyingLegacy:
+        return _c('platform_default_placeholder');
+      default:
+        return type;
+    }
+  }
+
+  List<ChromeSelectOption<String>> _buyingTypeOptions() {
+    final p = _pricing;
+    final options = <ChromeSelectOption<String>>[];
+    if (p != null &&
+        p.auctionEnabled &&
+        _c('buying_type_auction_label').isNotEmpty) {
+      options.add(
+        ChromeSelectOption(
+          value: _buyingAuction,
+          label: _c('buying_type_auction_label'),
+        ),
+      );
+    }
+    if (p != null &&
+        p.reservationEnabled &&
+        _c('buying_type_reservation_label').isNotEmpty) {
+      options.add(
+        ChromeSelectOption(
+          value: _buyingReservation,
+          label: _c('buying_type_reservation_label'),
+        ),
+      );
+    }
+    if (!_marketplaceOn && _c('platform_default_placeholder').isNotEmpty) {
+      options.add(
+        ChromeSelectOption(
+          value: _buyingLegacy,
+          label: _c('platform_default_placeholder'),
+        ),
+      );
+    }
+    return options;
+  }
+
+  void _onBuyingTypePicked(String type) {
+    setState(() {
+      _buyingType = type;
+      _bidCpm.clear();
+      _reservedCpm.clear();
+      _packageCode = _packageNone;
+    });
+    unawaited(_fetchPackagesIfNeeded());
+  }
+
+  String? _marketplaceValidationError() {
+    if (!_marketplaceOn) return null;
+    if (_pricingFailed || _pricing == null) {
+      final msg = _c('marketplace_unavailable');
+      return msg.isNotEmpty ? msg : null;
+    }
+    if (_buyingType.trim().isEmpty) {
+      final msg = _c('err_buying_type_required');
+      return msg.isNotEmpty ? msg : null;
+    }
+    if (!_buyingTypeOk) {
+      if (_buyingType == _buyingAuction) {
+        final msg = _c('err_buying_type_locked');
+        return msg.isNotEmpty ? msg : null;
+      }
+      if (_buyingType == _buyingReservation) {
+        final msg = _c('err_reservation_locked');
+        return msg.isNotEmpty ? msg : null;
+      }
+    }
+    if (!_mediaMinOk) {
+      final msg = _c('err_media_daily_min');
+      return msg.isNotEmpty ? msg : null;
+    }
+    if (_buyingType == _buyingAuction && !_auctionBidOk) {
+      final bid = num.tryParse(_bidCpm.text.trim());
+      final floor = _floorCpm;
+      final msg =
+          (bid != null && bid > 0 && floor != null && bid + 1e-9 < floor)
+              ? _c('err_bid_below_floor')
+              : _c('err_bid_cpm_required');
+      return msg.isNotEmpty ? msg : null;
+    }
+    if (_buyingType == _buyingReservation && !_reservationCpmOk) {
+      final reserved = num.tryParse(_reservedCpm.text.trim());
+      final floor = _floorCpm;
+      final msg = (reserved != null &&
+              reserved > 0 &&
+              floor != null &&
+              reserved + 1e-9 < floor)
+          ? _c('err_bid_below_floor')
+          : (_c('err_reserved_cpm_required').isNotEmpty
+              ? _c('err_reserved_cpm_required')
+              : _c('err_bid_cpm_required'));
+      return msg.isNotEmpty ? msg : null;
+    }
+    return null;
+  }
+
+  Widget _buildCampaignMarketplaceSummary(
+    Map<String, dynamic> campaign,
+    Color muted,
+  ) {
+    final bt = (campaign['buying_type']?.toString() ?? '').trim();
+    final agency = campaign['agency_managed'] == true;
+    final pkgCode = (campaign['package_code']?.toString() ?? '').trim();
+    if (bt.isEmpty && !agency && pkgCode.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final title = _c('detail_marketplace_title');
+    if (title.isEmpty) return const SizedBox.shrink();
+    var buyLabel = _c('detail_standard_buying_label');
+    if (bt == _buyingAuction) {
+      buyLabel = _c('buying_type_auction_label');
+    } else if (bt == _buyingReservation) {
+      buyLabel = _c('buying_type_reservation_label');
+    } else if (bt == _buyingLegacy || bt.isEmpty) {
+      final def = _c('platform_default_placeholder');
+      if (def.isNotEmpty) buyLabel = def;
+    }
+    final rateSuffix = _c('detail_rate_suffix');
+    String rateText = '';
+    String rateLabel = '';
+    if (bt == _buyingAuction) {
+      final bid = campaign['bid_cpm'];
+      if (bid is num && bid > 0) {
+        rateLabel = _c('bid_cpm_label');
+        rateText = rateSuffix.isNotEmpty ? '$bid $rateSuffix' : '$bid';
+      }
+    } else if (bt == _buyingReservation) {
+      final reserved = campaign['reserved_cpm'];
+      if (reserved is num && reserved > 0) {
+        rateLabel = _c('reserved_cpm_label');
+        rateText =
+            rateSuffix.isNotEmpty ? '$reserved $rateSuffix' : '$reserved';
+      }
+    }
+    String pkgTitle = '';
+    if (pkgCode.isNotEmpty) {
+      pkgTitle = _packages
+              .where((p) => p.code == pkgCode)
+              .map((p) => p.title)
+              .where((t) => t.isNotEmpty)
+              .firstOrNull ??
+          '';
+    }
+    final lines = <String>[
+      if (_c('buying_type_label').isNotEmpty && buyLabel.isNotEmpty)
+        '${_c('buying_type_label')}: $buyLabel'
+      else if (buyLabel.isNotEmpty)
+        buyLabel,
+      if (rateLabel.isNotEmpty && rateText.isNotEmpty) '$rateLabel: $rateText',
+      if (pkgTitle.isNotEmpty && _c('package_label').isNotEmpty)
+        '${_c('package_label')}: $pkgTitle',
+      if (agency && _c('agency_managed_label').isNotEmpty)
+        _c('agency_managed_label'),
+      if (_c('marketplace_fields_locked_blurb').isNotEmpty)
+        _c('marketplace_fields_locked_blurb'),
+    ];
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
+              for (final line in lines)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child:
+                      Text(line, style: TextStyle(color: muted, fontSize: 12)),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMarketplaceCreateSection(Color muted, Color gold, Color danger) {
+    if (!_marketplaceOn || !_pinOk || _c('marketplace_section_title').isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final p = _pricing;
+    final options = _buyingTypeOptions();
+    final reservationPackages = _reservationPackages;
+    final showPackages = (p?.unlockPackages ?? false) &&
+        reservationPackages.isNotEmpty &&
+        _c('package_label').isNotEmpty;
+    return SizedBox(
+      width: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _c('marketplace_section_title'),
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              if (_c('marketplace_section_blurb').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _c('marketplace_section_blurb'),
+                    style: TextStyle(color: muted, fontSize: 13),
+                  ),
+                ),
+              if (_c('marketplace_fields_locked_blurb').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _c('marketplace_fields_locked_blurb'),
+                    style: TextStyle(color: muted, fontSize: 12),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              if (_pricingFailed || p == null)
+                Text(
+                  _c('marketplace_unavailable'),
+                  style: TextStyle(color: danger),
+                )
+              else ...[
+                if (_c('tier_label').isNotEmpty) ...[
+                  Text(
+                    _c('tier_label'),
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  if ((p.advertiserTierLabel).isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        p.advertiserTierLabel,
+                        style: TextStyle(
+                          color: gold,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  if (_c('tier_blurb').isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _c('tier_blurb'),
+                        style: TextStyle(color: muted, fontSize: 13),
+                      ),
+                    ),
+                  if (p.advertiserTierBlurb.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        p.advertiserTierBlurb,
+                        style: TextStyle(color: muted, fontSize: 13),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                ],
+                if (_floorCpm != null && _c('floor_cpm_label').isNotEmpty) ...[
+                  Text(
+                    _c('floor_cpm_label'),
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  if (_c('floor_cpm_blurb').isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _c('floor_cpm_blurb'),
+                        style: TextStyle(color: muted, fontSize: 13),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      _createFeeCurrency.isNotEmpty &&
+                              _c('amount_currency_separator').isNotEmpty
+                          ? '$_floorCpm${_c('amount_currency_separator')}$_createFeeCurrency'
+                          : '$_floorCpm',
+                      style: TextStyle(
+                        color: gold,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_c('buying_type_label').isNotEmpty && options.isNotEmpty)
+                  ChromeSelectField(
+                    label: _c('buying_type_label'),
+                    valueLabel: _buyingType.isNotEmpty
+                        ? _buyingTypeLabel(_buyingType)
+                        : '',
+                    hintText: _c('buying_type_label'),
+                    onTap: () async {
+                      final picked = await showChromeOptionSheet<String>(
+                        context: context,
+                        title: _c('buying_type_label'),
+                        options: options,
+                        selected: _buyingType.isNotEmpty ? _buyingType : null,
+                      );
+                      if (picked != null && picked != _buyingType) {
+                        _onBuyingTypePicked(picked);
+                      }
+                    },
+                  ),
+                if (_buyingType == _buyingAuction &&
+                    _c('buying_type_auction_blurb').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _c('buying_type_auction_blurb'),
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ),
+                if (_buyingType == _buyingReservation &&
+                    _c('buying_type_reservation_blurb').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _c('buying_type_reservation_blurb'),
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ),
+                if (_buyingType == _buyingAuction &&
+                    _c('bid_cpm_label').isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _bidCpm,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: _c('bid_cpm_label'),
+                      hintText: _c('bid_cpm_label'),
+                      border: const OutlineInputBorder(),
+                      helperText: _c('bid_cpm_blurb').isNotEmpty
+                          ? _c('bid_cpm_blurb')
+                          : null,
+                      errorText: _createAttempted && !_auctionBidOk
+                          ? (_marketplaceValidationError() ?? '')
+                          : null,
+                    ),
+                    onChanged: (v) {
+                      final s = sanitizeDecimalInput(v);
+                      if (s != v) {
+                        _bidCpm.value = TextEditingValue(
+                          text: s,
+                          selection: TextSelection.collapsed(offset: s.length),
+                        );
+                      }
+                      if (_createAttempted) setState(() {});
+                    },
+                  ),
+                ],
+                if (_buyingType == _buyingReservation) ...[
+                  const SizedBox(height: 12),
+                  if (showPackages &&
+                      _c('packages_section_title').isNotEmpty) ...[
+                    Text(
+                      _c('packages_section_title'),
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    if (_c('packages_section_blurb').isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, bottom: 8),
+                        child: Text(
+                          _c('packages_section_blurb'),
+                          style: TextStyle(color: muted, fontSize: 12),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 8),
+                  ],
+                  if (showPackages)
+                    ChromeSelectField(
+                      label: _c('package_label'),
+                      valueLabel: _packageCode == _packageNone
+                          ? _c('package_none_label')
+                          : (reservationPackages
+                                  .where((pkg) => pkg.code == _packageCode)
+                                  .map((pkg) => pkg.title)
+                                  .where((t) => t.isNotEmpty)
+                                  .firstOrNull ??
+                              _packageCode),
+                      hintText: _c('package_label'),
+                      onTap: () async {
+                        final pkgOptions = <ChromeSelectOption<String>>[
+                          if (_c('package_none_label').isNotEmpty)
+                            ChromeSelectOption(
+                              value: _packageNone,
+                              label: _c('package_none_label'),
+                            ),
+                          for (final pkg in reservationPackages)
+                            ChromeSelectOption(
+                              value: pkg.code,
+                              label:
+                                  pkg.title.isNotEmpty ? pkg.title : pkg.code,
+                            ),
+                        ];
+                        final picked = await showChromeOptionSheet<String>(
+                          context: context,
+                          title: _c('package_label'),
+                          options: pkgOptions,
+                          selected: _packageCode,
+                        );
+                        if (picked != null && picked != _packageCode) {
+                          setState(() {
+                            _packageCode = picked;
+                            if (picked != _packageNone) _reservedCpm.clear();
+                          });
+                        }
+                      },
+                    ),
+                  if (showPackages && _packageCode != _packageNone)
+                    Builder(
+                      builder: (context) {
+                        final picked = reservationPackages
+                            .where((pkg) => pkg.code == _packageCode)
+                            .firstOrNull;
+                        if (picked == null) return const SizedBox.shrink();
+                        final lines = <String>[
+                          if (picked.blurb.isNotEmpty) picked.blurb,
+                          if (picked.exclusive &&
+                              _c('package_exclusive_label').isNotEmpty)
+                            _c('package_exclusive_label'),
+                          if (picked.exclusive &&
+                              _c('package_exclusive_blurb').isNotEmpty)
+                            _c('package_exclusive_blurb'),
+                        ];
+                        if (lines.isEmpty) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            lines.join('\n'),
+                            style: TextStyle(color: muted, fontSize: 12),
+                          ),
+                        );
+                      },
+                    ),
+                  if (_packageCode == _packageNone &&
+                      _c('reserved_cpm_label').isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _reservedCpm,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: _c('reserved_cpm_label'),
+                        hintText: _c('reserved_cpm_label'),
+                        border: const OutlineInputBorder(),
+                        helperText: _c('reserved_cpm_blurb').isNotEmpty
+                            ? _c('reserved_cpm_blurb')
+                            : null,
+                        errorText: _createAttempted && !_reservationCpmOk
+                            ? () {
+                                final reserved =
+                                    num.tryParse(_reservedCpm.text.trim());
+                                final floor = _floorCpm;
+                                final belowFloor = reserved != null &&
+                                    reserved > 0 &&
+                                    floor != null &&
+                                    reserved + 1e-9 < floor;
+                                final msg = belowFloor
+                                    ? _c('err_bid_below_floor')
+                                    : (_c('err_reserved_cpm_required')
+                                            .isNotEmpty
+                                        ? _c('err_reserved_cpm_required')
+                                        : _c('err_bid_cpm_required'));
+                                return msg.isNotEmpty ? msg : null;
+                              }()
+                            : null,
+                      ),
+                      onChanged: (v) {
+                        final s = sanitizeDecimalInput(v);
+                        if (s != v) {
+                          _reservedCpm.value = TextEditingValue(
+                            text: s,
+                            selection:
+                                TextSelection.collapsed(offset: s.length),
+                          );
+                        }
+                        if (_createAttempted) setState(() {});
+                      },
+                    ),
+                  ],
+                ],
+                if (p.agencyEnabled &&
+                    _c('agency_managed_label').isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: _agencyManaged,
+                    onChanged: (v) {
+                      setState(() => _agencyManaged = v == true);
+                      unawaited(_refreshPricingAtPin(_pinLat, _pinLng));
+                    },
+                    title: Text(_c('agency_managed_label')),
+                    subtitle: _c('agency_managed_blurb').isNotEmpty
+                        ? Text(
+                            _c('agency_managed_blurb'),
+                            style: TextStyle(color: muted, fontSize: 12),
+                          )
+                        : null,
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Map<String, String> _authHeaders({bool json = false}) => {
@@ -376,12 +1110,19 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
       );
       if (pricing.statusCode == 200) {
         final body = jsonDecode(pricing.body) as Map<String, dynamic>;
-        final feeRaw = body['campaign_create_fee_amount'];
-        _createFeeAmount = feeRaw is num ? feeRaw.toDouble() : null;
-        _createFeeCurrency =
-            (body['campaign_create_fee_currency'] as String? ?? '')
-                .trim()
-                .toUpperCase();
+        final parsed = PublisherAdPricing.tryFromJson(body);
+        if (parsed != null) {
+          _pricing = parsed;
+          _pricingFailed = false;
+          _createFeeAmount = parsed.campaignCreateFeeAmount;
+          _createFeeCurrency = parsed.campaignCreateFeeCurrency;
+        } else {
+          _pricing = null;
+          _pricingFailed = true;
+        }
+      } else {
+        _pricing = null;
+        _pricingFailed = true;
       }
       final enums = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/v1/platform/enums'),
@@ -444,6 +1185,8 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         _loading = false;
       });
       unawaited(SkipStore.write(_skipKey, nextSkip));
+      _syncDefaultBuyingType();
+      unawaited(_fetchPackagesIfNeeded());
       await _resolveFocusCampaign();
     } catch (_) {
       if (!mounted) return;
@@ -518,6 +1261,15 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
     final cap = num.tryParse(_cap.text.trim());
     final capOk = cap != null && cap > 0;
     setState(() => _createAttempted = true);
+    if (_marketplaceOn && !_marketplaceCreateOk) {
+      final msg = _marketplaceValidationError();
+      if (msg != null && msg.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+      return;
+    }
     if (title.isEmpty ||
         country.length != 2 ||
         _defaultCreativeType.isEmpty ||
@@ -570,6 +1322,31 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
           body['ends_at'] = parsed.toUtc().toIso8601String();
         }
       }
+      if (_marketplaceOn) {
+        final buying = _buyingType.trim();
+        if (buying.isNotEmpty) {
+          body['buying_type'] = buying;
+        }
+        if (buying == _buyingAuction) {
+          final bid = num.tryParse(_bidCpm.text.trim());
+          if (bid != null && bid > 0) {
+            body['bid_cpm'] = bid;
+          }
+        }
+        if (buying == _buyingReservation) {
+          if (_packageCode != _packageNone && _packageCode.trim().isNotEmpty) {
+            body['package_code'] = _packageCode.trim();
+          } else {
+            final reserved = num.tryParse(_reservedCpm.text.trim());
+            if (reserved != null && reserved > 0) {
+              body['reserved_cpm'] = reserved;
+            }
+          }
+        }
+        if (_agencyManaged) {
+          body['agency_managed'] = true;
+        }
+      }
       final res = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/campaigns'),
         headers: _authHeaders(json: true),
@@ -585,10 +1362,11 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
             final key = decoded['error_key']?.toString().trim() ?? '';
             if (key.isNotEmpty) {
               final mapped = _c(key);
-              if (mapped.isNotEmpty) err = mapped;
+              if (mapped.isNotEmpty) {
+                err = mapped;
+              }
             }
-            final msg = decoded['error']?.toString().trim() ?? '';
-            if (msg.isNotEmpty) err = msg;
+            // Fail closed: never surface raw API English; chrome / status map only.
           }
         } catch (_) {}
         if (mounted) {
@@ -707,6 +1485,10 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          _buildCampaignMarketplaceSummary(
+                            campaign,
+                            tokens.onSurfaceMuted,
+                          ),
                           if (_viewportCreativesChromeReady)
                             ViewportCreativesEditor(
                               accessToken: widget.accessToken,
@@ -822,8 +1604,11 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         try {
           final decoded = jsonDecode(res.body);
           if (decoded is Map) {
-            final msg = decoded['error']?.toString().trim() ?? '';
-            if (msg.isNotEmpty) err = msg;
+            final key = decoded['error_key']?.toString().trim() ?? '';
+            if (key.isNotEmpty) {
+              final mapped = _c(key);
+              if (mapped.isNotEmpty) err = mapped;
+            }
           }
         } catch (_) {}
         if (mounted && err.isNotEmpty) {
@@ -862,8 +1647,7 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         }
         await _load();
       } else if (mounted) {
-        // Chrome-only (never invent API English bodies).
-        final msg = _c('toast_save_failed');
+        final msg = _adsErrFromBody(res.body, _c('toast_save_failed'));
         if (msg.isNotEmpty) {
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(msg)));
@@ -933,7 +1717,7 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
           body: jsonEncode({'status': status}),
         );
         if (res.statusCode >= 300) {
-          final msg = _c('toast_save_failed');
+          final msg = _adsErrFromBody(res.body, _c('toast_save_failed'));
           if (mounted && msg.isNotEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(msg)),
@@ -975,8 +1759,23 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
           );
         }
         await _load();
+      } else if (mounted) {
+        final msg = _adsErrFromBody(res.body, _c('toast_save_failed'));
+        if (msg.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg)),
+          );
+        }
       }
     } catch (_) {
+      if (mounted) {
+        final msg = _c('toast_save_failed');
+        if (msg.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg)),
+          );
+        }
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -999,7 +1798,8 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         }
         await _load();
       } else if (mounted) {
-        final msg = _c('toast_campaign_close_failed');
+        final msg =
+            _adsErrFromBody(res.body, _c('toast_campaign_close_failed'));
         if (msg.isEmpty) return;
         setState(() => _error = msg);
       }
@@ -1028,7 +1828,8 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         }
         await _load();
       } else if (mounted) {
-        final msg = _c('toast_campaign_reopen_failed');
+        final msg =
+            _adsErrFromBody(res.body, _c('toast_campaign_reopen_failed'));
         if (msg.isEmpty) return;
         setState(() => _error = msg);
       }
@@ -1130,7 +1931,10 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         );
         await _load();
       } else if (mounted) {
-        setState(() => _error = _c('media_upload_failed'));
+        final body = await streamed.stream.bytesToString();
+        setState(
+          () => _error = _adsErrFromBody(body, _c('media_upload_failed')),
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _error = _c('media_upload_failed'));
@@ -1171,9 +1975,12 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
           final body = await streamed.stream.bytesToString();
           try {
             final decoded = jsonDecode(body);
-            if (decoded is Map && decoded['error'] is String) {
-              final err = (decoded['error'] as String).trim();
-              if (err.isNotEmpty) limitMsg = err;
+            if (decoded is Map) {
+              final key = decoded['error_key']?.toString().trim() ?? '';
+              if (key.isNotEmpty) {
+                final mapped = _c(key);
+                if (mapped.isNotEmpty) limitMsg = mapped;
+              }
             }
           } catch (_) {}
           break;
@@ -1218,7 +2025,9 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         );
         await _load();
       } else if (mounted) {
-        setState(() => _error = _c('media_upload_failed'));
+        setState(
+          () => _error = _adsErrFromBody(res.body, _c('media_upload_failed')),
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _error = _c('media_upload_failed'));
@@ -1251,7 +2060,9 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
         );
         await _load();
       } else if (mounted) {
-        setState(() => _error = _c('media_upload_failed'));
+        setState(
+          () => _error = _adsErrFromBody(res.body, _c('media_upload_failed')),
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _error = _c('media_upload_failed'));
@@ -1444,6 +2255,15 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
                   },
                 ),
               ),
+            if (_marketplaceOn)
+              SizedBox(
+                width: double.infinity,
+                child: _buildMarketplaceCreateSection(
+                  tokens.onSurfaceMuted,
+                  tokens.gold,
+                  tokens.danger,
+                ),
+              ),
             if (_c('campaign_create_fee_label').isNotEmpty)
               SizedBox(
                 width: 280,
@@ -1490,8 +2310,9 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
                       _country.text.trim().isEmpty ||
                       (num.tryParse(_cap.text.trim()) ?? 0) <= 0 ||
                       _createFeeAmount == null ||
-                      _createFeeAmount! <= 0 ||
-                      _createFeeCurrency.isEmpty
+                      _createFeeAmount! < 0 ||
+                      _createFeeCurrency.isEmpty ||
+                      !_marketplaceCreateOk
                   ? null
                   : _create,
               child: Text(_c('create_action')),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"sync"
 	"time"
@@ -48,8 +49,15 @@ type AdCampaign struct {
 	EndsAt                *time.Time      `json:"ends_at,omitempty"`
 	ClosedAt              *time.Time      `json:"closed_at,omitempty"`
 	AutoClosed            bool            `json:"auto_closed"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"-"`
+	// Marketplace (additive). legacy = existing flat unit-cost path.
+	BuyingType         string    `json:"buying_type,omitempty"`
+	BidCPM             *float64  `json:"bid_cpm,omitempty"`
+	ReservedCPM        *float64  `json:"reserved_cpm,omitempty"`
+	PackageCode        string    `json:"package_code,omitempty"`
+	AgencyManaged      bool      `json:"agency_managed,omitempty"`
+	AdvertiserTierCode string    `json:"advertiser_tier_code,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"-"`
 }
 
 type AdStore struct {
@@ -72,15 +80,55 @@ func (s *AdStore) requireDB() error {
 	return fmt.Errorf("service temporarily unavailable")
 }
 
+// ExclusivePackageLockKey hashes an exclusivity bucket for pg_advisory_lock.
+func ExclusivePackageLockKey(exclKey string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("ad_pkg_excl:" + strings.ToLower(strings.TrimSpace(exclKey))))
+	return int64(h.Sum64())
+}
+
+// LockExclusivePackage acquires a session advisory lock on one pooled connection.
+// The connection is held until unlock so lock/unlock cannot land on different backends.
+// Returns unlock (always call via defer). No-op unlock when DB/key unavailable.
+func (s *AdStore) LockExclusivePackage(ctx context.Context, exclKey string) (unlock func(), err error) {
+	noop := func() {}
+	exclKey = strings.TrimSpace(exclKey)
+	if exclKey == "" || s.db == nil || !s.db.Ready() || s.db.Pool == nil {
+		return noop, nil
+	}
+	key := ExclusivePackageLockKey(exclKey)
+	conn, err := s.db.Pool.Acquire(ctx)
+	if err != nil {
+		return noop, err
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, key); err != nil {
+		conn.Release()
+		return noop, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, key)
+			conn.Release()
+		})
+	}, nil
+}
+
 type CreateAdInput struct {
-	PublisherID   string
-	Title         string
-	Status        string
-	DailySpendCap *float64
-	GeoTargets    []any
-	CreativeType  string
-	CreativeURL   string
-	EndsAt        *time.Time
+	PublisherID        string
+	Title              string
+	Status             string
+	DailySpendCap      *float64
+	GeoTargets         []any
+	CreativeType       string
+	CreativeURL        string
+	EndsAt             *time.Time
+	BuyingType         string
+	BidCPM             *float64
+	ReservedCPM        *float64
+	PackageCode        string
+	AgencyManaged      bool
+	AdvertiserTierCode string
 }
 
 func (s *AdStore) Create(ctx context.Context, in CreateAdInput) (*AdCampaign, error) {
@@ -95,25 +143,38 @@ func (s *AdStore) Create(ctx context.Context, in CreateAdInput) (*AdCampaign, er
 		geo = []byte("[]")
 	}
 	now := time.Now().UTC()
+	buying := strings.TrimSpace(in.BuyingType)
+	if buying == "" {
+		buying = BuyingTypeLegacy
+	}
 	c := &AdCampaign{
-		ID:            uuid.NewString(),
-		PublisherID:   in.PublisherID,
-		Title:         in.Title,
-		Status:        in.Status,
-		DailySpendCap: in.DailySpendCap,
-		GeoTargets:    geo,
-		CreativeType:  in.CreativeType,
-		CreativeURL:   in.CreativeURL,
-		EndsAt:        in.EndsAt,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                 uuid.NewString(),
+		PublisherID:        in.PublisherID,
+		Title:              in.Title,
+		Status:             in.Status,
+		DailySpendCap:      in.DailySpendCap,
+		GeoTargets:         geo,
+		CreativeType:       in.CreativeType,
+		CreativeURL:        in.CreativeURL,
+		EndsAt:             in.EndsAt,
+		BuyingType:         buying,
+		BidCPM:             in.BidCPM,
+		ReservedCPM:        in.ReservedCPM,
+		PackageCode:        strings.TrimSpace(in.PackageCode),
+		AgencyManaged:      in.AgencyManaged,
+		AdvertiserTierCode: strings.TrimSpace(in.AdvertiserTierCode),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if s.db != nil && s.db.Ready() {
 		_, err := s.db.Pool.Exec(ctx, `
 			INSERT INTO ad_campaigns (
-				id, publisher_id, title, status, daily_spend_cap, geo_targets, creative_type, creative_url, ends_at, created_at, updated_at
-			) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,NOW(),NOW())
-		`, c.ID, c.PublisherID, c.Title, c.Status, c.DailySpendCap, string(geo), c.CreativeType, c.CreativeURL, c.EndsAt)
+				id, publisher_id, title, status, daily_spend_cap, geo_targets, creative_type, creative_url, ends_at,
+				buying_type, bid_cpm, reserved_cpm, package_code, agency_managed, advertiser_tier_code,
+				created_at, updated_at
+			) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW())
+		`, c.ID, c.PublisherID, c.Title, c.Status, c.DailySpendCap, string(geo), c.CreativeType, c.CreativeURL, c.EndsAt,
+			c.BuyingType, c.BidCPM, c.ReservedCPM, nullIfEmpty(c.PackageCode), c.AgencyManaged, nullIfEmpty(c.AdvertiserTierCode))
 		if err != nil {
 			return nil, err
 		}
@@ -905,6 +966,100 @@ func (s *AdStore) ListActive(ctx context.Context, servableStatus string) ([]AdCa
 		}
 	}
 	return out, nil
+}
+
+// ListOpenPackagedCampaigns returns non-archived, non-auto-closed campaigns that hold a package.
+// Used for exclusive package booking (draft + pending + live all count as holders).
+func (s *AdStore) ListOpenPackagedCampaigns(ctx context.Context, archivedStatus string) ([]AdCampaign, error) {
+	archivedStatus = strings.TrimSpace(archivedStatus)
+	if s.db != nil && s.db.Ready() {
+		rows, err := s.db.Pool.Query(ctx, `
+			SELECT `+s.scanCampaignCols()+`
+			FROM ad_campaigns
+			WHERE package_code IS NOT NULL AND length(trim(package_code)) > 0
+			  AND COALESCE(auto_closed, false) = false
+			  AND ($1 = '' OR status <> $1)
+			ORDER BY created_at DESC
+		`, archivedStatus)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []AdCampaign{}
+		for rows.Next() {
+			c, err := scanAdCampaign(rows.Scan)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, *c)
+		}
+		return out, nil
+	}
+	if err := s.requireDB(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []AdCampaign{}
+	for _, c := range s.mem {
+		if strings.TrimSpace(c.PackageCode) == "" || c.AutoClosed {
+			continue
+		}
+		if archivedStatus != "" && c.Status == archivedStatus {
+			continue
+		}
+		out = append(out, *c)
+	}
+	return out, nil
+}
+
+// PublisherMonthlyVirtualSpend estimates last-30d media spend for tiering.
+// Units match pacing (WithinDailySpendCap): bid/reserved/unit fields are cost-per-impression
+// virtual units used across marketplace (not industry CPM/1000).
+func (s *AdStore) PublisherMonthlyVirtualSpend(ctx context.Context, publisherID string, unitCost float64) (float64, error) {
+	publisherID = strings.TrimSpace(publisherID)
+	if publisherID == "" || unitCost <= 0 {
+		return 0, nil
+	}
+	if s.db == nil || !s.db.Ready() {
+		return 0, nil
+	}
+	var total float64
+	err := s.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(
+			CASE
+				WHEN c.buying_type = 'auction' AND c.bid_cpm IS NOT NULL AND c.bid_cpm > 0 THEN c.bid_cpm
+				WHEN c.buying_type = 'reservation' AND c.reserved_cpm IS NOT NULL AND c.reserved_cpm > 0 THEN c.reserved_cpm
+				ELSE $2
+			END
+		), 0)::float8
+		FROM ad_impression_events e
+		INNER JOIN ad_campaigns c ON c.id = e.campaign_id
+		WHERE c.publisher_id = $1
+		  AND e.created_at >= NOW() - INTERVAL '30 days'
+	`, publisherID, unitCost).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// InventoryFillPctApprox is recent fill proxy for dynamic floor (0-100).
+func (s *AdStore) InventoryFillPctApprox(ctx context.Context) float64 {
+	if s.db == nil || !s.db.Ready() {
+		return 0
+	}
+	var n int64
+	_ = s.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM ad_impression_events
+		WHERE created_at >= NOW() - INTERVAL '1 hour'
+	`).Scan(&n)
+	// Soft scale: 200 impressions/hour ~ 100% busy for dynamic floor.
+	pct := float64(n) / 2.0
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }
 
 // WithinDailySpendCap returns false when today's impressions * unitCost meet the daily spend budget.

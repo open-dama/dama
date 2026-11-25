@@ -295,6 +295,8 @@ func normalizeAndValidateMatchClockPresets(presets []MatchClockPreset, initialSe
 
 // AdPricingConfig is loaded from platform_settings.key = 'ad_pricing'.
 // Campaign create fees are split: Ethiopia (domestic) vs global (everywhere else).
+// Marketplace fields are additive; legacy flat unit-cost path stays when marketplace is off
+// or campaign buying_type is legacy.
 type AdPricingConfig struct {
 	ImpressionUnitCost float64 `json:"impression_unit_cost"`
 	// Ethiopia domestic create fee (typically ETB; currency locked to payment_currency.ethiopia).
@@ -303,7 +305,33 @@ type AdPricingConfig struct {
 	// Global create fee outside Ethiopia (typically USD; currency locked to payment_currency.global).
 	CampaignCreateFeeGlobalAmount   float64 `json:"campaign_create_fee_global_amount"`
 	CampaignCreateFeeGlobalCurrency string  `json:"campaign_create_fee_global_currency"`
-	Source                          string  `json:"-"`
+
+	MarketplaceEnabled            bool             `json:"marketplace_enabled"`
+	AuctionEnabled                bool             `json:"auction_enabled"`
+	ReservationEnabled            bool             `json:"reservation_enabled"`
+	DefaultBuyingType             string           `json:"default_buying_type"`
+	FloorCPM                      float64          `json:"floor_cpm"`
+	FloorCPMEthiopia              float64          `json:"floor_cpm_ethiopia"`
+	FloorCPMGlobal                float64          `json:"floor_cpm_global"`
+	PlacementLobbyMultiplier      float64          `json:"placement_lobby_multiplier"`
+	PlacementInMatchMultiplier    float64          `json:"placement_in_match_multiplier"`
+	ViewportDesktopMultiplier     float64          `json:"viewport_desktop_multiplier"`
+	ViewportTabletMultiplier      float64          `json:"viewport_tablet_multiplier"`
+	ViewportMobileMultiplier      float64          `json:"viewport_mobile_multiplier"`
+	PeakHourMultiplier            float64          `json:"peak_hour_multiplier"`
+	PeakHoursUTCStart             int              `json:"peak_hours_utc_start"`
+	PeakHoursUTCEnd               int              `json:"peak_hours_utc_end"`
+	DynamicFloorEnabled           bool             `json:"dynamic_floor_enabled"`
+	DynamicFloorFillPct           float64          `json:"dynamic_floor_fill_pct"`
+	DynamicFloorBoost             float64          `json:"dynamic_floor_boost"`
+	AgencyEnabled                 bool             `json:"agency_enabled"`
+	AgencySpendPercent            float64          `json:"agency_spend_percent"`
+	ImpressionWalletSettleEnabled bool             `json:"impression_wallet_settle_enabled"`
+	AudienceHighRatingMin         int              `json:"audience_high_rating_min"`
+	AudienceHighRatingMultiplier  float64          `json:"audience_high_rating_multiplier"`
+	Tiers                         []AdvertiserTier `json:"tiers"`
+
+	Source string `json:"-"`
 }
 
 // BoardRulesConfig is loaded from platform_settings.key = 'board_rules' (FMJD params).
@@ -2269,6 +2297,7 @@ func (s *SettingsStore) ReloadAdPricing(ctx context.Context) error {
 	if cfg.CampaignCreateFeeGlobalCurrency == "" {
 		return errors.New("ad_pricing.campaign_create_fee_global_currency required from platform_settings")
 	}
+	cfg.MarketplaceDefaults()
 	cfg.Source = "database"
 	s.mu.Lock()
 	s.ads = cfg
@@ -2323,6 +2352,7 @@ func (s *SettingsStore) SetAdPricing(ctx context.Context, cfg AdPricingConfig) e
 	}
 	cfg.CampaignCreateFeeEthiopiaCurrency = etCur
 	cfg.CampaignCreateFeeGlobalCurrency = glCur
+	cfg.MarketplaceDefaults()
 	raw, err := json.Marshal(map[string]any{
 		"impression_unit_cost":                  cfg.ImpressionUnitCost,
 		"campaign_create_fee_ethiopia_amount":   cfg.CampaignCreateFeeEthiopiaAmount,
@@ -2330,8 +2360,32 @@ func (s *SettingsStore) SetAdPricing(ctx context.Context, cfg AdPricingConfig) e
 		"campaign_create_fee_global_amount":     cfg.CampaignCreateFeeGlobalAmount,
 		"campaign_create_fee_global_currency":   cfg.CampaignCreateFeeGlobalCurrency,
 		// Legacy mirrors (Ethiopia) for older readers until fully retired.
-		"campaign_create_fee_amount":   cfg.CampaignCreateFeeEthiopiaAmount,
-		"campaign_create_fee_currency": cfg.CampaignCreateFeeEthiopiaCurrency,
+		"campaign_create_fee_amount":       cfg.CampaignCreateFeeEthiopiaAmount,
+		"campaign_create_fee_currency":     cfg.CampaignCreateFeeEthiopiaCurrency,
+		"marketplace_enabled":              cfg.MarketplaceEnabled,
+		"auction_enabled":                  cfg.AuctionEnabled,
+		"reservation_enabled":              cfg.ReservationEnabled,
+		"default_buying_type":              cfg.DefaultBuyingType,
+		"floor_cpm":                        cfg.FloorCPM,
+		"floor_cpm_ethiopia":               cfg.FloorCPMEthiopia,
+		"floor_cpm_global":                 cfg.FloorCPMGlobal,
+		"placement_lobby_multiplier":       cfg.PlacementLobbyMultiplier,
+		"placement_in_match_multiplier":    cfg.PlacementInMatchMultiplier,
+		"viewport_desktop_multiplier":      cfg.ViewportDesktopMultiplier,
+		"viewport_tablet_multiplier":       cfg.ViewportTabletMultiplier,
+		"viewport_mobile_multiplier":       cfg.ViewportMobileMultiplier,
+		"peak_hour_multiplier":             cfg.PeakHourMultiplier,
+		"peak_hours_utc_start":             cfg.PeakHoursUTCStart,
+		"peak_hours_utc_end":               cfg.PeakHoursUTCEnd,
+		"dynamic_floor_enabled":            cfg.DynamicFloorEnabled,
+		"dynamic_floor_fill_pct":           cfg.DynamicFloorFillPct,
+		"dynamic_floor_boost":              cfg.DynamicFloorBoost,
+		"agency_enabled":                   cfg.AgencyEnabled,
+		"agency_spend_percent":             cfg.AgencySpendPercent,
+		"impression_wallet_settle_enabled": cfg.ImpressionWalletSettleEnabled,
+		"audience_high_rating_min":         cfg.AudienceHighRatingMin,
+		"audience_high_rating_multiplier":  cfg.AudienceHighRatingMultiplier,
+		"tiers":                            cfg.Tiers,
 	})
 	if err != nil {
 		return err
@@ -2352,6 +2406,36 @@ func (s *SettingsStore) SetAdPricing(ctx context.Context, cfg AdPricingConfig) e
 	s.ads = cfg
 	s.mu.Unlock()
 	return nil
+}
+
+// AdPackages loads public package catalog from platform_settings.key = ad_packages.
+func (s *SettingsStore) AdPackages(ctx context.Context) ([]AdPackage, error) {
+	if s == nil || s.db == nil || !s.db.Ready() {
+		return nil, errors.New("database required for ad_packages")
+	}
+	var raw []byte
+	err := s.db.Pool.QueryRow(ctx, `SELECT value FROM platform_settings WHERE key='ad_packages'`).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdPackages(raw)
+}
+
+// SetAdPackages persists the package catalog (admin).
+func (s *SettingsStore) SetAdPackages(ctx context.Context, packages []AdPackage) error {
+	if s == nil || s.db == nil || !s.db.Ready() {
+		return errors.New("database required to persist ad_packages")
+	}
+	raw, err := json.Marshal(map[string]any{"packages": packages})
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `
+		INSERT INTO platform_settings (key, value, updated_at)
+		VALUES ('ad_packages', $1::jsonb, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, string(raw))
+	return err
 }
 
 // SetXPLevels persists the career ladder into platform_settings (fail-closed validation).

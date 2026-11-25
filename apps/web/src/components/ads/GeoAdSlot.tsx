@@ -77,8 +77,9 @@ export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
       campaignId: ad.id,
       viewerKey: viewerKey(),
       placement: lobbyPlacement,
+      viewport: slot || undefined,
     });
-  }, [ad, lobbyPlacement, recordImpression]);
+  }, [ad, lobbyPlacement, recordImpression, slot]);
 
   if (!geoReady || serveQuery.isLoading) {
     return hideUntilReady ? null : <GeoAdSlotSkeleton />;

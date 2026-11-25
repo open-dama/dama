@@ -601,6 +601,7 @@ func main() {
 			r.Get("/serve", adsAPI.Serve)
 			r.Get("/playback", adsAPI.Playback)
 			r.Get("/pricing", adsAPI.Pricing)
+			r.Get("/packages", adsAPI.Packages)
 			r.Post("/in-match/eligibility", adsAPI.InMatchEligibility)
 			r.Post("/campaigns/{id}/impression", adsAPI.Impression)
 			r.Post("/campaigns/{id}/click", adsAPI.Click)
