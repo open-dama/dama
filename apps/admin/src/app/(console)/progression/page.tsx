@@ -22,7 +22,10 @@ import {
   type OpsRowSelectionState,
   selectedRowIds,
 } from "@/components/ui/ops-data-table";
-import { OpsDataTableRowActions } from "@/components/ui/ops-data-table-row-actions";
+import {
+  type OpsDataTableRowAction,
+  OpsDataTableRowActions,
+} from "@/components/ui/ops-data-table-row-actions";
 import { PauseDurationField } from "@/components/ui/pause-duration-field";
 import {
   Select,
@@ -52,7 +55,7 @@ import { adminConsoleChromeUnavailable } from "@/lib/chrome-unavailable";
 import { sanitizeIntegerInput } from "@/lib/sanitize-integer-input";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
-import type { XPLevel } from "@/types";
+import type { MatchClockPreset, XPLevel } from "@/types";
 import { isAdminConsoleChromeReady } from "@/types/admin-console-chrome";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -62,9 +65,22 @@ type XpFormMode =
   | { kind: "edit"; index: number }
   | { kind: "view"; index: number };
 
+type TcPresetFormMode =
+  | { kind: "create" }
+  | { kind: "edit"; index: number }
+  | { kind: "view"; index: number };
+
 type XpRow = XPLevel & { id: string };
+type TcPresetRow = MatchClockPreset & { id: string };
 
 type ProgressionTab = "platform" | "board";
+
+function sortTcPresets(rows: MatchClockPreset[]): MatchClockPreset[] {
+  return [...rows].sort((a, b) => {
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+    return a.seconds - b.seconds;
+  });
+}
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   const l = label.trim();
@@ -118,7 +134,17 @@ export default function ConsoleProgressionPage() {
   const debouncedXpSearch = useDebouncedValue(xpSearch.trim().toLowerCase(), 250);
   const [rowSelection, setRowSelection] = useState<OpsRowSelectionState>({});
 
+  const [presets, setPresets] = useState<MatchClockPreset[]>([]);
+  const [presetLabel, setPresetLabel] = useState("");
+  const [presetSeconds, setPresetSeconds] = useState("");
+  const [presetEnabled, setPresetEnabled] = useState(true);
+  const [presetSortOrder, setPresetSortOrder] = useState("");
+  const [disablePresetIndex, setDisablePresetIndex] = useState<number | null>(null);
+  const [tcSearch, setTcSearch] = useState("");
+  const debouncedTcSearch = useDebouncedValue(tcSearch.trim().toLowerCase(), 250);
+
   const xpDialog = useDeferredDialogValue<XpFormMode>();
+  const tcDialog = useDeferredDialogValue<TcPresetFormMode>();
   const [tab, setTab] = useState<ProgressionTab>("platform");
 
   const { data, isLoading, error } = useConsoleProgressionQuery(token, isAdmin);
@@ -151,6 +177,16 @@ export default function ConsoleProgressionPage() {
     setInitialSeconds(data.match_clock.initial_seconds);
     setIncrementSeconds(data.match_clock.increment_seconds);
     setInviteTtlSeconds(data.match_clock.invite_ttl_seconds);
+    setPresets(
+      sortTcPresets(
+        (data.match_clock.presets ?? []).map((p, i) => ({
+          seconds: p.seconds,
+          label: p.label,
+          enabled: p.enabled !== false,
+          sort_order: typeof p.sort_order === "number" ? p.sort_order : i,
+        })),
+      ),
+    );
     setWebAppOrigin((data.web_app_origin || "").trim());
     setUnitCost(data.ad_pricing.impression_unit_cost);
     setEthiopiaCreateFeeAmount(data.ad_pricing.campaign_create_fee_ethiopia_amount);
@@ -179,8 +215,27 @@ export default function ConsoleProgressionPage() {
     setLevelMinXp(String(row.min_xp ?? ""));
   }, [xpDialog.open, xpDialog.value, levels]);
 
+  useEffect(() => {
+    if (!tcDialog.open || !tcDialog.value) return;
+    const mode = tcDialog.value;
+    if (mode.kind === "create") {
+      setPresetLabel("");
+      setPresetSeconds("");
+      setPresetEnabled(true);
+      setPresetSortOrder(String(presets.length));
+      return;
+    }
+    const row = presets[mode.index];
+    if (!row) return;
+    setPresetLabel(row.label || "");
+    setPresetSeconds(String(row.seconds ?? ""));
+    setPresetEnabled(row.enabled !== false);
+    setPresetSortOrder(String(row.sort_order ?? mode.index));
+  }, [tcDialog.open, tcDialog.value, presets]);
+
   const progressionLoading = isAdmin && isLoading;
   const boardLoading = isAdmin && boardQuery.isLoading;
+  const enabledPresets = useMemo(() => presets.filter((p) => p.enabled), [presets]);
 
   const xpRows: XpRow[] = useMemo(
     () =>
@@ -265,6 +320,159 @@ export default function ConsoleProgressionPage() {
     xpDialog.close();
   }
 
+  const tcRows: TcPresetRow[] = useMemo(
+    () =>
+      presets.map((p, i) => ({
+        ...p,
+        id: `tc-${p.seconds}-${i}`,
+      })),
+    [presets],
+  );
+  const filteredTcRows = useMemo(() => {
+    if (!debouncedTcSearch) return tcRows;
+    return tcRows.filter(
+      (r) =>
+        r.label.toLowerCase().includes(debouncedTcSearch) ||
+        String(r.seconds).includes(debouncedTcSearch),
+    );
+  }, [debouncedTcSearch, tcRows]);
+
+  const tcColumns = useMemo((): OpsColumn<TcPresetRow>[] => {
+    if (!chrome) return [];
+    const labelHeader = (chrome.tc_preset_col_label || "").trim();
+    const secondsHeader = (chrome.tc_preset_col_seconds || "").trim();
+    const enabledHeader = (chrome.tc_preset_col_enabled || "").trim();
+    const sortHeader = (chrome.tc_preset_col_sort || "").trim();
+    const actionsHeader = (chrome.tc_preset_actions_label || "").trim();
+    const viewLabel = (chrome.tc_preset_view_action || "").trim();
+    const editLabel = (chrome.tc_preset_edit_action || "").trim();
+    const disableLabel = (chrome.tc_preset_disable_action || "").trim();
+    const enableLabel = (chrome.tc_preset_enable_action || "").trim();
+    const emptyVal = (chrome.empty_value || "").trim();
+    const cols: OpsColumn<TcPresetRow>[] = [
+      {
+        id: "label",
+        header: labelHeader,
+        cell: (row: TcPresetRow) => <span className="font-medium">{row.label}</span>,
+      },
+      {
+        id: "seconds",
+        header: secondsHeader,
+        cell: (row: TcPresetRow) => <span className="font-mono tabular-nums">{row.seconds}</span>,
+      },
+      {
+        id: "enabled",
+        header: enabledHeader,
+        cell: (row: TcPresetRow) => (
+          <span className="text-sm text-[var(--dama-muted)]">
+            {row.enabled ? enableLabel || "✓" : disableLabel || emptyVal}
+          </span>
+        ),
+      },
+      {
+        id: "sort_order",
+        header: sortHeader,
+        cell: (row: TcPresetRow) => (
+          <span className="font-mono tabular-nums">{row.sort_order}</span>
+        ),
+      },
+      {
+        id: "actions",
+        header: actionsHeader,
+        className: "w-12 text-right",
+        cell: (row: TcPresetRow) => {
+          const index = tcRows.findIndex((r) => r.id === row.id);
+          if (index < 0) return null;
+          const actions: OpsDataTableRowAction[] = [
+            {
+              id: "view",
+              label: viewLabel,
+              onSelect: () => tcDialog.openWith({ kind: "view", index }),
+            },
+            {
+              id: "edit",
+              label: editLabel,
+              onSelect: () => tcDialog.openWith({ kind: "edit", index }),
+            },
+          ];
+          if (row.enabled) {
+            actions.push({
+              id: "disable",
+              label: disableLabel,
+              destructive: true,
+              onSelect: () => setDisablePresetIndex(index),
+            });
+          } else {
+            actions.push({
+              id: "enable",
+              label: enableLabel,
+              onSelect: () => {
+                setPresets((prev) =>
+                  sortTcPresets(prev.map((p, i) => (i === index ? { ...p, enabled: true } : p))),
+                );
+              },
+            });
+          }
+          return <OpsDataTableRowActions triggerLabel={actionsHeader} actions={actions} />;
+        },
+      },
+    ];
+    return cols.filter((c) => c.id === "actions" || Boolean(c.header));
+  }, [chrome, tcDialog, tcRows]);
+
+  function saveTcPreset() {
+    const mode = tcDialog.value;
+    if (!mode || mode.kind === "view" || !chrome) return;
+    const label = presetLabel.trim();
+    const seconds = Number.parseInt(presetSeconds.trim(), 10);
+    const sortOrder = Number.parseInt(presetSortOrder.trim(), 10);
+    if (!label || !Number.isFinite(seconds) || seconds <= 0) {
+      const msg = (chrome.err_tc_preset_values || "").trim();
+      if (msg) toast.error(msg);
+      return;
+    }
+    if (!Number.isFinite(sortOrder)) {
+      const msg = (chrome.err_tc_preset_values || "").trim();
+      if (msg) toast.error(msg);
+      return;
+    }
+    const dup = presets.some(
+      (p, i) => p.seconds === seconds && !(mode.kind === "edit" && i === mode.index),
+    );
+    if (dup) {
+      const msg = (chrome.err_tc_preset_duplicate || "").trim();
+      if (msg) toast.error(msg);
+      return;
+    }
+    const next: MatchClockPreset = {
+      label,
+      seconds,
+      enabled: presetEnabled,
+      sort_order: sortOrder,
+    };
+    if (mode.kind === "edit" && !next.enabled) {
+      const enabledCount = presets.filter((p, i) => i !== mode.index && p.enabled).length;
+      if (enabledCount < 1) {
+        const msg = (chrome.err_tc_preset_disable_last || "").trim();
+        if (msg) toast.error(msg);
+        return;
+      }
+      if (initialSeconds != null && seconds === initialSeconds) {
+        const msg = (chrome.err_tc_preset_disable_default || "").trim();
+        if (msg) toast.error(msg);
+        return;
+      }
+    }
+    setPresets((prev) => {
+      const updated =
+        mode.kind === "create"
+          ? [...prev, next]
+          : prev.map((row, i) => (i === mode.index ? next : row));
+      return sortTcPresets(updated);
+    });
+    tcDialog.close();
+  }
+
   if (chromeQuery.isLoading) {
     return (
       <div className="space-y-6">
@@ -293,6 +501,15 @@ export default function ConsoleProgressionPage() {
         ? chrome.xp_detail_modal_title
         : chrome.xp_create_modal_title;
   const xpViewing = xpMode?.kind === "view";
+
+  const tcMode = tcDialog.value;
+  const tcFormTitle =
+    tcMode?.kind === "edit"
+      ? chrome.tc_preset_edit_modal_title
+      : tcMode?.kind === "view"
+        ? chrome.tc_preset_detail_modal_title
+        : chrome.tc_preset_create_modal_title;
+  const tcViewing = tcMode?.kind === "view";
 
   const tabPlatform = (chrome.page_title || "").trim() || (chrome.xp_levels_label || "").trim();
   const tabBoard = (chrome.board_section_title || "").trim();
@@ -597,7 +814,7 @@ export default function ConsoleProgressionPage() {
                       description={chrome.initial_seconds_blurb}
                       descriptionWrap
                     >
-                      {(data?.match_clock.presets?.length ?? 0) > 0 ? (
+                      {enabledPresets.length > 0 ? (
                         <Select
                           value={
                             initialSeconds != null && initialSeconds > 0
@@ -614,7 +831,7 @@ export default function ConsoleProgressionPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {(data?.match_clock.presets ?? []).map((p) => (
+                            {enabledPresets.map((p) => (
                               <SelectItem key={`${p.seconds}-${p.label}`} value={String(p.seconds)}>
                                 {p.label} ({p.seconds}s)
                               </SelectItem>
@@ -677,23 +894,52 @@ export default function ConsoleProgressionPage() {
                     </Field>
                   </div>
 
-                  {(data?.match_clock.presets?.length ?? 0) > 0 ? (
-                    <Field
-                      id="progression-clock-presets"
-                      label={chrome.match_clock_presets_label}
-                      description={chrome.match_clock_presets_blurb}
-                      descriptionWrap
-                    >
-                      <ul className="space-y-1 text-sm text-[var(--dama-text)]">
-                        {(data?.match_clock.presets ?? []).map((p) => (
-                          <li key={`${p.seconds}-${p.label}`}>
-                            {p.label}
-                            <span className="text-[var(--dama-muted)]"> ({p.seconds}s)</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </Field>
-                  ) : null}
+                  <div className="space-y-3 border-t border-[var(--dama-border)] pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-[var(--dama-text)]">
+                          {chrome.match_clock_presets_label}
+                        </h3>
+                        {(chrome.match_clock_presets_blurb || "").trim() ? (
+                          <p className="mt-1 text-sm text-[var(--dama-muted)]">
+                            {chrome.match_clock_presets_blurb}
+                          </p>
+                        ) : null}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="gold"
+                        disabled={!isAdmin || save.isPending}
+                        onClick={() => tcDialog.openWith({ kind: "create" })}
+                      >
+                        {chrome.tc_preset_add_action}
+                      </Button>
+                    </div>
+                    <AdminFilterBar
+                      filters={[
+                        {
+                          kind: "search",
+                          id: "admin-tc-preset-search",
+                          label: (chrome.tc_preset_search_label || "").trim(),
+                          value: tcSearch,
+                          onChange: setTcSearch,
+                          placeholder:
+                            (chrome.tc_preset_search_placeholder || "").trim() || undefined,
+                        },
+                      ]}
+                    />
+                    <OpsDataTable
+                      columns={tcColumns}
+                      data={filteredTcRows}
+                      getRowId={(row) => row.id}
+                      empty={
+                        <p className="py-6 text-center text-sm text-[var(--dama-muted)]">
+                          {chrome.tc_preset_empty}
+                        </p>
+                      }
+                    />
+                  </div>
 
                   <div className="space-y-3 border-t border-[var(--dama-border)] pt-4">
                     <div>
@@ -861,12 +1107,25 @@ export default function ConsoleProgressionPage() {
                         if (pauseEnabled && !(pauseDurationSeconds > 0)) {
                           throw new Error((chrome.err_pause_duration || "").trim());
                         }
-                        const presetSecs = (data?.match_clock.presets ?? []).map((p) => p.seconds);
-                        if (presetSecs.length > 0 && !presetSecs.includes(initialSeconds)) {
+                        if (!enabledPresets.length) {
+                          throw new Error((chrome.err_tc_presets_empty || "").trim());
+                        }
+                        const presetSecs = enabledPresets.map((p) => p.seconds);
+                        if (!presetSecs.includes(initialSeconds)) {
                           throw new Error(
                             (chrome.err_clock_initial_not_in_presets || "").trim() ||
                               chrome.err_clock_values,
                           );
+                        }
+                        const seenSecs = new Set<number>();
+                        for (const p of presets) {
+                          if (!(p.seconds > 0) || !p.label.trim()) {
+                            throw new Error((chrome.err_tc_preset_values || "").trim());
+                          }
+                          if (seenSecs.has(p.seconds)) {
+                            throw new Error((chrome.err_tc_preset_duplicate || "").trim());
+                          }
+                          seenSecs.add(p.seconds);
                         }
                         const origin = (webAppOrigin || "").trim().replace(/\/$/, "");
                         if (!origin || !/^https?:\/\//i.test(origin)) {
@@ -891,6 +1150,7 @@ export default function ConsoleProgressionPage() {
                             invite_ttl_seconds: inviteTtlSeconds,
                             pause_enabled: pauseEnabled,
                             pause_duration_seconds: pauseDurationSeconds,
+                            presets: sortTcPresets(presets),
                           },
                           ad_pricing: {
                             impression_unit_cost: unitCost,
@@ -1105,6 +1365,137 @@ export default function ConsoleProgressionPage() {
           setLevels((prev) => prev.filter((l, i) => !ids.has(`xp-${i}-${l.label}-${l.min_xp}`)));
           setRowSelection({});
           setBulkDeleteOpen(false);
+        }}
+      />
+
+      <Dialog open={tcDialog.open} onOpenChange={tcDialog.onOpenChange}>
+        <DialogContent
+          closeLabel={(chrome.tc_preset_dialog_close_label || "").trim()}
+          className="max-w-lg sm:max-w-xl"
+        >
+          <DialogHeader>
+            <DialogTitle>{tcFormTitle}</DialogTitle>
+            <DialogDescription className="sr-only">{tcFormTitle}</DialogDescription>
+          </DialogHeader>
+          {tcViewing ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <DetailRow
+                label={(chrome.tc_preset_label_field || "").trim()}
+                value={presetLabel || (chrome.empty_value || "").trim()}
+              />
+              <DetailRow
+                label={(chrome.tc_preset_seconds_field || "").trim()}
+                value={presetSeconds || (chrome.empty_value || "").trim()}
+              />
+              <DetailRow
+                label={(chrome.tc_preset_enabled_field || "").trim()}
+                value={
+                  presetEnabled
+                    ? (chrome.tc_preset_enable_action || "").trim()
+                    : (chrome.tc_preset_disable_action || "").trim()
+                }
+              />
+              <DetailRow
+                label={(chrome.tc_preset_sort_field || "").trim()}
+                value={presetSortOrder || (chrome.empty_value || "").trim()}
+              />
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field id="tc-preset-label" label={(chrome.tc_preset_label_field || "").trim()}>
+                <Input
+                  id="tc-preset-label"
+                  value={presetLabel}
+                  onChange={(e) => setPresetLabel(e.target.value)}
+                />
+              </Field>
+              <Field id="tc-preset-seconds" label={(chrome.tc_preset_seconds_field || "").trim()}>
+                <Input
+                  id="tc-preset-seconds"
+                  inputMode="numeric"
+                  value={presetSeconds}
+                  onChange={(e) => setPresetSeconds(sanitizeIntegerInput(e.target.value))}
+                />
+              </Field>
+              <Field id="tc-preset-sort" label={(chrome.tc_preset_sort_field || "").trim()}>
+                <Input
+                  id="tc-preset-sort"
+                  inputMode="numeric"
+                  value={presetSortOrder}
+                  onChange={(e) =>
+                    setPresetSortOrder(
+                      sanitizeIntegerInput(e.target.value, { allowNegative: true }),
+                    )
+                  }
+                />
+              </Field>
+              <Field id="tc-preset-enabled" label={(chrome.tc_preset_enabled_field || "").trim()}>
+                <div className="flex min-h-10 items-center gap-2 pt-1">
+                  <Checkbox
+                    id="tc-preset-enabled"
+                    checked={presetEnabled}
+                    onCheckedChange={(v) => setPresetEnabled(v === true)}
+                  />
+                </div>
+              </Field>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => tcDialog.close()}>
+              {tcViewing
+                ? (chrome.tc_preset_dialog_close_label || "").trim()
+                : (chrome.tc_preset_cancel_action || "").trim()}
+            </Button>
+            {!tcViewing ? (
+              <Button
+                type="button"
+                variant="gold"
+                pendingLabel={(chrome.tc_preset_save_pending || "").trim()}
+                disabled={!presetLabel.trim() || presetSeconds.trim() === ""}
+                onClick={() => saveTcPreset()}
+              >
+                {(chrome.tc_preset_save_action || "").trim()}
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={disablePresetIndex != null}
+        onOpenChange={(open) => {
+          if (!open) setDisablePresetIndex(null);
+        }}
+        title={(chrome.tc_preset_disable_action || "").trim()}
+        description={(chrome.tc_preset_disable_confirm || "").trim()}
+        cancelLabel={(chrome.tc_preset_cancel_action || "").trim()}
+        confirmLabel={(chrome.tc_preset_disable_action || "").trim()}
+        destructive
+        onConfirm={() => {
+          if (disablePresetIndex == null) return;
+          const idx = disablePresetIndex;
+          const target = presets[idx];
+          if (!target) {
+            setDisablePresetIndex(null);
+            return;
+          }
+          const enabledCount = presets.filter((p, i) => i !== idx && p.enabled).length;
+          if (enabledCount < 1) {
+            const msg = (chrome.err_tc_preset_disable_last || "").trim();
+            if (msg) toast.error(msg);
+            setDisablePresetIndex(null);
+            return;
+          }
+          if (initialSeconds != null && target.seconds === initialSeconds) {
+            const msg = (chrome.err_tc_preset_disable_default || "").trim();
+            if (msg) toast.error(msg);
+            setDisablePresetIndex(null);
+            return;
+          }
+          setPresets((prev) =>
+            sortTcPresets(prev.map((p, i) => (i === idx ? { ...p, enabled: false } : p))),
+          );
+          setDisablePresetIndex(null);
         }}
       />
     </div>

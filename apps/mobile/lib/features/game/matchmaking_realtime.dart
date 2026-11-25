@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/audio/invite_alert.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
@@ -248,7 +247,7 @@ class MatchmakingRealtimeController extends ChangeNotifier {
     _enteringMatch = true;
     _stopOutgoingPoll();
     unawaited(InviteAlert.playResolvedChime());
-    unawaited(GameNotify.play('match_found'));
+    // No match_found/game-start thud into VS intro (doubled piece-put on boards).
     inviteActionBusy = false;
     incoming = null;
     outgoingInviteId = null;
@@ -328,7 +327,7 @@ class MatchmakingRealtimeController extends ChangeNotifier {
         case 'match_found':
           final gid = msg['game_id']?.toString();
           if (gid != null && gid.isNotEmpty) {
-            unawaited(GameNotify.play('match_found'));
+            // Navigate only - no game-start.mp3 over VS intro / board open.
             matchedP1 = msg['player1_id']?.toString();
             matchedP2 = msg['player2_id']?.toString();
             outgoingInviteId = null;

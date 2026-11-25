@@ -12,6 +12,10 @@ class GameNotify {
   static AudioPlayer? _gameStartPlayer;
   static AudioPlayer? _messagePlayer;
   static DateTime? _lastMessageAt;
+
+  /// Coalesce match_found + game_start (same asset) so join/WS/intro cannot double-thud.
+  static DateTime? _lastGameStartAt;
+  static const _gameStartCoalesceMs = 1200;
   static bool _landConfigured = false;
   static bool _audioWarmed = false;
 
@@ -141,6 +145,13 @@ class GameNotify {
         return;
       case 'game_start':
       case 'match_found':
+        final now = DateTime.now();
+        final last = _lastGameStartAt;
+        if (last != null &&
+            now.difference(last).inMilliseconds < _gameStartCoalesceMs) {
+          return;
+        }
+        _lastGameStartAt = now;
         try {
           final player = await _ensureGameStartPlayer();
           await player.setVolume(0.85);

@@ -2715,9 +2715,8 @@ export function LivePlayHub({
         nameSuffix={nameSuffix}
         top={pauseOverlaySeats.top}
         bottom={pauseOverlaySeats.bottom}
-        onShow={() => {
-          void playGameNotify("game_start");
-        }}
+        // No start SFX here: match_found already cues matchmaking; game_start
+        // (same asset) doubled the "piece put" thud over the VS intro on 2D/3D.
         onDone={() => setMatchIntroActive(false)}
       />
     ) : phase === "finished" &&

@@ -541,8 +541,9 @@ assert(
     liveHub.includes("setMatchIntroActive(true)") &&
     liveHub.includes("board stays tappable under the timed design") &&
     matchPage.includes("Overlay is IgnorePointer (timed)") &&
-    matchPage.includes("GameNotify.play('game_start')"),
-  "web+flutter full VS intro cinematic (/90) with freeze-safe non-blocking taps",
+    !/GameNotify\.play\(\s*['"]game_start['"]\s*\)/.test(matchPage) &&
+    !/playGameNotify\(\s*["']game_start["']\s*\)/.test(liveHub),
+  "web+flutter full VS intro cinematic (/90) freeze-safe taps, no start thud",
 );
 assert(
   liveHub.includes("Stale GET /state must never rewind") &&
@@ -639,9 +640,7 @@ assert(
     spectateHub.includes("Half-open spectate WSS stops live plies") &&
     spectatePage.includes("_armSpectatePollWatch") &&
     read("apps/api/internal/rest/handlers.go").includes("fail-open drain") &&
-    read("apps/api/internal/rest/handlers.go").includes(
-      "Do NOT bail on MustContinue",
-    ) &&
+    read("apps/api/internal/rest/handlers.go").includes("Do NOT bail on MustContinue") &&
     read("apps/api/internal/rest/handlers.go").includes("pickDeferredAIMove"),
   "web+flutter poll /state while awaiting AI/opponent or spectating (half-open WSS)",
 );

@@ -26,6 +26,9 @@ const GAME_START_SRC = "/sounds/game-start.mp3";
 const MESSAGE_SRC = "/sounds/message.wav";
 
 let lastMessageNotifyAt = 0;
+/** Coalesce match_found + game_start (same asset) so join/WS/intro cannot double-thud. */
+let lastGameStartNotifyAt = 0;
+const GAME_START_COALESCE_MS = 1200;
 
 let ctx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
@@ -450,6 +453,11 @@ export async function playGameNotify(event: NotifyEvent): Promise<void> {
   if (event === "capture") return playPieceLandSound("capture");
   if (event === "promote") return playPieceLandSound("promote");
   if (event === "game_start" || event === "match_found") {
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (nowMs - lastGameStartNotifyAt < GAME_START_COALESCE_MS) {
+      return;
+    }
+    lastGameStartNotifyAt = nowMs;
     if (typeof window !== "undefined") {
       try {
         await ensureCtx();

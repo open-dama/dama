@@ -17,7 +17,7 @@ must(hub.includes("MatchPauseOverlay"), "hub missing MatchPauseOverlay");
 must(hub.includes("buildPauseOverlayCopy"), "hub missing buildPauseOverlayCopy");
 must(hub.includes("MatchResultOverlay"), "hub missing MatchResultOverlay");
 must(hub.includes('mode !== "pvp" && mode !== "ai"'), "hub mode gate");
-must(hub.includes('playGameNotify("game_start")'), "hub game_start");
+must(!hub.includes('playGameNotify("game_start")'), "hub must not play game_start on VS intro");
 must(hub.includes("fireGameVictoryCelebration"), "hub victory");
 must(hub.includes("fireGameDefeatPulse"), "hub defeat");
 must(hub.includes('playGameNotify("win")'), "hub win sfx");
@@ -95,7 +95,10 @@ must(mb.includes("gamePausedBlurb"), "flutter player pause banner blurb");
 must(mb.includes("officialPausedBlurb"), "flutter official pause banner blurb");
 must(mb.includes("MatchResultOverlay"), "flutter result");
 must(mb.includes("widget.mode == 'pvp' || widget.mode == 'ai'"), "flutter mode gate");
-must(mb.includes("GameNotify.play('game_start')"), "flutter game_start");
+must(
+  !/GameNotify\.play\(\s*['"]game_start['"]\s*\)/.test(mb),
+  "flutter must not play game_start on VS intro",
+);
 must(mb.includes("GameNotify.play(youWon ? 'win' : 'loss')"), "flutter win/loss");
 must(mb.includes("youWonOnTimeMessage"), "flutter on-time win copy");
 must(mb.includes("_endReason"), "flutter persists endReason");
@@ -134,7 +137,7 @@ must(rail.includes("matchResultDurationMs.isNotEmpty"), "flutter rail requires r
 
 const home = read(path.join(web, "src/components/home/HomePlayHub.tsx"));
 must(home.includes("<LivePlayHub"), "home uses LivePlayHub");
-must(home.includes('embed={{ mode: "ai"'), "home AI embed");
+must(/embed=\{\{[\s\S]*?mode:\s*"ai"/.test(home), "home AI embed");
 must(home.includes("showResumeLive"), "home pvp resume");
 
 for (const e of [

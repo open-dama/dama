@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"dama/apps/api/internal/auth"
 	"dama/apps/api/internal/store"
 )
 
 type ProgressionAPI struct {
 	Settings *store.SettingsStore
+	Audit    *store.AuditStore
 }
 
 // Public returns DB-backed XP ladder + match clock (no client hardcodes).
+// Play clients only see enabled time-control presets.
 func (a *ProgressionAPI) Public(w http.ResponseWriter, r *http.Request) {
 	if a.Settings == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "progression config unavailable"})
@@ -25,7 +28,7 @@ func (a *ProgressionAPI) Public(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "progression config unavailable"})
 		return
 	}
-	writeJSON(w, http.StatusOK, progressionPayload(levels, clock, rewards))
+	writeJSON(w, http.StatusOK, progressionPayload(levels, clock, rewards, false))
 }
 
 // ConsoleGet returns progression + ad pricing for admin console hydration.
@@ -59,6 +62,8 @@ type progressionPutBody struct {
 		// Pointers so an admin save that omits pause fields keeps the stored config.
 		PauseEnabled         *bool `json:"pause_enabled"`
 		PauseDurationSeconds *int  `json:"pause_duration_seconds"`
+		// Nil → keep stored presets; non-nil replaces (soft-disable via enabled=false).
+		Presets *[]store.MatchClockPreset `json:"presets"`
 	} `json:"match_clock"`
 	AdPricing *struct {
 		ImpressionUnitCost                float64 `json:"impression_unit_cost"`
@@ -95,6 +100,7 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "xp_levels, match_clock, match_rewards, ad_pricing, or web_app_origin required"})
 		return
 	}
+	changed := map[string]any{}
 	if body.XPLevels != nil {
 		levels := make([]store.XPLevel, 0, len(body.XPLevels))
 		for _, lvl := range body.XPLevels {
@@ -104,6 +110,7 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		changed["xp_levels"] = len(levels)
 	}
 	if body.MatchClock != nil {
 		cur := a.Settings.MatchClock()
@@ -114,6 +121,7 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 			InviteTTLSeconds:     body.MatchClock.InviteTTLSeconds,
 			PauseEnabled:         cur.PauseEnabled,
 			PauseDurationSeconds: cur.PauseDurationSeconds,
+			Presets:              cur.Presets,
 		}
 		if body.MatchClock.PauseEnabled != nil {
 			cfg.PauseEnabled = *body.MatchClock.PauseEnabled
@@ -121,9 +129,22 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 		if body.MatchClock.PauseDurationSeconds != nil {
 			cfg.PauseDurationSeconds = *body.MatchClock.PauseDurationSeconds
 		}
+		if body.MatchClock.Presets != nil {
+			cfg.Presets = append([]store.MatchClockPreset{}, (*body.MatchClock.Presets)...)
+		}
 		if err := a.Settings.SetMatchClock(r.Context(), cfg); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
+		}
+		after := a.Settings.MatchClock()
+		changed["match_clock"] = map[string]any{
+			"enabled":                after.Enabled,
+			"initial_seconds":        after.InitialSeconds,
+			"increment_seconds":      after.IncrementSeconds,
+			"invite_ttl_seconds":     after.InviteTTLSeconds,
+			"pause_enabled":          after.PauseEnabled,
+			"pause_duration_seconds": after.PauseDurationSeconds,
+			"presets":                after.Presets,
 		}
 	}
 	if body.AdPricing != nil {
@@ -138,6 +159,7 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		changed["ad_pricing"] = true
 	}
 	if body.MatchRewards != nil {
 		cfg := store.MatchRewardsConfig{
@@ -154,19 +176,27 @@ func (a *ProgressionAPI) ConsolePut(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		changed["match_rewards"] = true
 	}
 	if body.WebAppOrigin != nil {
 		if err := a.Settings.SetPlayRailWebAppOrigin(r.Context(), *body.WebAppOrigin); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		changed["web_app_origin"] = true
+	}
+	if a.Audit != nil && len(changed) > 0 {
+		actor := auth.UserIDFromContext(r.Context())
+		a.Audit.Log(r.Context(), &actor, "progression.put", "platform_settings", "progression", changed)
 	}
 	writeJSON(w, http.StatusOK, consolePlatformPayload(
 		r.Context(), a.Settings,
 	))
 }
 
-func progressionPayload(levels store.XPLevelsConfig, clock store.MatchClockConfig, rewards store.MatchRewardsConfig) map[string]any {
+// progressionPayload builds public/console progression JSON.
+// includeDisabledPresets=true for admin (full CRUD list); false for play (enabled only).
+func progressionPayload(levels store.XPLevelsConfig, clock store.MatchClockConfig, rewards store.MatchRewardsConfig, includeDisabledPresets bool) map[string]any {
 	outLevels := make([]map[string]any, 0, len(levels.Levels))
 	for _, lvl := range levels.Levels {
 		outLevels = append(outLevels, map[string]any{
@@ -174,12 +204,21 @@ func progressionPayload(levels store.XPLevelsConfig, clock store.MatchClockConfi
 			"label":  lvl.Label,
 		})
 	}
-	presets := make([]map[string]any, 0, len(clock.Presets))
-	for _, p := range clock.Presets {
-		presets = append(presets, map[string]any{
+	src := clock.Presets
+	if !includeDisabledPresets {
+		src = store.EnabledMatchClockPresets(clock.Presets)
+	}
+	presets := make([]map[string]any, 0, len(src))
+	for _, p := range src {
+		row := map[string]any{
 			"seconds": p.Seconds,
 			"label":   p.Label,
-		})
+		}
+		if includeDisabledPresets {
+			row["enabled"] = p.Enabled
+			row["sort_order"] = p.SortOrder
+		}
+		presets = append(presets, row)
 	}
 	return map[string]any{
 		"xp_levels": outLevels,
@@ -206,7 +245,7 @@ func progressionPayload(levels store.XPLevelsConfig, clock store.MatchClockConfi
 }
 
 func consolePlatformPayload(ctx context.Context, settings *store.SettingsStore) map[string]any {
-	out := progressionPayload(settings.XPLevels(), settings.MatchClock(), settings.MatchRewards())
+	out := progressionPayload(settings.XPLevels(), settings.MatchClock(), settings.MatchRewards(), true)
 	ads := settings.AdPricing()
 	out["ad_pricing"] = map[string]any{
 		"impression_unit_cost":                  ads.ImpressionUnitCost,

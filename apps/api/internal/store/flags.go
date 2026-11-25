@@ -11,25 +11,25 @@ import (
 )
 
 type FeatureFlags struct {
-	VSAIEnabled               bool           `json:"vs_ai_enabled"`
-	OTPRequired               bool           `json:"otp_required"`
-	CashRmgEnabled            bool           `json:"cash_rmg_enabled"`
-	CashPhoneKycRequired      bool           `json:"cash_phone_kyc_required"`
-	CashPhoneOtpRequired      bool           `json:"cash_phone_otp_required"`
-	CashRmgDisabledCountries  []string       `json:"cash_rmg_disabled_countries"`
-	HostedEventsEnabled       bool           `json:"hosted_events_enabled"`
-	PublicEventsEnabled       bool           `json:"public_events_enabled"`
-	PublicEventMatchesRated   bool           `json:"public_event_matches_rated"`
-	PrizePoolDisplayEnabled   bool           `json:"prize_pool_display_enabled"`
-	PrizePoolGuaranteeEnabled bool           `json:"prize_pool_guarantee_enabled"`
-	KycAutoApprove            bool           `json:"kyc_auto_approve"`
+	VSAIEnabled               bool     `json:"vs_ai_enabled"`
+	OTPRequired               bool     `json:"otp_required"`
+	CashRmgEnabled            bool     `json:"cash_rmg_enabled"`
+	CashPhoneKycRequired      bool     `json:"cash_phone_kyc_required"`
+	CashPhoneOtpRequired      bool     `json:"cash_phone_otp_required"`
+	CashRmgDisabledCountries  []string `json:"cash_rmg_disabled_countries"`
+	HostedEventsEnabled       bool     `json:"hosted_events_enabled"`
+	PublicEventsEnabled       bool     `json:"public_events_enabled"`
+	PublicEventMatchesRated   bool     `json:"public_event_matches_rated"`
+	PrizePoolDisplayEnabled   bool     `json:"prize_pool_display_enabled"`
+	PrizePoolGuaranteeEnabled bool     `json:"prize_pool_guarantee_enabled"`
+	KycAutoApprove            bool     `json:"kyc_auto_approve"`
 	// GeoPreferDeviceGps default ON: HTML5/device GPS may enrich /geo/locate.
 	// When false: locate is IP-only (clients should skip sending lat/lng).
-	GeoPreferDeviceGps        bool           `json:"geo_prefer_device_gps"`
-	EthiopiaPaymentMode       string         `json:"-"` // internal gateway mode; public APIs map via PublicChannel
-	AIDepths                  []int          `json:"ai_depths"`
-	Source                    string         `json:"-"`
-	Raw                       map[string]any `json:"-"`
+	GeoPreferDeviceGps  bool           `json:"geo_prefer_device_gps"`
+	EthiopiaPaymentMode string         `json:"-"` // internal gateway mode; public APIs map via PublicChannel
+	AIDepths            []int          `json:"ai_depths"`
+	Source              string         `json:"-"`
+	Raw                 map[string]any `json:"-"`
 }
 
 type FlagStore struct {

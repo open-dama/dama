@@ -1417,6 +1417,17 @@ func (a *PaymentsAPI) AdminConsoleChrome(w http.ResponseWriter, r *http.Request)
 			"xp_delete_confirm", "xp_label_field", "xp_min_xp_field",
 			"select_all_label", "select_row_label", "selected_count_fmt", "clear_selection_action",
 			"xp_search_label", "xp_search_placeholder", "empty_value",
+			"tc_preset_col_label", "tc_preset_col_seconds", "tc_preset_col_enabled", "tc_preset_col_sort",
+			"tc_preset_actions_label", "tc_preset_add_action", "tc_preset_view_action",
+			"tc_preset_edit_action", "tc_preset_disable_action", "tc_preset_enable_action",
+			"tc_preset_empty", "tc_preset_dialog_close_label", "tc_preset_cancel_action",
+			"tc_preset_save_action", "tc_preset_save_pending",
+			"tc_preset_create_modal_title", "tc_preset_edit_modal_title", "tc_preset_detail_modal_title",
+			"tc_preset_disable_confirm", "tc_preset_label_field", "tc_preset_seconds_field",
+			"tc_preset_enabled_field", "tc_preset_sort_field",
+			"tc_preset_search_label", "tc_preset_search_placeholder",
+			"err_tc_presets_empty", "err_tc_preset_duplicate", "err_tc_preset_values",
+			"err_tc_preset_disable_default", "err_tc_preset_disable_last",
 		},
 	}
 	for section, keys := range sections {

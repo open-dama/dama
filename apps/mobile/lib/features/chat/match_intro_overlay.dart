@@ -62,6 +62,15 @@ class _MatchIntroOverlayState extends State<MatchIntroOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
 
+  /// Fire onShow once (web MatchIntroOverlay parity) - never re-cue start SFX.
+  bool _onShowFired = false;
+
+  void _fireOnShowOnce() {
+    if (_onShowFired) return;
+    _onShowFired = true;
+    widget.onShow?.call();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -71,7 +80,7 @@ class _MatchIntroOverlayState extends State<MatchIntroOverlay>
     )..repeat(reverse: true);
     if (widget.persistent) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        widget.onShow?.call();
+        if (mounted) _fireOnShowOnce();
       });
       return;
     }
@@ -83,7 +92,7 @@ class _MatchIntroOverlayState extends State<MatchIntroOverlay>
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.onShow?.call();
+      if (mounted) _fireOnShowOnce();
     });
     Future<void>.delayed(Duration(milliseconds: widget.durationMs), () {
       if (mounted) widget.onDone?.call();

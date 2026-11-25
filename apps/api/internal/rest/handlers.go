@@ -167,12 +167,13 @@ func (a *API) StartGame(w http.ResponseWriter, r *http.Request) {
 		}
 		// Same fail-closed preset gate as invites / matchmaking (challenge Time picker).
 		clock := a.Settings.MatchClock()
-		if clock.Source != "database" || len(clock.Presets) == 0 {
+		enabledPresets := store.EnabledMatchClockPresets(clock.Presets)
+		if clock.Source != "database" || len(enabledPresets) == 0 {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "time controls unavailable"})
 			return
 		}
 		tcOK := false
-		for _, p := range clock.Presets {
+		for _, p := range enabledPresets {
 			if p.Seconds == req.TimeControlSeconds && p.Seconds > 0 {
 				tcOK = true
 				break

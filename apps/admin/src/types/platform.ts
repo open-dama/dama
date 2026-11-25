@@ -5,6 +5,14 @@ export type ConsoleFeatureFlags = ConsoleFeatureFlagsQuery["consoleFeatureFlags"
 
 export type XPLevel = { min_xp: number; label: string };
 
+/** Admin-owned match_clock.presets row (soft-disable via enabled=false). */
+export type MatchClockPreset = {
+  seconds: number;
+  label: string;
+  enabled: boolean;
+  sort_order: number;
+};
+
 /** PvP career deltas + floors from platform_settings.match_rewards (VS-AI never applies deltas). */
 export type MatchRewardsConfig = {
   win_xp: number;
@@ -28,7 +36,7 @@ export type ProgressionPayload = {
     invite_ttl_seconds: number;
     pause_enabled: boolean;
     pause_duration_seconds: number;
-    presets?: { seconds: number; label: string }[];
+    presets?: MatchClockPreset[];
   };
   match_rewards: MatchRewardsConfig;
   ad_pricing: {

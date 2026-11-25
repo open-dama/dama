@@ -5,7 +5,6 @@ import { useMatchmakingChromeQuery } from "@/hooks/query/useMatchmakingChromeQue
 import { meQueryKey } from "@/hooks/query/useMeQuery";
 import { usePlayRailChromeQuery } from "@/hooks/query/usePlayRailChromeQuery";
 import { useProgressionQuery } from "@/hooks/query/useProgressionQuery";
-import { playGameNotify } from "@/lib/audio-notify";
 import { patchAvatarEverywhere } from "@/lib/avatar-cache-patch";
 import { notifyIncomingChatMessage } from "@/lib/chat-message-notify";
 import { apiRestUrl, apiWsUrl } from "@/lib/env";
@@ -201,7 +200,8 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       if (!gid || navigatingMatchRef.current) return;
       navigatingMatchRef.current = true;
       playInviteResolvedChime();
-      void playGameNotify("match_found");
+      // No match_found/game-start thud: board opens into VS intro; that clip
+      // sounded like a doubled piece-put on every 2D/3D start. Invite chime only.
       inviteActionLatchRef.current = null;
       setInviteActionPending(null);
       clearIncoming();
@@ -381,7 +381,7 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
           return;
         }
         if (msg.type === "match_found" && msg.game_id) {
-          void playGameNotify("match_found");
+          // Toast + navigate only - no game-start.mp3 (piece-put thud over VS intro).
           clearOutgoing();
           setLastMatch({
             gameId: msg.game_id,

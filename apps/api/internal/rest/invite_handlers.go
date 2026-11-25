@@ -41,12 +41,13 @@ func (a *InviteAPI) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clock := a.Settings.MatchClock()
-	if clock.Source != "database" || len(clock.Presets) == 0 {
+	enabledPresets := store.EnabledMatchClockPresets(clock.Presets)
+	if clock.Source != "database" || len(enabledPresets) == 0 {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "time controls unavailable"})
 		return
 	}
 	allowed := false
-	for _, p := range clock.Presets {
+	for _, p := range enabledPresets {
 		if p.Seconds == body.TimeControlSeconds && p.Seconds > 0 {
 			allowed = true
 			break

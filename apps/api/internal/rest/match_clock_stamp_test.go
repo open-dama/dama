@@ -16,10 +16,10 @@ func TestStampMatchClockFromSettingsArmsDualClocks(t *testing.T) {
 		InitialSeconds:   600,
 		IncrementSeconds: 2,
 		Presets: []store.MatchClockPreset{
-			{Seconds: 60, Label: "1 min"},
-			{Seconds: 180, Label: "3 min"},
-			{Seconds: 600, Label: "10 min"},
-			{Seconds: 1800, Label: "30 min"},
+			{Seconds: 60, Label: "1 min", Enabled: true, SortOrder: 0},
+			{Seconds: 180, Label: "3 min", Enabled: true, SortOrder: 1},
+			{Seconds: 600, Label: "10 min", Enabled: true, SortOrder: 2},
+			{Seconds: 1800, Label: "30 min", Enabled: true, SortOrder: 3},
 		},
 		InviteTTLSeconds: 120,
 		Source:           "database",
@@ -66,7 +66,7 @@ func TestStampMatchClockFromSettingsFailClosed(t *testing.T) {
 	settings.SetMatchClockCacheForTest(store.MatchClockConfig{
 		Enabled:        true,
 		InitialSeconds: 600,
-		Presets:        []store.MatchClockPreset{{Seconds: 600, Label: "10 min"}},
+		Presets:        []store.MatchClockPreset{{Seconds: 600, Label: "10 min", Enabled: true}},
 		Source:         "memory", // not database
 	})
 	stampMatchClockFromSettings(settings, st, 0)

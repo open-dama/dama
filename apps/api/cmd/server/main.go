@@ -336,7 +336,7 @@ func main() {
 		CanSpectate: api.CanSpectateHostedEventGame,
 	}
 	dmAPI := &rest.DMAPI{DMs: dmStore, Users: users, Settings: settings, Presence: presenceSvc, Media: avatars, Hub: hub, Cash: cashRmg, DB: handle}
-	progAPI := &rest.ProgressionAPI{Settings: settings}
+	progAPI := &rest.ProgressionAPI{Settings: settings, Audit: audit}
 	rulesAPI := &rest.GameRulesAPI{Settings: settings}
 	geoAPI := &rest.GeoAPI{Geo: geoResolver, Payments: paySvc, Presence: presenceSvc, Users: users, Settings: settings, Flags: flags, DB: handle, Activity: activityAPI}
 	otpAPI := &rest.OTPAPI{OTP: otpStore, Flags: flags, Users: users, Redis: redisClient, Settings: settings}

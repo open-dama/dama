@@ -121,17 +121,23 @@ export function MatchIntroOverlay({
   const [visible, setVisible] = useState(false);
   const onDoneRef = useRef(onDone);
   const onShowRef = useRef(onShow);
+  /** Fire onShow once per active cycle (duration hydrate must not re-cue SFX). */
+  const onShowFiredRef = useRef(false);
   onDoneRef.current = onDone;
   onShowRef.current = onShow;
 
   useEffect(() => {
     if (!active) {
       setVisible(false);
+      onShowFiredRef.current = false;
       return;
     }
     if (persistent) {
       setVisible(true);
-      onShowRef.current?.();
+      if (!onShowFiredRef.current) {
+        onShowFiredRef.current = true;
+        onShowRef.current?.();
+      }
       return;
     }
     // Fail closed: duration must come from DB chrome (no invented default).
@@ -141,7 +147,10 @@ export function MatchIntroOverlay({
       return;
     }
     setVisible(true);
-    onShowRef.current?.();
+    if (!onShowFiredRef.current) {
+      onShowFiredRef.current = true;
+      onShowRef.current?.();
+    }
     const tDone = window.setTimeout(() => {
       setVisible(false);
       onDoneRef.current?.();

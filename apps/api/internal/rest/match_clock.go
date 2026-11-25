@@ -42,10 +42,7 @@ func stampMatchClockFromSettings(settings *store.SettingsStore, state *engine.St
 		return
 	}
 	cfg := settings.MatchClock()
-	presets := make([]int, 0, len(cfg.Presets))
-	for _, p := range cfg.Presets {
-		presets = append(presets, p.Seconds)
-	}
+	presets := store.MatchClockPresetSeconds(store.EnabledMatchClockPresets(cfg.Presets))
 	engine.ArmMatchClockFromDB(
 		state,
 		cfg.Source,

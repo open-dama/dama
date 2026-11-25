@@ -2370,7 +2370,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       if (_error != null) return;
       _wsSawOpen = false;
       await _ws.connectGame(token: widget.accessToken, gameId: id);
-      await GameNotify.play('match_found');
+      // No match_found here: matchmaking already cues it, and game_start on the
+      // VS intro reused the same clip → doubled piece-put thud on board open.
       _sub = _ws.messages.listen(_onWsMessage);
     } catch (_) {
       setState(() {
@@ -2698,7 +2699,8 @@ class _MatchBoardPageState extends State<MatchBoardPage>
       if (id != null) {
         _wsSawOpen = false;
         await _ws.connectGame(token: widget.accessToken, gameId: id);
-        await GameNotify.play('match_found');
+        // No match_found / game_start on board arm - VS intro + start flow stay
+        // silent; in-game land SFX on 2D/3D boards are unchanged.
         _sub = _ws.messages.listen(_onWsMessage);
       }
     } catch (e) {
@@ -3429,7 +3431,7 @@ class _MatchBoardPageState extends State<MatchBoardPage>
         bottom: bottomSeat(),
         onShow: () {
           _armMatchIntroFailOpen();
-          unawaited(GameNotify.play('game_start'));
+          // No game_start SFX: same asset as match_found; doubles over VS intro.
         },
         onDone: () {
           _matchIntroFailOpen?.cancel();

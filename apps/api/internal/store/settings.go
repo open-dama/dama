@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -159,9 +160,12 @@ type XPLevelsConfig struct {
 }
 
 // MatchClockPreset is one selectable time control from platform_settings.match_clock.presets.
+// Soft-disable via Enabled=false hides the TC from new games; in-flight matches keep their clock.
 type MatchClockPreset struct {
-	Seconds int    `json:"seconds"`
-	Label   string `json:"label"`
+	Seconds   int    `json:"seconds"`
+	Label     string `json:"label"`
+	Enabled   bool   `json:"enabled"`
+	SortOrder int    `json:"sort_order"`
 }
 
 // MatchClockConfig is loaded from platform_settings.key = 'match_clock'.
@@ -177,6 +181,116 @@ type MatchClockConfig struct {
 	// PauseDurationSeconds is the auto-resume deadline. Required > 0 when pause is enabled.
 	PauseDurationSeconds int    `json:"pause_duration_seconds"`
 	Source               string `json:"-"`
+}
+
+// EnabledMatchClockPresets returns playable presets (enabled only), sorted by sort_order then seconds.
+func EnabledMatchClockPresets(presets []MatchClockPreset) []MatchClockPreset {
+	out := make([]MatchClockPreset, 0, len(presets))
+	for _, p := range presets {
+		if p.Enabled && p.Seconds > 0 && strings.TrimSpace(p.Label) != "" {
+			out = append(out, p)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].Seconds < out[j].Seconds
+	})
+	return out
+}
+
+// MatchClockPresetSeconds extracts seconds from presets (order preserved).
+func MatchClockPresetSeconds(presets []MatchClockPreset) []int {
+	out := make([]int, 0, len(presets))
+	for _, p := range presets {
+		if p.Seconds > 0 {
+			out = append(out, p.Seconds)
+		}
+	}
+	return out
+}
+
+// parseMatchClockPresetsJSON decodes presets; legacy rows without "enabled" default to enabled.
+func parseMatchClockPresetsJSON(raw json.RawMessage) ([]MatchClockPreset, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var wire []struct {
+		Seconds   int    `json:"seconds"`
+		Label     string `json:"label"`
+		Enabled   *bool  `json:"enabled"`
+		SortOrder *int   `json:"sort_order"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, err
+	}
+	out := make([]MatchClockPreset, 0, len(wire))
+	for i, w := range wire {
+		en := true
+		if w.Enabled != nil {
+			en = *w.Enabled
+		}
+		sortOrd := i
+		if w.SortOrder != nil {
+			sortOrd = *w.SortOrder
+		}
+		out = append(out, MatchClockPreset{
+			Seconds:   w.Seconds,
+			Label:     strings.TrimSpace(w.Label),
+			Enabled:   en,
+			SortOrder: sortOrd,
+		})
+	}
+	return out, nil
+}
+
+// normalizeAndValidateMatchClockPresets trims labels, rejects dupes, and requires ≥1 enabled
+// preset whose seconds match initialSeconds. Sort order is caller-owned (stable sort applied).
+func normalizeAndValidateMatchClockPresets(presets []MatchClockPreset, initialSeconds int) ([]MatchClockPreset, error) {
+	if len(presets) == 0 {
+		return nil, errors.New("match_clock.presets required")
+	}
+	seen := make(map[int]struct{}, len(presets))
+	out := make([]MatchClockPreset, 0, len(presets))
+	enabledCount := 0
+	initialOK := false
+	for _, p := range presets {
+		label := strings.TrimSpace(p.Label)
+		if p.Seconds <= 0 || label == "" {
+			return nil, errors.New("match_clock.presets entries require seconds > 0 and label")
+		}
+		if _, dup := seen[p.Seconds]; dup {
+			return nil, errors.New("match_clock.presets must use unique seconds")
+		}
+		seen[p.Seconds] = struct{}{}
+		np := MatchClockPreset{
+			Seconds:   p.Seconds,
+			Label:     label,
+			Enabled:   p.Enabled,
+			SortOrder: p.SortOrder,
+		}
+		if np.Enabled {
+			enabledCount++
+			if np.Seconds == initialSeconds {
+				initialOK = true
+			}
+		}
+		out = append(out, np)
+	}
+	if enabledCount == 0 {
+		return nil, errors.New("match_clock.presets require at least one enabled preset")
+	}
+	if !initialOK {
+		return nil, errors.New("match_clock.initial_seconds must match an enabled preset")
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].Seconds < out[j].Seconds
+	})
+	return out, nil
 }
 
 // AdPricingConfig is loaded from platform_settings.key = 'ad_pricing'.
@@ -2001,24 +2115,24 @@ func (s *SettingsStore) ReloadProgression(ctx context.Context) error {
 	if err := json.Unmarshal(clockRaw, &clock); err != nil {
 		return err
 	}
+	var clockObj map[string]json.RawMessage
+	if err := json.Unmarshal(clockRaw, &clockObj); err == nil {
+		if pr, ok := clockObj["presets"]; ok {
+			parsed, err := parseMatchClockPresetsJSON(pr)
+			if err != nil {
+				return err
+			}
+			clock.Presets = parsed
+		}
+	}
 	if clock.InitialSeconds <= 0 {
 		return errors.New("match_clock.initial_seconds required from platform_settings")
 	}
-	if len(clock.Presets) == 0 {
-		return errors.New("match_clock.presets required from platform_settings")
+	normalized, err := normalizeAndValidateMatchClockPresets(clock.Presets, clock.InitialSeconds)
+	if err != nil {
+		return err
 	}
-	initialInPresets := false
-	for _, p := range clock.Presets {
-		if p.Seconds <= 0 || strings.TrimSpace(p.Label) == "" {
-			return errors.New("match_clock.presets entries require seconds > 0 and label")
-		}
-		if p.Seconds == clock.InitialSeconds {
-			initialInPresets = true
-		}
-	}
-	if !initialInPresets {
-		return errors.New("match_clock.initial_seconds must match a preset")
-	}
+	clock.Presets = normalized
 	if clock.InviteTTLSeconds <= 0 {
 		return errors.New("match_clock.invite_ttl_seconds required from platform_settings")
 	}
@@ -2328,22 +2442,11 @@ func (s *SettingsStore) SetMatchClock(ctx context.Context, cfg MatchClockConfig)
 	if len(presets) == 0 {
 		presets = s.MatchClock().Presets
 	}
-	if len(presets) == 0 {
-		return errors.New("match_clock.presets required")
+	normalized, err := normalizeAndValidateMatchClockPresets(presets, cfg.InitialSeconds)
+	if err != nil {
+		return err
 	}
-	initialInPresets := false
-	for _, p := range presets {
-		if p.Seconds <= 0 || strings.TrimSpace(p.Label) == "" {
-			return errors.New("match_clock.presets entries require seconds > 0 and label")
-		}
-		if p.Seconds == cfg.InitialSeconds {
-			initialInPresets = true
-		}
-	}
-	if !initialInPresets {
-		return errors.New("match_clock.initial_seconds must match a preset")
-	}
-	cfg.Presets = presets
+	cfg.Presets = normalized
 	ttl := cfg.InviteTTLSeconds
 	if ttl <= 0 {
 		ttl = s.MatchClock().InviteTTLSeconds
@@ -2362,7 +2465,7 @@ func (s *SettingsStore) SetMatchClock(ctx context.Context, cfg MatchClockConfig)
 		"enabled":                cfg.Enabled,
 		"initial_seconds":        cfg.InitialSeconds,
 		"increment_seconds":      cfg.IncrementSeconds,
-		"presets":                presets,
+		"presets":                normalized,
 		"invite_ttl_seconds":     ttl,
 		"pause_enabled":          cfg.PauseEnabled,
 		"pause_duration_seconds": cfg.PauseDurationSeconds,

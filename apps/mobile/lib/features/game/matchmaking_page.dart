@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/audio/invite_alert.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
@@ -216,7 +215,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
       try {
         final msg = jsonDecode(event) as Map<String, dynamic>;
         if (msg['type'] == 'match_found' && msg['game_id'] is String) {
-          unawaited(GameNotify.play('match_found'));
+          // No match_found SFX: opens board + VS intro; thud doubled like piece-put.
           setState(() {
             queued = false;
             _matchedP1 = msg['player1_id']?.toString();
@@ -249,7 +248,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
         }
         if (msg['type'] == 'invite_accepted' && msg['game_id'] is String) {
           unawaited(InviteAlert.playResolvedChime());
-          unawaited(GameNotify.play('match_found'));
+          // Invite chime only - no game-start thud into VS intro.
           setState(() {
             _incomingInvite = null;
             _outgoingInviteId = null;
@@ -615,7 +614,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
       }
       final match = json['match'];
       if (match is Map && match['game_id'] is String) {
-        await GameNotify.play('match_found');
+        // Silent into board/VS intro (game-start.mp3 sounded like piece-put).
         setState(() {
           _matchedP1 = match['player1_id']?.toString();
           _matchedP2 = match['player2_id']?.toString();
