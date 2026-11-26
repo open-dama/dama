@@ -64,14 +64,14 @@ If local `DAMA_JWT_SECRET` / `DAMA_SECRETS_KEY` still contain `change-me`, the s
 
 Do these yourself. Do not commit secrets (`.env`, `.env.render`, `.env.vercel`, `.env.prod`).
 
-1. **GitHub (browser)** - create empty private repo `dama` (no README/license if local already has commits).
+1. **GitHub (browser)** - create empty repo `open-dama/dama` (no README/license if local already has commits).
 2. **Push local `dama/`**
    ```powershell
    cd C:\Users\berek\Downloads\C-Projects\addismender-project\dama
-   git remote add origin https://github.com/back-y/dama.git
+   git remote add origin https://github.com/open-dama/dama.git
+   # if origin already exists: git remote set-url origin https://github.com/open-dama/dama.git
    git push -u origin main
    ```
-   (Adjust the URL if your repo name/owner differs.)
 3. **Supabase Auth** - Site URL `https://www.opendama.com`; Redirect URLs must use `**` wildcards (apps send `?next=`). Exact `/auth/callback` alone does **not** match and silently falls back to the web Site URL.
 4. **Render** - Blueprint or Docker service from this repo → paste `apps/api/.env.render` → `/readyz`.
 5. **Vercel web** - root `apps/web` → paste `apps/web/.env.vercel`.
