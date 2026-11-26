@@ -1,5 +1,5 @@
 import { restClient } from "@/lib/api";
-import { invalidateAdPublisher } from "@/lib/invalidate";
+import { invalidateAdPublisherStats } from "@/lib/invalidate";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useAdClickMutation() {
@@ -9,7 +9,8 @@ export function useAdClickMutation() {
       await restClient.post(`/ads/campaigns/${campaignId}/click`);
     },
     onSuccess: () => {
-      void invalidateAdPublisher(qc);
+      // Player click must not refresh lobby serve (rotate owns re-rank timing).
+      void invalidateAdPublisherStats(qc);
     },
   });
 }

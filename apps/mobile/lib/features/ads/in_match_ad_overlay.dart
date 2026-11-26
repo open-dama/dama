@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dama_mobile/core/ads/ad_viewer_session.dart';
 import 'package:dama_mobile/core/audio/game_notify.dart';
 import 'package:dama_mobile/core/geo/device_locate.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
@@ -12,7 +13,6 @@ import 'package:dama_mobile/features/ads/viewport_ad_creative.dart';
 import 'package:dama_mobile/features/game/board_ply_flight.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// Full-screen in-match ad driven by POST /ads/in-match/eligibility (DB-backed).
 class InMatchAdOverlay extends StatefulWidget {
@@ -162,17 +162,6 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
     });
   }
 
-  Future<String> _viewerKey() async {
-    const key = 'dama_ad_viewer';
-    final prefs = await SharedPreferences.getInstance();
-    var v = prefs.getString(key);
-    if (v == null || v.isEmpty) {
-      v = DateTime.now().microsecondsSinceEpoch.toString();
-      await prefs.setString(key, v);
-    }
-    return v;
-  }
-
   void _schedule(int seconds) {
     final wait = seconds < 1 ? 1 : seconds;
     _checkTimer?.cancel();
@@ -211,11 +200,20 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
       final sinceLast = _lastShownAt == null
           ? null
           : DateTime.now().difference(_lastShownAt!).inSeconds;
-      final viewer = await _viewerKey();
+      final viewer = await AdViewerSession.viewerKey();
+      final session = await AdViewerSession.sessionKey();
+      // Parity with lobby: do not eligibility/impress without keys (freq + session caps).
+      if (viewer.isEmpty || session.isEmpty) {
+        final backoff =
+            _intervalMin != null && _intervalMin! > 0 ? _intervalMin! : 30;
+        _schedule(backoff < 30 ? 30 : backoff);
+        return;
+      }
       // Server resolves match geo from IP/GPS; optional lat/lng only.
       final body = <String, dynamic>{
         'game_elapsed_seconds': elapsed,
         'viewer_key': viewer,
+        'session_key': session,
         if (_geo!['lat'] != null) 'lat': _geo!['lat'],
         if (_geo!['lng'] != null) 'lng': _geo!['lng'],
         if (sinceLast != null) 'seconds_since_last_ad': sinceLast,
@@ -302,6 +300,7 @@ class _InMatchAdOverlayState extends State<InMatchAdOverlay> {
             },
             body: jsonEncode({
               'viewer_key': viewer,
+              'session_key': session,
               'placement': placement,
               'viewport': viewportSlot.name,
             }),

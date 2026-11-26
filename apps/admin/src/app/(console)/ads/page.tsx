@@ -797,12 +797,31 @@ export default function ConsoleAdsRuntimePage() {
   const [nonSkip, setNonSkip] = useState<number | null>(null);
   const [firstShow, setFirstShow] = useState<number | null>(null);
   const [interval, setIntervalSec] = useState<number | null>(null);
+  const [lobbyRotateOn, setLobbyRotateOn] = useState(true);
+  const [lobbyRotateSec, setLobbyRotateSec] = useState<number | null>(null);
+  const [freqCampHour, setFreqCampHour] = useState<number | null>(null);
+  const [freqCampDay, setFreqCampDay] = useState<number | null>(null);
+  const [freqCampSession, setFreqCampSession] = useState<number | null>(null);
+  const [freqPlaceHour, setFreqPlaceHour] = useState<number | null>(null);
+  const [freqPlaceDay, setFreqPlaceDay] = useState<number | null>(null);
+  const [freqPlaceSession, setFreqPlaceSession] = useState<number | null>(null);
+  const [freqMinGap, setFreqMinGap] = useState<number | null>(null);
 
   useEffect(() => {
     if (!playbackQuery.data) return;
-    setNonSkip(playbackQuery.data.playback.non_skippable_seconds);
-    setFirstShow(playbackQuery.data.playback.first_show_after_game_seconds);
-    setIntervalSec(playbackQuery.data.playback.default_interval_seconds);
+    const pb = playbackQuery.data.playback;
+    setNonSkip(pb.non_skippable_seconds);
+    setFirstShow(pb.first_show_after_game_seconds);
+    setIntervalSec(pb.default_interval_seconds);
+    setLobbyRotateOn(pb.lobby_rotate_enabled !== false);
+    setLobbyRotateSec(pb.lobby_rotate_interval_seconds ?? null);
+    setFreqCampHour(pb.freq_cap_campaign_per_hour ?? null);
+    setFreqCampDay(pb.freq_cap_campaign_per_day ?? null);
+    setFreqCampSession(pb.freq_cap_campaign_per_session ?? null);
+    setFreqPlaceHour(pb.freq_cap_placement_per_hour ?? null);
+    setFreqPlaceDay(pb.freq_cap_placement_per_day ?? null);
+    setFreqPlaceSession(pb.freq_cap_placement_per_session ?? null);
+    setFreqMinGap(pb.freq_cap_min_gap_seconds ?? null);
   }, [playbackQuery.data]);
 
   useEffect(() => {
@@ -1177,16 +1196,228 @@ export default function ConsoleAdsRuntimePage() {
                   />
                 </Field>
               </div>
+              <div className="space-y-2 border-t border-[var(--dama-border)] pt-4">
+                <h3 className="text-sm font-semibold">
+                  {(chrome.lobby_rotate_section_title || "").trim() || "Lobby tile rotation"}
+                </h3>
+                <p className="text-xs text-[var(--dama-muted)]">
+                  {(chrome.lobby_rotate_section_blurb || "").trim()}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={lobbyRotateOn}
+                      onChange={(e) => setLobbyRotateOn(e.target.checked)}
+                      disabled={savePlayback.isPending}
+                    />
+                    {(chrome.lobby_rotate_enabled_label || "").trim() || "Lobby tile rotation"}
+                  </label>
+                  <Field
+                    id="ads-lobby-rotate-interval"
+                    label={
+                      (chrome.lobby_rotate_interval_label || "").trim() ||
+                      "Lobby rotate interval (seconds)"
+                    }
+                  >
+                    <Input
+                      id="ads-lobby-rotate-interval"
+                      type="number"
+                      min={playbackQuery.data?.playback.lobby_rotate_interval_min}
+                      max={playbackQuery.data?.playback.lobby_rotate_interval_max}
+                      value={lobbyRotateSec ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setLobbyRotateSec(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      placeholder={chrome.platform_default_placeholder}
+                      disabled={savePlayback.isPending || lobbyRotateSec == null}
+                    />
+                  </Field>
+                </div>
+              </div>
+              <div className="space-y-2 border-t border-[var(--dama-border)] pt-4">
+                <h3 className="text-sm font-semibold">
+                  {(chrome.freq_caps_section_title || "").trim() || "Viewer frequency caps"}
+                </h3>
+                <p className="text-xs text-[var(--dama-muted)]">
+                  {(chrome.freq_caps_section_blurb || "").trim()}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field
+                    id="ads-freq-camp-hour"
+                    label={(chrome.freq_cap_campaign_hour_label || "").trim() || "Campaign / hour"}
+                  >
+                    <Input
+                      id="ads-freq-camp-hour"
+                      type="number"
+                      min={0}
+                      value={freqCampHour ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqCampHour(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqCampHour == null}
+                    />
+                  </Field>
+                  <Field
+                    id="ads-freq-camp-day"
+                    label={(chrome.freq_cap_campaign_day_label || "").trim() || "Campaign / day"}
+                  >
+                    <Input
+                      id="ads-freq-camp-day"
+                      type="number"
+                      min={0}
+                      value={freqCampDay ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqCampDay(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqCampDay == null}
+                    />
+                  </Field>
+                  <Field
+                    id="ads-freq-camp-session"
+                    label={
+                      (chrome.freq_cap_campaign_session_label || "").trim() || "Campaign / session"
+                    }
+                  >
+                    <Input
+                      id="ads-freq-camp-session"
+                      type="number"
+                      min={0}
+                      value={freqCampSession ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqCampSession(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqCampSession == null}
+                    />
+                  </Field>
+                  <Field
+                    id="ads-freq-place-hour"
+                    label={
+                      (chrome.freq_cap_placement_hour_label || "").trim() || "Placement / hour"
+                    }
+                  >
+                    <Input
+                      id="ads-freq-place-hour"
+                      type="number"
+                      min={0}
+                      value={freqPlaceHour ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqPlaceHour(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqPlaceHour == null}
+                    />
+                  </Field>
+                  <Field
+                    id="ads-freq-place-day"
+                    label={(chrome.freq_cap_placement_day_label || "").trim() || "Placement / day"}
+                  >
+                    <Input
+                      id="ads-freq-place-day"
+                      type="number"
+                      min={0}
+                      value={freqPlaceDay ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqPlaceDay(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqPlaceDay == null}
+                    />
+                  </Field>
+                  <Field
+                    id="ads-freq-place-session"
+                    label={
+                      (chrome.freq_cap_placement_session_label || "").trim() ||
+                      "Placement / session"
+                    }
+                  >
+                    <Input
+                      id="ads-freq-place-session"
+                      type="number"
+                      min={0}
+                      value={freqPlaceSession ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqPlaceSession(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqPlaceSession == null}
+                    />
+                  </Field>
+                  <Field
+                    id="ads-freq-min-gap"
+                    label={(chrome.freq_cap_min_gap_label || "").trim() || "Min gap (seconds)"}
+                  >
+                    <Input
+                      id="ads-freq-min-gap"
+                      type="number"
+                      min={0}
+                      value={freqMinGap ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setFreqMinGap(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      disabled={savePlayback.isPending || freqMinGap == null}
+                    />
+                  </Field>
+                </div>
+              </div>
               <Button
                 isLoading={savePlayback.isPending}
                 pendingLabel={chrome.save_pending}
-                disabled={nonSkip == null || firstShow == null || interval == null}
+                disabled={
+                  nonSkip == null ||
+                  firstShow == null ||
+                  interval == null ||
+                  lobbyRotateSec == null ||
+                  freqCampHour == null ||
+                  freqCampDay == null ||
+                  freqCampSession == null ||
+                  freqPlaceHour == null ||
+                  freqPlaceDay == null ||
+                  freqPlaceSession == null ||
+                  freqMinGap == null
+                }
                 onClick={() => {
-                  if (nonSkip == null || firstShow == null || interval == null) return;
+                  if (
+                    nonSkip == null ||
+                    firstShow == null ||
+                    interval == null ||
+                    lobbyRotateSec == null ||
+                    freqCampHour == null ||
+                    freqCampDay == null ||
+                    freqCampSession == null ||
+                    freqPlaceHour == null ||
+                    freqPlaceDay == null ||
+                    freqPlaceSession == null ||
+                    freqMinGap == null
+                  ) {
+                    return;
+                  }
                   savePlayback.mutate({
                     non_skippable_seconds: nonSkip,
                     first_show_after_game_seconds: firstShow,
                     default_interval_seconds: interval,
+                    lobby_rotate_enabled: lobbyRotateOn,
+                    lobby_rotate_interval_seconds: lobbyRotateSec,
+                    freq_cap_campaign_per_hour: freqCampHour,
+                    freq_cap_campaign_per_day: freqCampDay,
+                    freq_cap_campaign_per_session: freqCampSession,
+                    freq_cap_placement_per_hour: freqPlaceHour,
+                    freq_cap_placement_per_day: freqPlaceDay,
+                    freq_cap_placement_per_session: freqPlaceSession,
+                    freq_cap_min_gap_seconds: freqMinGap,
                   });
                 }}
               >

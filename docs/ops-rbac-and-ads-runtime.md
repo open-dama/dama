@@ -50,22 +50,33 @@ Meta/YouTube-style: **frequency caps** (impressions per calendar day/week/month/
 | Per-campaign override | Campaign schedule field (null = inherit platform; invalid = fail closed) |
 | Players | Only eligibility/playback `non_skippable_seconds` |
 
+### Lobby tile rotation + viewer frequency (Phase A)
+
+| Concern | Where |
+| --- | --- |
+| Lobby rotate on/off + interval | `ad_playback.lobby_rotate_enabled`, `lobby_rotate_interval_seconds` (+ min/max bounds; separate from in-match first show / interval) |
+| Viewer freq caps | `freq_cap_campaign_per_hour`, `freq_cap_campaign_per_day`, `freq_cap_campaign_per_session`, `freq_cap_placement_per_hour`, `freq_cap_placement_per_day`, `freq_cap_placement_per_session`, `freq_cap_min_gap_seconds` (0 disables that cap) |
+| Session key | Clients send `session_key` on serve / eligibility / impression; stored on `ad_impression_events` |
+| Soft tile only | Home lobby one tile refresh; not a full-screen interrupt (Phase B/C later) |
+| Console PUT | Full replace: echo all Phase A fields (see `scripts/e2e-rbac-ads.ps1` `New-PlaybackPutBody`) |
+
 ### APIs
 
 | Action | API |
 | --- | --- |
 | Public playback + bounds + player chrome (incl. placements) | `GET /api/v1/ads/playback` |
+| Lobby serve (freq + rotate fields) | `GET /api/v1/ads/serve` |
 | In-match decision | `POST /api/v1/ads/in-match/eligibility` |
 | Console global policy | `GET/PUT /api/v1/console/ads/playback` (`ads.manage_runtime`) |
 | Console campaigns + schedule + status | `GET/PATCH .../console/ads/campaigns...` (`ads.manage_campaigns`) |
 | Publisher schedule | `PATCH /api/v1/ads/campaigns/{id}/schedule` |
-| Impression (placement required, must match DB keys) | `POST /api/v1/ads/campaigns/{id}/impression` |
+| Impression (placement required, must match DB keys; freq re-check when keys present) | `POST /api/v1/ads/campaigns/{id}/impression` |
 
 ## Chrome / settings keys
 
 | Key | Consumers |
 | --- | --- |
-| `ad_playback` | Live timings + bounds + `impression_cap_min` + `console_campaigns_limit` |
+| `ad_playback` | Live timings + bounds + lobby rotate + viewer freq caps + `impression_cap_min` + `console_campaigns_limit` |
 | `ad_runtime_chrome` | Admin `/ads` + publisher campaigns/dashboard/analytics chrome + viewport device-creative copy + `viewport_breakpoint_*` (also on `GET /ads/playback` `schedule_chrome`) + `runtime_permission_key` / `campaigns_permission_key` |
 | `admin_console_chrome.media_pool` | Admin `/media-pool` labels, quota hint (~10 uploads/day/channel), `sort_order` failover copy, upload errors |
 | `client_enums` | Includes `creative_types`, `default_creative_type`, `video_creative_type` (served on `GET /platform/enums`) |

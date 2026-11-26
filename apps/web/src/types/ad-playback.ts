@@ -392,6 +392,18 @@ export type AdPlayback = {
   interval_min: number;
   interval_max: number;
   impression_cap_min: number;
+  /** Phase A lobby tile rotation (optional until migration 568). */
+  lobby_rotate_enabled?: boolean;
+  lobby_rotate_interval_seconds?: number;
+  lobby_rotate_interval_min?: number;
+  lobby_rotate_interval_max?: number;
+  freq_cap_campaign_per_hour?: number;
+  freq_cap_campaign_per_day?: number;
+  freq_cap_campaign_per_session?: number;
+  freq_cap_placement_per_hour?: number;
+  freq_cap_placement_per_day?: number;
+  freq_cap_placement_per_session?: number;
+  freq_cap_min_gap_seconds?: number;
   player_chrome: AdPlayerChrome;
   schedule_chrome: AdScheduleChrome;
 };
@@ -400,6 +412,7 @@ export type InMatchEligibilityRequest = {
   game_elapsed_seconds: number;
   seconds_since_last_ad?: number | null;
   viewer_key: string;
+  session_key?: string;
   country: string;
   region?: string;
   district?: string;

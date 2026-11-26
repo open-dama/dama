@@ -420,8 +420,13 @@ Think of an ad campaign like hiring a poster in a busy game hall.
 **Who wins when many want the same slot:** higher offer math wins. Agency / high-rated audience affect how fast budget is used, not that winner pick alone.
 **Live pay-per-view from wallet:** admin option, default off.
 
+**Lobby vs in-match (plain)**
+- In-match: timed breaks on the match clock (first show + interval); one ad per break.
+- Lobby: one home tile. Optional **tile rotation** every N seconds while you stay on lobby and the app is visible (admin on/off + interval). Still one ad at a time. Not a full-screen interrupt.
+- Viewer frequency caps (hour/day/session, placement, min gap) limit how often the same person sees the same campaign or placement across lobby and in-match.
+
 Full first-day dictionary, **buying types end to end** (what / why / when / advantages / differences), FAQ, and cheat sheet: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide` (read Section 4 first for buying types).
-Day-to-day ads ops: `Dama_Ads_And_Admin_Ops_Guide`.
+Day-to-day ads ops (including lobby rotation + frequency caps): `Dama_Ads_And_Admin_Ops_Guide`.
 
 ---
 

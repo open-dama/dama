@@ -158,6 +158,30 @@ func marketplaceDetailChromeKeys(settings *store.SettingsStore) map[string]any {
 	return out
 }
 
+// lobbyPlaybackChromeKeys are admin/public labels for lobby tile rotation + viewer frequency caps.
+func lobbyPlaybackChromeKeys(settings *store.SettingsStore) map[string]any {
+	if settings == nil {
+		return map[string]any{}
+	}
+	keys := []string{
+		"lobby_rotate_section_title", "lobby_rotate_section_blurb",
+		"lobby_rotate_enabled_label", "lobby_rotate_interval_label",
+		"freq_caps_section_title", "freq_caps_section_blurb",
+		"freq_cap_campaign_hour_label", "freq_cap_campaign_day_label",
+		"freq_cap_campaign_session_label",
+		"freq_cap_placement_hour_label", "freq_cap_placement_day_label",
+		"freq_cap_placement_session_label",
+		"freq_cap_min_gap_label",
+	}
+	out := make(map[string]any, len(keys))
+	for _, k := range keys {
+		if v := strings.TrimSpace(settings.AdRuntimeChromeString(k)); v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // appendConsoleMarketplaceFields adds read-only marketplace fields for admin console campaign rows.
 func appendConsoleMarketplaceFields(row map[string]any, c *store.AdCampaign) {
 	if row == nil || c == nil {

@@ -85,11 +85,20 @@ export function invalidateLeaderboard(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: ["leaderboard"] });
 }
 
-export function invalidateAdPublisher(qc: QueryClient, token?: string | null) {
+/** Publisher dashboard stats only. Does not touch player lobby serve (ads-serve). */
+export function invalidateAdPublisherStats(qc: QueryClient) {
   return Promise.all([
     qc.invalidateQueries({ queryKey: ["ad-campaigns"] }),
     qc.invalidateQueries({ queryKey: ["ad-analytics"] }),
     qc.invalidateQueries({ queryKey: ["publisher-dashboard"] }),
+  ]);
+}
+
+/** Publisher mutations that change inventory also refresh lobby serve ranking. */
+export function invalidateAdPublisher(qc: QueryClient, token?: string | null) {
+  void token;
+  return Promise.all([
+    invalidateAdPublisherStats(qc),
     qc.invalidateQueries({ queryKey: ["ads-serve"] }),
   ]);
 }

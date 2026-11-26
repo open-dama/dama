@@ -1,5 +1,5 @@
 import { restClient } from "@/lib/api";
-import { invalidateAdPublisher } from "@/lib/invalidate";
+import { invalidateAdPublisherStats } from "@/lib/invalidate";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useAdImpressionMutation() {
@@ -8,6 +8,7 @@ export function useAdImpressionMutation() {
     mutationFn: async (vars: {
       campaignId: string;
       viewerKey: string;
+      sessionKey?: string;
       placement: string;
       viewport?: string;
     }) => {
@@ -18,6 +19,10 @@ export function useAdImpressionMutation() {
         viewer_key: vars.viewerKey,
         placement: vars.placement,
       };
+      const sessionKey = (vars.sessionKey || "").trim();
+      if (sessionKey) {
+        body.session_key = sessionKey;
+      }
       const viewport = (vars.viewport || "").trim();
       if (viewport) {
         body.viewport = viewport;
@@ -27,7 +32,9 @@ export function useAdImpressionMutation() {
       });
     },
     onSuccess: () => {
-      void invalidateAdPublisher(qc);
+      // Do not invalidate ads-serve: that re-ranks immediately, hits min-gap,
+      // and blanks the lobby tile until the next rotate interval.
+      void invalidateAdPublisherStats(qc);
     },
   });
 }

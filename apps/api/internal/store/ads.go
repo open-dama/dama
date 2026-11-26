@@ -1080,7 +1080,7 @@ func (c *AdCampaign) WithinDailySpendCap(unitCost float64, dayImpressions int64)
 
 // RecordImpressionWithPlacement requires placement + servable status (no invented defaults).
 // requireSchedule=true for in-match placement (Meta-style: only scheduled campaigns deliver in-match).
-func (s *AdStore) RecordImpressionWithPlacement(ctx context.Context, id string, unitCost float64, viewerKey, placement, servableStatus string, requireSchedule bool) error {
+func (s *AdStore) RecordImpressionWithPlacement(ctx context.Context, id string, unitCost float64, viewerKey, placement, servableStatus string, requireSchedule bool, sessionKey string) error {
 	c, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -1116,7 +1116,7 @@ func (s *AdStore) RecordImpressionWithPlacement(ctx context.Context, id string, 
 		if err != nil {
 			return err
 		}
-		if err := s.RecordImpressionEvent(ctx, id, viewerKey, placement); err != nil {
+		if err := s.RecordImpressionEvent(ctx, id, viewerKey, placement, sessionKey); err != nil {
 			return err
 		}
 		if viewerKey != "" {

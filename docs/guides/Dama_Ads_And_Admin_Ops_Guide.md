@@ -55,6 +55,8 @@ Who: Admins with ads / progression permissions
 Where: Admin -> Product and growth -> Ads (runtime + campaign buying summary); Admin -> Progression (marketplace money settings)
 What:
 - Global playback policy, bounds, console campaign overrides
+- **Lobby tile rotation** (separate from in-match): on/off + rotate interval seconds. While a player stays on home/lobby and the tab/app is visible, the single lobby tile re-serves on that interval (one ad at a time, not a full-screen interrupt). Rotation pauses when backgrounded.
+- **Viewer frequency caps** (lobby + in-match): same campaign per hour/day/session, same placement per hour/day/session, min seconds between any two shows for that viewer. Session uses the browser/app session key. Campaign caps apply across lobby and in-match. Zero disables that cap.
 - Marketplace on/off; Auction / Reservation; default buying type
 - Floors (base / Ethiopia / global), peak and optional dynamic floor
 - Placement / viewport multipliers; agency percent; audience premium; optional impression wallet settle (default off)
@@ -135,6 +137,13 @@ Register YouTube channels before large video pushes. Each channel has daily quot
 ## Device creatives on player apps
 Lobby (`GeoAdSlot`) and in-match overlay resolve the screen band from `viewport_breakpoint_mobile_max` / `viewport_breakpoint_tablet_max` on `GET /ads/playback` `schedule_chrome`. They show **only** the matching slot creative (desktop / tablet / mobile). They do not borrow another device slot. If the current screen has no creative, the lobby tile stays hidden and in-match does not open (no impression). Legacy single creative is used only when no viewport slots are filled. Aspect ratio labels also come from that chrome. Missing or invalid breakpoints or ratio labels **fail closed**. Do not patch client defaults; fix platform settings instead.
 
+### Lobby tile rotation (Phase A)
+Who: Players on home/lobby (web + Flutter). Admin sets interval on Ads runtime.
+What: One lobby tile. When rotation is on, the tile re-asks `/ads/serve` every N seconds while the lobby stays mounted and the app/tab is visible. Rank can pick a different campaign on the next tick. Still one creative visible. Rotation pauses when the tab is hidden or the app is backgrounded.
+What it is not: Not in-match break timing. Not a Playit-style full-screen interrupt while navigating tools. Home already hides the lobby tile when a live match is active.
+Why: More lobby inventory over a long dwell without stacking brands on one screen.
+Frequency: Server also applies viewer + session caps across lobby and in-match so one brand cannot dominate every surface. Clients send `viewer_key` and `session_key` on serve, eligibility, and impression. Web waits for both keys before lobby serve/impress and before in-match eligibility. Flutter refuses lobby serve and in-match eligibility without both keys, re-serves after a warm cache paint, and records that impression so caps apply before the first rotate tick. Impression also re-checks freq policy when keys are present (defense in depth; `err_viewer_freq_cap`). Web uses one browser-tab session key; Flutter uses one app-process session key shared by lobby tile and in-match overlay. On web, player impression / click / video-complete refresh publisher stats only and do not invalidate lobby `ads-serve`; immediate re-serve after impress would hit min-gap and blank the tile, so the rotate interval owns re-rank timing.
+
 ## Feature flags / RBAC / Telemetry
 Flags first for market launches. RBAC only for superadmin changes. Telemetry when investigating abuse/fraud.
 
@@ -166,7 +175,7 @@ Operators may see reasons like period_cap_reached or spend cap reached. Teach pu
 2. Prefer granting existing permissions to admin role over inventing new keys.
 3. Never delete protected permissions.
 4. After grant changes, have the admin refresh and open the target leaf.
-5. Smoke with e2e-rbac-ads when DAMA_ALLOW_E2E_AUTH=1 in staging.
+5. Smoke with e2e-rbac-ads when DAMA_ALLOW_E2E_AUTH=1 in staging. That script echoes Phase A lobby rotate + freq cap fields on every console playback PUT (full replace); omitting them would fail validation.
 
 # 19. Daily Ops Timeline Example
 

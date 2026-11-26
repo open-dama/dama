@@ -18,19 +18,9 @@ import {
   pickCampaignCreative,
   resolveViewportSlot,
 } from "@/lib/resolve-viewport-creative";
+import { adSessionKey, adViewerKey } from "@/lib/ad-viewer-session";
 import type { InMatchCampaign } from "@/types/ad-playback";
 import { useCallback, useEffect, useRef, useState } from "react";
-
-function viewerKey(): string {
-  if (typeof window === "undefined") return "";
-  const key = "dama_ad_viewer";
-  let v = window.localStorage.getItem(key);
-  if (!v) {
-    v = crypto.randomUUID();
-    window.localStorage.setItem(key, v);
-  }
-  return v;
-}
 
 function formatSkip(template: string, seconds: number): string {
   return template.replace("{seconds}", String(seconds));
@@ -140,11 +130,19 @@ export function InMatchAdOverlay({ active, gameStartedAtMs, moveCount = 0 }: Pro
         lastShownAtMs.current == null
           ? null
           : Math.floor((Date.now() - lastShownAtMs.current) / 1000);
+      const viewerKey = adViewerKey();
+      const sessionKey = adSessionKey();
+      // Parity with lobby: skip eligibility without keys so freq/session caps apply.
+      if (!viewerKey || !sessionKey) {
+        scheduleAfter(Math.max(30, pb.interval_min || 30));
+        return;
+      }
       const res = await eligibilityMutateRef.current({
         body: {
           game_elapsed_seconds: elapsed,
           seconds_since_last_ad: sinceLast,
-          viewer_key: viewerKey(),
+          viewer_key: viewerKey,
+          session_key: sessionKey,
           country: geo.country,
           region: geo.region,
           district: geo.district,
@@ -179,6 +177,8 @@ export function InMatchAdOverlay({ active, gameStartedAtMs, moveCount = 0 }: Pro
         const campaign = res.campaign;
         const nonSkip = res.non_skippable_seconds;
         const placement = pb.player_chrome.placement_in_match;
+        const session = adSessionKey();
+        const viewer = adViewerKey();
         runWhenPlyIdle(
           () => {
             if (!activeRef.current || !openRef.current) {
@@ -192,7 +192,8 @@ export function InMatchAdOverlay({ active, gameStartedAtMs, moveCount = 0 }: Pro
             lastShownAtMs.current = Date.now();
             impressionMutateRef.current({
               campaignId: campaign.id,
-              viewerKey: viewerKey(),
+              viewerKey: viewer,
+              sessionKey: session,
               placement,
               viewport: slot,
             });

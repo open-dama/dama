@@ -1,5 +1,5 @@
 import { restClient } from "@/lib/api";
-import { invalidateAdPublisher } from "@/lib/invalidate";
+import { invalidateAdPublisherStats } from "@/lib/invalidate";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useAdVideoCompleteMutation() {
@@ -9,7 +9,8 @@ export function useAdVideoCompleteMutation() {
       await restClient.post(`/ads/campaigns/${campaignId}/video-complete`);
     },
     onSuccess: () => {
-      void invalidateAdPublisher(qc);
+      // Player complete must not refresh lobby serve (rotate owns re-rank timing).
+      void invalidateAdPublisherStats(qc);
     },
   });
 }

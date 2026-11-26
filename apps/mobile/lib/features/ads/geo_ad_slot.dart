@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
+import 'package:dama_mobile/core/ads/ad_viewer_session.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/geo/device_locate.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
@@ -12,7 +12,6 @@ import 'package:dama_mobile/features/ads/viewport_ad_creative.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// Player-facing geo ad slot: serve + one-shot impression from backend only.
 class GeoAdSlot extends StatefulWidget {
@@ -22,18 +21,58 @@ class GeoAdSlot extends StatefulWidget {
   State<GeoAdSlot> createState() => _GeoAdSlotState();
 }
 
-class _GeoAdSlotState extends State<GeoAdSlot> {
+class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
   ServedAdCampaign? _ad;
-  String? _impressedId;
+  String? _impressedShowKey;
   String? _lobbyPlacement;
   ViewportBreakpoints? _viewportBreakpoints;
   Map<String, String>? _scheduleChrome;
   bool _loading = true;
+  bool _lobbyRotateEnabled = false;
+  int _lobbyRotateSeconds = 0;
+  bool _appVisible = true;
+  Map<String, String> _lastQs = const {};
+  String _lastCacheKey = '';
+  Timer? _rotateTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_load(showSkeleton: true));
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _rotateTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final visible = state == AppLifecycleState.resumed;
+    if (visible == _appVisible) return;
+    _appVisible = visible;
+    if (visible) {
+      _armRotateTimer();
+    } else {
+      _rotateTimer?.cancel();
+    }
+  }
+
+  void _armRotateTimer() {
+    _rotateTimer?.cancel();
+    if (!_appVisible || !_lobbyRotateEnabled || _lobbyRotateSeconds < 1) {
+      return;
+    }
+    _rotateTimer = Timer.periodic(Duration(seconds: _lobbyRotateSeconds), (_) {
+      if (!mounted || !_appVisible || _lastCacheKey.isEmpty) return;
+      QueryCache.invalidate(_lastCacheKey);
+      unawaited(
+        _fetchAndApply(_lastQs, _lastCacheKey, recordImpression: true),
+      );
+    });
   }
 
   Future<bool> _loadPlacement() async {
@@ -46,6 +85,15 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
     final place = (chrome?['placement_lobby']?.toString() ?? '').trim();
     if (place.isEmpty) return false;
     _lobbyPlacement = place;
+    final rotateRaw = pb['lobby_rotate_enabled'];
+    _lobbyRotateEnabled = rotateRaw == true ||
+        rotateRaw?.toString().toLowerCase() == 'true' ||
+        rotateRaw?.toString() == '1';
+    final rotateSec = int.tryParse(
+          pb['lobby_rotate_interval_seconds']?.toString() ?? '',
+        ) ??
+        0;
+    _lobbyRotateSeconds = rotateSec;
     final scheduleRaw = pb['schedule_chrome'];
     if (scheduleRaw is Map<String, dynamic>) {
       final scheduleChrome = scheduleRaw.map(
@@ -77,7 +125,17 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
       final country = located.countryCode;
       final region = (located.region ?? '').toLowerCase();
       final district = (located.city ?? '').toLowerCase();
-      final qs = <String, String>{};
+      final viewer = await AdViewerSession.viewerKey();
+      final session = await AdViewerSession.sessionKey();
+      // Parity with web: do not serve/rank without keys (freq + session caps).
+      if (viewer.isEmpty || session.isEmpty) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+      final qs = <String, String>{
+        'viewer_key': viewer,
+        'session_key': session,
+      };
       if (located.latitude != null) {
         qs['lat'] = located.latitude!.toString();
       }
@@ -86,6 +144,8 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
       }
 
       final cacheKey = CacheKeys.geoAd(country, region, district);
+      _lastQs = qs;
+      _lastCacheKey = cacheKey;
       final cachedAd = QueryCache.read<ServedAdCampaign>(
         cacheKey,
         maxAge: QueryCache.sessionTtl,
@@ -96,11 +156,15 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
           _ad = cachedAd;
           _loading = false;
         });
-        unawaited(_fetchAndApply(qs, cacheKey, recordImpression: false));
+        // Warm cache paint is instant; still re-serve and impress once this mount so
+        // session/cross-placement caps stay accurate before the first rotate tick.
+        unawaited(_fetchAndApply(qs, cacheKey, recordImpression: true));
+        _armRotateTimer();
         return;
       }
 
       await _fetchAndApply(qs, cacheKey, recordImpression: true);
+      _armRotateTimer();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -111,9 +175,15 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
     String cacheKey, {
     required bool recordImpression,
   }) async {
+    final viewer = qs['viewer_key'] ?? await AdViewerSession.viewerKey();
+    final session = qs['session_key'] ?? await AdViewerSession.sessionKey();
+    final headers = <String, String>{};
+    if (viewer.isNotEmpty) {
+      headers['X-Device-Id'] = viewer;
+    }
     final uri = Uri.parse('${ApiConfig.baseUrl}/api/v1/ads/serve')
         .replace(queryParameters: qs.isEmpty ? null : qs);
-    final serve = await http.get(uri);
+    final serve = await http.get(uri, headers: headers);
     if (serve.statusCode >= 300 || !mounted) {
       if (mounted) setState(() => _loading = false);
       return;
@@ -158,11 +228,13 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
       _loading = false;
     });
     if (!recordImpression) return;
-    if (_impressedId == chosen.id) return;
+    // One impression per successful serve apply (rotate re-shows count again).
+    final showKey =
+        '${chosen.id}:${DateTime.now().millisecondsSinceEpoch}';
+    if (_impressedShowKey == showKey) return;
     final placement = (_lobbyPlacement ?? '').trim();
     if (placement.isEmpty) return;
-    _impressedId = chosen.id;
-    final viewer = await _stableViewerKey();
+    _impressedShowKey = showKey;
     String? viewport;
     if (bp != null && mounted) {
       final width = MediaQuery.sizeOf(context).width;
@@ -170,6 +242,7 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
     }
     final body = <String, dynamic>{
       'viewer_key': viewer,
+      'session_key': session,
       'placement': placement,
     };
     if (viewport != null && viewport.isNotEmpty) {
@@ -181,17 +254,6 @@ class _GeoAdSlotState extends State<GeoAdSlot> {
       headers: {'Content-Type': 'application/json', 'X-Device-Id': viewer},
       body: jsonEncode(body),
     );
-  }
-
-  Future<String> _stableViewerKey() async {
-    const key = 'dama_ad_viewer';
-    final prefs = await SharedPreferences.getInstance();
-    final existing = prefs.getString(key);
-    if (existing != null && existing.isNotEmpty) return existing;
-    final created =
-        'mobile_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(1 << 30)}';
-    await prefs.setString(key, created);
-    return created;
   }
 
   Future<void> _onTap() async {

@@ -19,6 +19,25 @@ function Invoke-Json($Method, $Path, $Body, $Token) {
   return ($res.Content | ConvertFrom-Json)
 }
 
+# Console playback PUT replaces the full ad_playback value. Always echo Phase A
+# lobby rotate + freq caps from the prior GET or validation fails (rotate=0).
+function New-PlaybackPutBody($pb, $NonSkippable, $FirstShow, $Interval) {
+  return @{
+    non_skippable_seconds = [int]$NonSkippable
+    first_show_after_game_seconds = [int]$FirstShow
+    default_interval_seconds = [int]$Interval
+    lobby_rotate_enabled = [bool]$pb.lobby_rotate_enabled
+    lobby_rotate_interval_seconds = [int]$pb.lobby_rotate_interval_seconds
+    freq_cap_campaign_per_hour = [int]$pb.freq_cap_campaign_per_hour
+    freq_cap_campaign_per_day = [int]$pb.freq_cap_campaign_per_day
+    freq_cap_campaign_per_session = [int]$pb.freq_cap_campaign_per_session
+    freq_cap_placement_per_hour = [int]$pb.freq_cap_placement_per_hour
+    freq_cap_placement_per_day = [int]$pb.freq_cap_placement_per_day
+    freq_cap_placement_per_session = [int]$pb.freq_cap_placement_per_session
+    freq_cap_min_gap_seconds = [int]$pb.freq_cap_min_gap_seconds
+  }
+}
+
 Write-Host "== health =="
 $hz = Invoke-WebRequest "http://127.0.0.1:8080/healthz" -UseBasicParsing
 if ($hz.Content -notmatch "ok") { throw "healthz failed" }
@@ -35,15 +54,16 @@ if (-not $token) { throw "no access_token (is DAMA_ALLOW_E2E_AUTH=1?)" }
 Write-Host "== normalize platform non_skippable to seed default 10 =="
 $cab0 = Invoke-Json GET "/console/ads/playback" $null $token
 $pb0seed = $cab0.playback
-Invoke-Json PUT "/console/ads/playback" @{
-  non_skippable_seconds = 10
-  first_show_after_game_seconds = [int]$pb0seed.first_show_after_game_seconds
-  default_interval_seconds = [int]$pb0seed.default_interval_seconds
-} $token | Out-Null
+Invoke-Json PUT "/console/ads/playback" (New-PlaybackPutBody $pb0seed 10 $pb0seed.first_show_after_game_seconds $pb0seed.default_interval_seconds) $token | Out-Null
 
 Write-Host "== playback public (non_skippable must be 10) =="
 $pb = Invoke-Json GET "/ads/playback" $null $null
 if ([int]$pb.non_skippable_seconds -ne 10) { throw ("expected non_skippable 10 got " + $pb.non_skippable_seconds) }
+if ($null -eq $pb.lobby_rotate_enabled) { throw "lobby_rotate_enabled missing" }
+if ([int]$pb.lobby_rotate_interval_seconds -lt 1) { throw "lobby_rotate_interval_seconds missing" }
+if ($null -eq $pb.freq_cap_campaign_per_session) { throw "freq_cap_campaign_per_session missing" }
+if ($null -eq $pb.freq_cap_placement_per_session) { throw "freq_cap_placement_per_session missing" }
+if ($null -eq $pb.freq_cap_min_gap_seconds) { throw "freq_cap_min_gap_seconds missing" }
 if (-not $pb.player_chrome.sponsored_label) { throw "player_chrome missing" }
 if (-not $pb.player_chrome.placement_in_match) { throw "placement_in_match missing" }
 if (-not $pb.schedule_chrome.publisher_page_title) { throw "publisher_page_title missing" }
@@ -191,12 +211,9 @@ $first = [int]$pb0.first_show_after_game_seconds
 $interval = [int]$pb0.default_interval_seconds
 
 Write-Host "== flexible non-skippable: set 15 (admin CRUD) =="
-$put15 = Invoke-Json PUT "/console/ads/playback" @{
-  non_skippable_seconds = 15
-  first_show_after_game_seconds = $first
-  default_interval_seconds = $interval
-} $token
+$put15 = Invoke-Json PUT "/console/ads/playback" (New-PlaybackPutBody $pb0 15 $first $interval) $token
 if ([int]$put15.non_skippable_seconds -ne 15) { throw "put 15 failed" }
+if ([int]$put15.lobby_rotate_interval_seconds -ne [int]$pb0.lobby_rotate_interval_seconds) { throw "put wiped lobby_rotate_interval" }
 $pubPb = Invoke-Json GET "/ads/playback" $null $null
 if ([int]$pubPb.non_skippable_seconds -ne 15) { throw "public playback not 15" }
 if (-not $pubPb.schedule_chrome.save_campaign_schedule_action) { throw "schedule_chrome missing" }
@@ -326,12 +343,9 @@ if ([int]$elig2.non_skippable_seconds -ne 12) { throw ("expected override 12 got
 if ($elig2.campaign.id -ne $campId) { throw "wrong campaign on override" }
 
 Write-Host "== restore platform non-skippable to 10 =="
-$put10 = Invoke-Json PUT "/console/ads/playback" @{
-  non_skippable_seconds = 10
-  first_show_after_game_seconds = $first
-  default_interval_seconds = $interval
-} $token
+$put10 = Invoke-Json PUT "/console/ads/playback" (New-PlaybackPutBody $pb0 10 $first $interval) $token
 if ([int]$put10.non_skippable_seconds -ne 10) { throw "restore 10 failed" }
+if ([int]$put10.lobby_rotate_interval_seconds -ne [int]$pb0.lobby_rotate_interval_seconds) { throw "restore wiped lobby_rotate_interval" }
 
 Write-Host "== placement keys from player_chrome (DB) =="
 $pbPlace = Invoke-Json GET "/ads/playback" $null $null

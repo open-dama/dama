@@ -12,18 +12,31 @@ import (
 // AdPlaybackConfig is loaded from platform_settings.key = 'ad_playback'.
 // NonSkippableSeconds is admin-editable (not static); bounds come from the same DB row.
 type AdPlaybackConfig struct {
-	NonSkippableSeconds       int    `json:"non_skippable_seconds"`
-	FirstShowAfterGameSeconds int    `json:"first_show_after_game_seconds"`
-	DefaultIntervalSeconds    int    `json:"default_interval_seconds"`
-	NonSkippableMin           int    `json:"non_skippable_min"`
-	NonSkippableMax           int    `json:"non_skippable_max"`
-	FirstShowMin              int    `json:"first_show_min"`
-	FirstShowMax              int    `json:"first_show_max"`
-	IntervalMin               int    `json:"interval_min"`
-	IntervalMax               int    `json:"interval_max"`
-	ImpressionCapMin          int    `json:"impression_cap_min"`
-	ConsoleCampaignsLimit     int    `json:"console_campaigns_limit"`
-	Source                    string `json:"-"`
+	NonSkippableSeconds       int `json:"non_skippable_seconds"`
+	FirstShowAfterGameSeconds int `json:"first_show_after_game_seconds"`
+	DefaultIntervalSeconds    int `json:"default_interval_seconds"`
+	NonSkippableMin           int `json:"non_skippable_min"`
+	NonSkippableMax           int `json:"non_skippable_max"`
+	FirstShowMin              int `json:"first_show_min"`
+	FirstShowMax              int `json:"first_show_max"`
+	IntervalMin               int `json:"interval_min"`
+	IntervalMax               int `json:"interval_max"`
+	ImpressionCapMin          int `json:"impression_cap_min"`
+	ConsoleCampaignsLimit     int `json:"console_campaigns_limit"`
+	// Lobby tile rotation (Phase A). Separate from in-match first_show / default_interval.
+	LobbyRotateEnabled         bool `json:"lobby_rotate_enabled"`
+	LobbyRotateIntervalSeconds int  `json:"lobby_rotate_interval_seconds"`
+	LobbyRotateIntervalMin     int  `json:"lobby_rotate_interval_min"`
+	LobbyRotateIntervalMax     int  `json:"lobby_rotate_interval_max"`
+	// Viewer frequency caps across lobby + in-match. 0 disables that cap.
+	FreqCapCampaignPerHour     int    `json:"freq_cap_campaign_per_hour"`
+	FreqCapCampaignPerDay      int    `json:"freq_cap_campaign_per_day"`
+	FreqCapCampaignPerSession  int    `json:"freq_cap_campaign_per_session"`
+	FreqCapPlacementPerHour    int    `json:"freq_cap_placement_per_hour"`
+	FreqCapPlacementPerDay     int    `json:"freq_cap_placement_per_day"`
+	FreqCapPlacementPerSession int    `json:"freq_cap_placement_per_session"`
+	FreqCapMinGapSeconds       int    `json:"freq_cap_min_gap_seconds"`
+	Source                     string `json:"-"`
 }
 
 // AdRuntimeChromeConfig is loaded from platform_settings.key = 'ad_runtime_chrome'.
@@ -365,6 +378,18 @@ func (c *AdPlaybackConfig) validateBoundsPresent() error {
 	if c.ConsoleCampaignsLimit < 1 {
 		return errors.New("ad_playback console_campaigns_limit incomplete")
 	}
+	if c.LobbyRotateIntervalMin < 1 || c.LobbyRotateIntervalMax < c.LobbyRotateIntervalMin {
+		return errors.New("ad_playback lobby_rotate interval bounds incomplete")
+	}
+	if c.FreqCapCampaignPerHour < 0 || c.FreqCapCampaignPerDay < 0 || c.FreqCapCampaignPerSession < 0 {
+		return errors.New("ad_playback freq_cap campaign bounds incomplete")
+	}
+	if c.FreqCapPlacementPerHour < 0 || c.FreqCapPlacementPerDay < 0 || c.FreqCapPlacementPerSession < 0 {
+		return errors.New("ad_playback freq_cap placement bounds incomplete")
+	}
+	if c.FreqCapMinGapSeconds < 0 {
+		return errors.New("ad_playback freq_cap_min_gap_seconds incomplete")
+	}
 	return nil
 }
 
@@ -383,6 +408,9 @@ func (c *AdPlaybackConfig) validateValues() error {
 	}
 	if c.DefaultIntervalSeconds < c.IntervalMin || c.DefaultIntervalSeconds > c.IntervalMax {
 		return fmt.Errorf("default_interval_seconds must be between %d and %d", c.IntervalMin, c.IntervalMax)
+	}
+	if c.LobbyRotateIntervalSeconds < c.LobbyRotateIntervalMin || c.LobbyRotateIntervalSeconds > c.LobbyRotateIntervalMax {
+		return fmt.Errorf("lobby_rotate_interval_seconds must be between %d and %d", c.LobbyRotateIntervalMin, c.LobbyRotateIntervalMax)
 	}
 	return nil
 }
@@ -407,22 +435,35 @@ func (s *SettingsStore) SetAdPlayback(ctx context.Context, cfg AdPlaybackConfig)
 	cfg.IntervalMax = cur.IntervalMax
 	cfg.ImpressionCapMin = cur.ImpressionCapMin
 	cfg.ConsoleCampaignsLimit = cur.ConsoleCampaignsLimit
+	cfg.LobbyRotateIntervalMin = cur.LobbyRotateIntervalMin
+	cfg.LobbyRotateIntervalMax = cur.LobbyRotateIntervalMax
 	if err := cfg.validateValues(); err != nil {
 		return err
 	}
 	payload := map[string]any{
-		"non_skippable_seconds":         cfg.NonSkippableSeconds,
-		"first_show_after_game_seconds": cfg.FirstShowAfterGameSeconds,
-		"default_interval_seconds":      cfg.DefaultIntervalSeconds,
-		"non_skippable_min":             cfg.NonSkippableMin,
-		"non_skippable_max":             cfg.NonSkippableMax,
-		"first_show_min":                cfg.FirstShowMin,
-		"first_show_max":                cfg.FirstShowMax,
-		"interval_min":                  cfg.IntervalMin,
-		"interval_max":                  cfg.IntervalMax,
-		"impression_cap_min":            cfg.ImpressionCapMin,
-		"console_campaigns_limit":       cfg.ConsoleCampaignsLimit,
-		"source":                        "database",
+		"non_skippable_seconds":          cfg.NonSkippableSeconds,
+		"first_show_after_game_seconds":  cfg.FirstShowAfterGameSeconds,
+		"default_interval_seconds":       cfg.DefaultIntervalSeconds,
+		"non_skippable_min":              cfg.NonSkippableMin,
+		"non_skippable_max":              cfg.NonSkippableMax,
+		"first_show_min":                 cfg.FirstShowMin,
+		"first_show_max":                 cfg.FirstShowMax,
+		"interval_min":                   cfg.IntervalMin,
+		"interval_max":                   cfg.IntervalMax,
+		"impression_cap_min":             cfg.ImpressionCapMin,
+		"console_campaigns_limit":        cfg.ConsoleCampaignsLimit,
+		"lobby_rotate_enabled":           cfg.LobbyRotateEnabled,
+		"lobby_rotate_interval_seconds":  cfg.LobbyRotateIntervalSeconds,
+		"lobby_rotate_interval_min":      cfg.LobbyRotateIntervalMin,
+		"lobby_rotate_interval_max":      cfg.LobbyRotateIntervalMax,
+		"freq_cap_campaign_per_hour":     cfg.FreqCapCampaignPerHour,
+		"freq_cap_campaign_per_day":      cfg.FreqCapCampaignPerDay,
+		"freq_cap_campaign_per_session":  cfg.FreqCapCampaignPerSession,
+		"freq_cap_placement_per_hour":    cfg.FreqCapPlacementPerHour,
+		"freq_cap_placement_per_day":     cfg.FreqCapPlacementPerDay,
+		"freq_cap_placement_per_session": cfg.FreqCapPlacementPerSession,
+		"freq_cap_min_gap_seconds":       cfg.FreqCapMinGapSeconds,
+		"source":                         "database",
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
