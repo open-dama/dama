@@ -10,13 +10,14 @@ Folder: `docs/guides/downloads/`
 - Dama_Wallet_Payments_And_Compliance_Guide.docx - wallet, KYC, payouts, Telegram ops
 - Dama_Host_Trust_And_Scammer_Protection_Guide.docx - host trust, phone/ID tiers, open-cup limits, locked guaranteed prizes (human step by step)
 - Dama_Ads_And_Admin_Ops_Guide.docx - publishers + admin console
+- Dama_Ad_Marketplace_Auction_And_Reservation_Guide.docx - auction, reservation, floors, tiers, packages, agency (human step by step)
 
 Markdown mirrors of the same names also live under `downloads/`.
 
 ## Markdown sources
 Same names as `.md` in this folder.
 
-Host trust and scammer protection (plain language): `Dama_Host_Trust_And_Scammer_Protection_Guide.md`. Architecture detail: `docs/architecture.md`.
+Host trust and scammer protection (plain language): `Dama_Host_Trust_And_Scammer_Protection_Guide.md`. Ad marketplace (plain language): `Dama_Ad_Marketplace_Auction_And_Reservation_Guide.md`. Architecture detail: `docs/architecture.md`.
 
 ## How to regenerate DOCX
 From repo root: `python scripts/build-dama-guide-docx.py`

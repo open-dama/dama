@@ -15,13 +15,17 @@ Where: `/ads/*`, Flutter Publisher shell
 ### Create campaign steps
 1. Open Ads Dashboard
 2. Campaigns -> Create
-3. Pay database create fee from wallet (amount depends on geo; create fails if balance is insufficient). This is a one-time fee, not the daily spend cap.
-4. Title + creative type + **required daily spend cap** (must be greater than zero; caps daily impression spend in wallet currency)
-5. After create succeeds, the campaign detail opens immediately with device creatives / media upload first (then title, status, schedule) so creatives can be attached without hunting the row
-6. Upload media: thumbnail/gallery as today, plus **device creatives** (desktop / tablet / mobile) when `ad_runtime_chrome` viewport keys are complete. Per-slot aspect labels come from DB (`viewport_*_ratio_label`; typically 16:9 / 4:3 / 9:16). Per slot: drag-drop or pick image/video. Fill all three or only the sizes you need; each size plays only on that screen.
-7. Schedule: first show, interval, period impression caps, optional non-skippable within admin bounds
-8. Set servable status (Draft / Active / Paused / Archived) from the detail form or bulk row selection
-9. Save
+3. Place the **required map pin** (geo pricing and targeting). When marketplace is on, pricing shows floor, advertiser level, daily media minimum, packages (if unlocked), and agency option.
+4. Pay database create fee from wallet (amount depends on geo; create fails if balance is insufficient). This is a one-time fee, not the daily spend cap. Marketplace may also apply level create-fee rules, agency uplift, and package flight fee.
+5. Title + creative type + **required daily spend cap** (must be greater than zero; caps daily impression spend in wallet currency). When marketplace is on, daily cap must meet your advertiser level minimum.
+6. **Buying type** when marketplace is on: choose **Auction** (max bid per view at or above floor) or **Reservation** (reserved rate at or above floor, or pick a package). Standard (legacy) create is blocked while marketplace is on. When marketplace is off, create stays Standard (flat unit cost).
+7. After create succeeds, the campaign detail opens immediately with device creatives / media upload first (then title, status, schedule) so creatives can be attached without hunting the row. Marketplace buying fields are **locked** after create (buying summary on detail).
+8. Upload media: thumbnail/gallery as today, plus **device creatives** (desktop / tablet / mobile) when `ad_runtime_chrome` viewport keys are complete. Per-slot aspect labels come from DB (`viewport_*_ratio_label`; typically 16:9 / 4:3 / 9:16). Per slot: drag-drop or pick image/video. Fill all three or only the sizes you need; each size plays only on that screen.
+9. Schedule: first show, interval, period impression caps, optional non-skippable within admin bounds
+10. Set servable status (Draft / Active / Paused / Archived) from the detail form or bulk row selection
+11. Save
+
+Full marketplace bible (Auction, Reservation, floors, levels, packages, agency, settle): `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
 
 ### Campaigns table
 - Status column, impressions/clicks/reach, daily spend cap, View, and row actions (including **Delete** when the campaign has zero impressions and zero clicks; otherwise archive)
@@ -46,10 +50,19 @@ Wallet and Receipts do not embed the bank-transfer form. ET geo users open the d
 - Force serve when eligibility fails
 - Moderate all publishers without admin permission
 
-## Part B - Admin ads runtime
-Who: Admins with ads permissions
-Where: Admin -> Product and growth -> Ads
-What: Global playback policy, bounds, console campaign overrides
+## Part B - Admin ads runtime and marketplace
+Who: Admins with ads / progression permissions
+Where: Admin -> Product and growth -> Ads (runtime + campaign buying summary); Admin -> Progression (marketplace money settings)
+What:
+- Global playback policy, bounds, console campaign overrides
+- Marketplace on/off; Auction / Reservation; default buying type
+- Floors (base / Ethiopia / global), peak and optional dynamic floor
+- Placement / viewport multipliers; agency percent; audience premium; optional impression wallet settle (default off)
+- Advertiser levels (spend mins, unlocks, create-fee multiplier, list multiplier)
+- Packages catalog (fixed rate, flight fee, exclusive, placement, min level)
+- Ads console read-only **Buying summary** (buying type, bid/reserved per view, package, tier, agency)
+
+Human step-by-step marketplace bible: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
 
 ## Part C - Admin console bible
 
@@ -67,7 +80,7 @@ Currency, Geo, Document KYC review, Payouts, Receipts (view/PDF/print), Transact
 Official tournaments lifecycle (create, start, force tools, settle).
 Hosted events catalog (formats, Swiss rounds map, groups target/advance, arena defaults). Host sizes use a DataTable with Ethiopia and global host fees per size (currencies from payment_currency), same geo pattern as Campaign create fees on Progression. Unlimited sizes (null max or high safety ceiling) are Arena-only for Community and Official; admin labels them Unlimited from DB chrome; the Unlimited toggle requires empty max or a high ceiling (classic-range max is rejected so it cannot save as a fixed Arena size by mistake; mig **490** `err_unlimited_max_high_or_empty`; EventsAdminChrome API requires that key fail-closed with the admin SPA); classic sizes stay fixed. Official Arena create/edit uses the same null or high ceiling rules (`ValidateOfficialMaxPlayers`).
 Hosted reports moderation.
-Progression: XP ladder; **rated match rewards** (win/draw/loss XP + rating deltas + **minimum rating floor** + **new player starting rating** - full admin edit of `match_rewards`; floor ≥ 0; starting ≥ floor; starting applies to new accounts only; match results clamp to floor); match_clock (enable, default preset, increment, invite TTL; presets listed from DB; **pause_enabled** + **pause_duration** as number + Seconds/Minutes unit stored as seconds - PauseDurationField, not a calendar picker).
+Progression: XP ladder; **rated match rewards** (win/draw/loss XP + rating deltas + **minimum rating floor** + **new player starting rating** - full admin edit of `match_rewards`; floor ≥ 0; starting ≥ floor; starting applies to new accounts only; match results clamp to floor); match_clock (enable, default preset, increment, invite TTL; presets listed from DB; **pause_enabled** + **pause_duration** as number + Seconds/Minutes unit stored as seconds - PauseDurationField, not a calendar picker); **ad marketplace** (on/off, auction/reservation, floors, tiers, packages, agency, audience, impression settle) plus Ethiopia/global **campaign create fees** and flat impression unit cost for Standard path.
 
 ### Product and growth
 Ads + Media pool.
@@ -86,10 +99,11 @@ payments.review, tournaments.write, events.manage_catalog, events.manage_reports
 3. Healthy Official cups
 4. Skim hosted reports (too many open reports or cancel-heavy hosts can be blocked from paid create)
 5. Confirm feature flags for market (include host-trust cash/KYC flags). Edit open-cup caps and reputation on Sales → Host trust policy (new 1 / phone 3 / ID 25 defaults).
-6. If ads live, skim runtime and stuck campaigns
+6. If ads live, skim runtime and stuck campaigns; confirm marketplace switches, floors, and exclusive packages match the market plan
 7. If Telegram ops on, confirm Ready and overnight notifies
 
 Scammer protection (human steps): `docs/guides/Dama_Host_Trust_And_Scammer_Protection_Guide.md`.
+Ad marketplace (Auction / Reservation): `docs/guides/Dama_Ad_Marketplace_Auction_And_Reservation_Guide.md`.
 
 
 # 15. Admin Leaf Deep Dives (Operator Notes)
