@@ -167,6 +167,18 @@ Each card answers: What is it? Why do we need it? Advantage? How is it different
 - **Advantage:** Brands buy the context they care about.
 - **Different from:** Viewport (screen size creative).
 
+### Lobby tile rotation
+- **What:** While someone stays on the home lobby, the single lobby ad tile can refresh every N seconds (admin setting, separate from in-match interval). Pauses when the tab/app is not visible.
+- **Why:** Long lobby dwell can show more than one brand over time without stacking ads.
+- **Advantage:** More inventory; still one tile; soft format (not full-screen interrupt).
+- **Different from:** In-match breaks (match clock). Different from Playit-style mid-navigation overlays (later premium phase, not default).
+
+### Viewer frequency caps
+- **What:** Limits how often one viewer sees the same campaign or placement (hour/day/session) plus a min gap between any two shows. Applies across lobby and in-match. Session caps use `session_key` stored on each impression event (one shared session key per browser tab on web, one shared process key on Flutter for lobby + in-match). Serve and eligibility rank with these caps; impression re-checks when keys are present so a direct impress cannot write past the limit.
+- **Why:** Stops one Auction winner from feeling spammy on every surface, including within one browse session.
+- **Advantage:** Professional multi-placement hygiene. Zero on a cap disables that rule.
+- **Different from:** Campaign period impression caps (campaign totals, not per-viewer).
+
 ### Viewport (device creative)
 - **What:** Creative slot for desktop / tablet / phone.
 - **Why:** Same campaign needs the right shape on each device.

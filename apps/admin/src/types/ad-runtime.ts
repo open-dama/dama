@@ -12,12 +12,34 @@ export type AdPlayback = {
   interval_max: number;
   impression_cap_min: number;
   console_campaigns_limit: number;
+  lobby_rotate_enabled: boolean;
+  lobby_rotate_interval_seconds: number;
+  lobby_rotate_interval_min: number;
+  lobby_rotate_interval_max: number;
+  freq_cap_campaign_per_hour: number;
+  freq_cap_campaign_per_day: number;
+  freq_cap_campaign_per_session: number;
+  freq_cap_placement_per_hour: number;
+  freq_cap_placement_per_day: number;
+  freq_cap_placement_per_session: number;
+  freq_cap_min_gap_seconds: number;
 };
 
 /** Writable platform playback fields (bounds stay DB-owned). */
 export type AdPlaybackUpdatePayload = Pick<
   AdPlayback,
-  "non_skippable_seconds" | "first_show_after_game_seconds" | "default_interval_seconds"
+  | "non_skippable_seconds"
+  | "first_show_after_game_seconds"
+  | "default_interval_seconds"
+  | "lobby_rotate_enabled"
+  | "lobby_rotate_interval_seconds"
+  | "freq_cap_campaign_per_hour"
+  | "freq_cap_campaign_per_day"
+  | "freq_cap_campaign_per_session"
+  | "freq_cap_placement_per_hour"
+  | "freq_cap_placement_per_day"
+  | "freq_cap_placement_per_session"
+  | "freq_cap_min_gap_seconds"
 >;
 
 export type AdRuntimeChrome = {
@@ -162,6 +184,19 @@ export type AdRuntimeChrome = {
   agency_managed_label?: string;
   marketplace_fields_locked_blurb?: string;
   tier_label?: string;
+  lobby_rotate_section_title?: string;
+  lobby_rotate_section_blurb?: string;
+  lobby_rotate_enabled_label?: string;
+  lobby_rotate_interval_label?: string;
+  freq_caps_section_title?: string;
+  freq_caps_section_blurb?: string;
+  freq_cap_campaign_hour_label?: string;
+  freq_cap_campaign_day_label?: string;
+  freq_cap_campaign_session_label?: string;
+  freq_cap_placement_hour_label?: string;
+  freq_cap_placement_day_label?: string;
+  freq_cap_placement_session_label?: string;
+  freq_cap_min_gap_label?: string;
 };
 
 export type ViewportCreativeSlot = "desktop" | "tablet" | "mobile";

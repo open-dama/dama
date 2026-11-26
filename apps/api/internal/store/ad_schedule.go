@@ -315,19 +315,20 @@ func (c *AdCampaign) SecondsUntilPeriodCapReset(counts PeriodImpressionCounts, n
 	return soonest
 }
 
-func (s *AdStore) RecordImpressionEvent(ctx context.Context, campaignID, viewerKey, placement string) error {
+func (s *AdStore) RecordImpressionEvent(ctx context.Context, campaignID, viewerKey, placement, sessionKey string) error {
 	if s.db == nil || !s.db.Ready() {
 		return fmt.Errorf("service temporarily unavailable")
 	}
 	viewerKey = strings.TrimSpace(viewerKey)
 	placement = strings.TrimSpace(placement)
+	sessionKey = strings.TrimSpace(sessionKey)
 	if placement == "" {
 		return fmt.Errorf("placement required")
 	}
 	_, err := s.db.Pool.Exec(ctx, `
-		INSERT INTO ad_impression_events (campaign_id, viewer_key, placement)
-		VALUES ($1, $2, $3)
-	`, campaignID, viewerKey, placement)
+		INSERT INTO ad_impression_events (campaign_id, viewer_key, placement, session_key)
+		VALUES ($1, $2, $3, $4)
+	`, campaignID, viewerKey, placement, sessionKey)
 	return err
 }
 

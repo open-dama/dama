@@ -10,23 +10,13 @@ import {
 import { useAdPlaybackQuery } from "@/hooks/query/useAdPlaybackQuery";
 import { usePlayerGeoQuery } from "@/hooks/query/usePlayerGeoQuery";
 import { useServeAdsQuery } from "@/hooks/query/useServeAdsQuery";
+import { adSessionKey, adViewerKey } from "@/lib/ad-viewer-session";
 import {
   parseViewportBreakpoints,
   pickCampaignCreative,
   resolveViewportSlot,
 } from "@/lib/resolve-viewport-creative";
 import { useEffect, useRef, useState } from "react";
-
-function viewerKey(): string {
-  if (typeof window === "undefined") return "";
-  const key = "dama_ad_viewer";
-  let v = window.localStorage.getItem(key);
-  if (!v) {
-    v = crypto.randomUUID();
-    window.localStorage.setItem(key, v);
-  }
-  return v;
-}
 
 type GeoAdSlotProps = {
   /** When true, render nothing until a real creative is ready (no skeleton band under the board). */
@@ -41,7 +31,33 @@ export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
   const playbackQuery = useAdPlaybackQuery(true);
   const impressed = useRef<string | null>(null);
   const videoCompletedRef = useRef<string | null>(null);
-  const serveQuery = useServeAdsQuery(geo, geoReady);
+  const [viewer, setViewer] = useState("");
+  const [session, setSession] = useState("");
+  const [tabVisible, setTabVisible] = useState(true);
+  useEffect(() => {
+    setViewer(adViewerKey());
+    setSession(adSessionKey());
+  }, []);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const sync = () => setTabVisible(!document.hidden);
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, []);
+  const lobbyRotateEnabled = playbackQuery.data?.lobby_rotate_enabled === true;
+  const lobbyRotateSec = Number(playbackQuery.data?.lobby_rotate_interval_seconds ?? 0);
+  const rotateMs =
+    lobbyRotateEnabled && tabVisible && Number.isFinite(lobbyRotateSec) && lobbyRotateSec >= 1
+      ? lobbyRotateSec * 1000
+      : false;
+  const serveQuery = useServeAdsQuery(geo, {
+    // Wait for viewer+session so first serve/rank applies freq + session caps.
+    enabled: geoReady && Boolean(viewer) && Boolean(session),
+    viewerKey: viewer,
+    sessionKey: session,
+    refetchIntervalMs: rotateMs,
+  });
   const impression = useAdImpressionMutation();
   const click = useAdClickMutation();
   const videoComplete = useAdVideoCompleteMutation();
@@ -71,15 +87,20 @@ export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
   const recordImpression = impression.mutate;
 
   useEffect(() => {
-    if (!ad?.id || impressed.current === ad.id || !lobbyPlacement) return;
-    impressed.current = ad.id;
+    // Match serve gate: both keys required so session caps land on every show.
+    if (!ad?.id || !lobbyPlacement || !viewer || !session) return;
+    // One impression per serve refresh (including rotate re-shows of same campaign).
+    const showKey = `${ad.id}:${serveQuery.dataUpdatedAt}`;
+    if (impressed.current === showKey) return;
+    impressed.current = showKey;
     recordImpression({
       campaignId: ad.id,
-      viewerKey: viewerKey(),
+      viewerKey: viewer,
+      sessionKey: session,
       placement: lobbyPlacement,
       viewport: slot || undefined,
     });
-  }, [ad, lobbyPlacement, recordImpression, slot]);
+  }, [ad, lobbyPlacement, recordImpression, slot, viewer, session, serveQuery.dataUpdatedAt]);
 
   if (!geoReady || serveQuery.isLoading) {
     return hideUntilReady ? null : <GeoAdSlotSkeleton />;
