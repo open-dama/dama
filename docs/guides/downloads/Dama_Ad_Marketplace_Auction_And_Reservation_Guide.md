@@ -1,410 +1,317 @@
-# Dama - Ad Marketplace (Auction and Reservation) Bible
+# Dama - Ad Marketplace Bible (Day-one plain English)
 
-Non-technical bible. Who / What / When / Why / Where / How.
-Covers how Dama sells ad attention with Auction, Reservation, floors, advertiser levels, packages, agency, and optional live wallet settle.
-Companion to `Dama_Ads_And_Admin_Ops_Guide` (full publisher + admin ops) and `Dama_Complete_App_Guide` (all-in-one).
-Regular hyphens only. No internal secrets. Live button text may differ slightly because labels come from the database.
+This guide is for someone on their **first day**.
+You do not need advertising experience. You do not need coding knowledge.
 
----
+If a word feels hard, look it up in **Section 3** (picture dictionary). Screen button text may differ slightly because labels come from the database.
 
-## 1. What problem this solves
+Companion guides:
+- Ads day-to-day ops: `Dama_Ads_And_Admin_Ops_Guide`
+- Whole product map: `Dama_Complete_App_Guide`
 
-Who: Ad publishers (brands and agencies) and platform admins.
-What: A smarter way to price and sell ad views than one flat create fee plus one flat price forever.
-Why: Big platforms (Meta, YouTube, LinkedIn) earn more by selling **scarce attention** and letting demand raise the price. They do not invent a higher fee only because a company "looks rich."
-Where: Ads shell on web and Flutter; Admin Progression (marketplace settings); Admin Ads console (campaign buying summary).
-How (plain idea):
-1. Sell better spots and busy times for more.
-2. Let advertisers compete (Auction) so prices rise when many want the same eyes.
-3. Offer locked premium buys (Reservation and packages) for brands that want certainty.
-4. Keep a simple path for small businesses when marketplace is off, or on lower advertiser levels.
-
-One sentence: Dama earns more by charging more for better attention and scarce slots, not by guessing a company's bank account.
+Regular hyphens only.
 
 ---
 
-## 2. Two ways to buy ads (and the old simple way)
+## 1. Read this first (the whole idea in one story)
 
-| Buying type | Plain meaning | Who it is for | When it is available |
-|-------------|---------------|---------------|----------------------|
-| **Auction** | You set a **max bid per view**. You compete with others. Higher effective bid wins scarce slots. Floor price is the minimum. | Most self-serve brands | Marketplace on **and** Auction enabled by admin |
-| **Reservation** | You lock a **fixed rate per view** (or a package with a fixed rate). More predictable. Often used for premium packages. | Brands that want certainty; higher advertiser levels for reservation unlock | Marketplace on **and** Reservation enabled **and** your advertiser level unlocks reservation |
-| **Standard (legacy)** | One create fee + one flat price per view set by the platform. No bid, no package. | Simple / older campaigns | When marketplace is **off**, new campaigns use this. When marketplace is **on**, new campaigns cannot choose Standard. Old Standard campaigns still keep working. |
+Imagine Dama is a busy game hall.
 
-Important: Names on screen may say "Auction", "Reservation", or "Standard". Rate fields are explained as **per view** (same money units as your daily media budget), so publishers can compare numbers without industry jargon.
+Players are people sitting at tables.
+An **ad** is a short poster or video that can appear:
+- in the lobby (before / around play), or
+- during a live match (in-match),
 
----
+when rules allow.
 
-## 3. Glossary (plain language)
+A **campaign** is your plan for one ad job: which creative, where, how long, how much money per day.
 
-| Term | Meaning |
-|------|---------|
-| Marketplace | Admin switch that turns on Auction / Reservation buying for new campaigns |
-| Create fee | One-time wallet charge when you create a campaign (Ethiopia vs rest of world can differ) |
-| Daily media budget (daily spend cap) | How much media spend that campaign may use per day. Required and must be greater than zero. Separate from the create fee. |
-| Floor price | Lowest allowed bid or reserved rate right now. Can be higher in Ethiopia vs global, and can rise at peak hours or when the network is busy. |
-| Max bid (Auction) | Highest you are willing to pay per view |
-| Reserved rate (Reservation) | Fixed rate per view you lock in (or the package sets it) |
-| Advertiser level (tier) | Starter / Growth / Enterprise style level based on your **recent media activity**, not on a "we are rich" checkbox |
-| Package | Ready-made offer (fixed rate, optional flight fee, which placement, optional exclusivity, minimum level) |
-| Exclusive package | Only one active campaign can hold that exclusive slot/category at a time |
-| Agency managed | Campaign marked as run by an agency; a small percent may apply to create fee and media pacing when admin enables agency |
-| High-rated audience | Views to higher-rated players can cost a bit more when admin turns that premium on (charge / pacing, not "who wins the slot" alone) |
-| Placement | Where the ad can show (for example lobby vs in-match) |
-| Viewport | Screen size creative (desktop / tablet / phone). Each size plays on matching screens. |
-| Impression / view | One counted show of the ad when rules pass |
-| Servable | Campaign status that allows delivery when other gates pass |
-| Impression wallet settle | Optional admin setting. Off by default. When on, each view also needs enough wallet balance at show time. When off, the create fee is prepaid and daily budget paces views. |
-| Buying summary | On campaign detail / admin console: buying type, rates, package, level, agency. Marketplace choices are locked after create. |
+### The old simple way (still exists)
+1. You pay a **create fee** once to open the campaign (like a small setup fee).
+2. The platform has one **flat price per view**.
+3. Your **daily media budget** is the max you allow that campaign to use per day for views.
+
+That simple way is called **Standard**.
+
+### The smarter way (Marketplace)
+Some days many brands want the same busy eyes (big cup, peak hours, popular lobby).
+Dama can then sell attention more like big platforms:
+
+- **Auction** = you say the most you will pay per view. If others want those eyes too, the higher offer usually wins the scarce slot.
+- **Reservation** = you lock a fixed price per view (or buy a ready-made **package**) so you know the price up front. More like booking a VIP table.
+
+Important fairness rule:
+Dama does **not** ask "is this company rich?" and invent a higher fee for the name alone.
+Dama charges more for **better / busier / scarcer attention**, and lets brands **compete** when they want the same slots.
 
 ---
 
-## 4. Across apps (who does what)
+## 2. Who should read which part
 
-Same product rules on every surface. Nothing below is a separate "second marketplace."
+| You are... | Read |
+|------------|------|
+| Brand or person creating ads (publisher) | Sections 1 to 8, then 11 FAQ |
+| Admin / operator | Sections 1 to 3, then 9 and 10 |
+| Support answering tickets | Section 3 + Section 11 |
 
-| Surface | Role in marketplace |
-|---------|---------------------|
-| **API (server)** | Pricing preview, create rules, packages list, floors, advertiser levels, rank who wins a slot, count views, wallet create fee and optional live settle, public error messages |
-| **Web** | Publisher create and detail UI: Auction / Reservation, bid or reserved rate, packages, agency, floor and level help text, locked buying summary |
-| **Flutter** | Same publisher marketplace create and detail flow as web |
-| **Admin** | Marketplace on/off; Auction / Reservation; floors; peak / busy floor; advertiser levels; packages; agency percent; high-rated audience; impression wallet settle; create fees; Ads console read-only Buying summary |
+Where publishers work: Ads area on **web** and **Flutter** (same rules).
+Where admins work: **Admin Console** → Progression (money switches) and Ads (campaign summary).
 
-Public publisher screens show floor, bid, reserved rate, packages, and clear errors. Internal knobs (exact percents, multipliers, settle switch) stay admin-only.
-
----
-
-## 5. Marketplace on vs off
-
-### When marketplace is OFF
-- New campaigns use **Standard** buying.
-- You still pay the geo create fee (if greater than zero).
-- Media uses the platform flat **unit cost per view**.
-- No auction bid, no reservation rate, no marketplace packages on create.
-
-### When marketplace is ON
-- New campaigns must choose **Auction** or **Reservation** (Standard is blocked for new creates).
-- Pricing screen shows floor, your advertiser level, daily media minimum for your level, packages (if unlocked), and agency option (if enabled).
-- Create still charges the create fee path (geo base, then level rules, then agency uplift if marked agency, plus package flight fee when a package has one).
-- Existing Standard campaigns already in the database keep serving with flat unit cost.
-
-### What does not change
-- Map pin / geo targeting still required.
-- Daily media budget still required.
-- Creatives, schedule, caps, pause/close, auto-close after end date, analytics, invoices, nested ads wallet still work as before.
-- Players still only see the creative. They never see publisher money settings.
+Players who only play the game never fill bid or package fields. They only see the creative.
 
 ---
 
-## 6. Before you create (pricing preview)
+## 3. Picture dictionary (every important word)
 
-Who: Publisher on web or Flutter.
-Where: Ads → Campaigns → Create (after you place the map pin so geo pricing can resolve).
-What you see (when marketplace is on):
-- Floor price (per view) for your location / time
-- Whether Auction and/or Reservation are available to you
-- Your advertiser level name and short blurb
-- Minimum daily media budget for your level
-- Packages list if your level unlocks packages
-- Agency checkbox if agency is enabled (checking it refreshes the create-fee preview)
+Read this like a menu. One row = one idea.
 
-Why: So you know the minimums before you spend wallet money.
+| Word you will see | In everyday life | On Dama | Tiny example |
+|-------------------|------------------|---------|--------------|
+| **Campaign** | One advertising job | Your ad project with creative + schedule + money limits | "Spring coffee promo" |
+| **Create fee** | Setup fee to open the job | Money taken from ads wallet **once** when create succeeds | 50 taken at create |
+| **Daily media budget** (also called daily spend cap) | Max you allow for views today | Required number greater than zero. Separate from create fee | "Spend at most 200 today on views" |
+| **View** (impression) | One time someone actually saw the ad | One counted show when rules pass | 1 view |
+| **Marketplace** | Switch from "one flat price" to "Auction / Reservation options" | Admin turns this on or off for new campaigns | On = choose Auction or Reservation |
+| **Buying type** | How you agree to pay for views | Standard, Auction, or Reservation | Dropdown on create |
+| **Standard** | Fixed menu price | Flat platform price per view. No bid, no package | Marketplace off → new campaigns use this |
+| **Auction** | Bidding at a market stall | You set a **max bid per view**. You compete for scarce slots | Max bid 3 per view |
+| **Reservation** | Booking a VIP table at a set price | You lock a **reserved rate per view**, or pick a **package** that sets it | Reserved rate 5 per view |
+| **Floor price** | Lowest price the stall accepts today | Your bid or reserved rate must be **at least** this number. Can change by country, peak time, or busy network | Floor is 2 → you cannot bid 1 |
+| **Max bid** | "I will not pay more than this per view" | Auction field. Must be ≥ floor | Bid 4 when floor is 2 |
+| **Reserved rate** | "I agree to this fixed price per view" | Reservation field when you do **not** pick a package. Must be ≥ floor | Reserved 5 |
+| **Package** | Ready-made combo meal | Admin-made offer: fixed rate, maybe extra setup money (flight fee), where it shows, maybe exclusive, minimum advertiser level | "Tournament Finals Pack" |
+| **Flight fee** | Extra package setup charge | Added into the create-fee payment when the package has one | Package adds 100 at create |
+| **Exclusive package** | Only one brand gets that VIP corner | Only one active campaign can hold that exclusive slot/category | Soft-drink exclusivity for one cup |
+| **Advertiser level** (tier) | Customer level from recent spending activity | Unlocks Reservation and/or packages; can change minimums. **Not** a "we are rich" checkbox | Starter → Growth → Enterprise style |
+| **Agency managed** (agency flag) | "An agency is running this for the brand" | Optional checkbox if admin enabled agency. May add a **small percent** on create fee and on how fast media budget is used | Checkbox on create |
+| **Agency percent** | Agency service cut | Set by **admin only**. Publishers see the checkbox, not a secret internal dump | Admin sets 10% |
+| **Placement** | Where the poster hangs | Lobby vs in-match (and package may lock a placement) | In-match only |
+| **Viewport** (device creative) | Poster size for phone vs desktop | Desktop / tablet / phone creative slots. Each plays on matching screens | Upload phone creative for phones |
+| **Schedule** | When the poster is allowed to show | First show delay, repeat interval, optional non-skippable time | First show after 60s in match |
+| **Period caps** | Max views per day/week/month/year | Optional limits on how many views | Max 1000 views / day |
+| **Servable / Active** | "This job is allowed to show" | Status that allows delivery when other gates pass | Set Active after creatives |
+| **Rank / who wins the slot** | Who gets the scarce wall space when many want it | Higher score from bid or reserved rate × placement × screen size × level list multiplier. **Agency and high-rated audience do not decide the winner.** | Higher bid-ish score wins |
+| **High-rated audience** | Showing to stronger / higher-rated players | May cost a bit more for pacing / optional live pay. Does **not** replace who wins the slot | Premium on high rating views |
+| **Impression wallet settle** | Pay-per-view from wallet live | Admin option, **default OFF**. ON = each view needs wallet money now. OFF = create fee already paid; daily budget only limits how many views | Usually leave OFF at first |
+| **Buying summary** | Receipt of how you bought | On campaign detail (and admin console): buying type, rates, package, level, agency. **Locked after create** | Read-only card |
+| **Invoice** | Bill / estimate PDF | Estimate ≈ base rate × views. Create fees and optional live settle are separate notes | Download from Ads |
 
----
-
-## 7. Create step by step (web and Flutter)
-
-Same product rules on both apps.
-
-### Always (marketplace on or off)
-1. Sign in and open the Ads shell.
-2. Fund the ads wallet enough for the create fee (and later media if live settle is on).
-3. Create: title, creative type, **required map pin**, **required daily media budget**.
-4. Wallet pays create fee. If balance is too low, create fails and nothing broken is left behind.
-5. After create, open detail: upload device creatives, set schedule and caps, set status so it can serve.
-
-### Extra when marketplace is ON
-
-**Auction**
-1. Choose Auction.
-2. Enter a max bid at or above the floor.
-3. Save / create.
-4. Cannot pick a marketplace package on Auction (package is cleared).
-
-**Reservation without a package**
-1. Choose Reservation (only if unlocked for you).
-2. Enter a reserved rate at or above the floor. This is required.
-3. Create.
-
-**Reservation with a package**
-1. Choose Reservation.
-2. Pick an allowed package from the list.
-3. The package sets the reserved rate (must clear the floor).
-4. If the package is exclusive and another active campaign already holds it, create is blocked with a clear message.
-5. Package flight fee (if any) is included in the create fee debit.
-6. Create.
-
-**Agency**
-1. If shown, you may mark "managed by an agency."
-2. Create-fee preview can rise by the admin agency percent.
-3. Only saved if admin has agency enabled.
-
-### Locked after create
-Buying type, bid, reserved rate, package, and agency flag are set at create and **cannot be edited later**. Screen shows a short locked blurb. To change buying approach, create a new campaign.
-
-### Cannot at create
-- Choose Standard while marketplace is on
-- Bid or reserve below the floor
-- Use Reservation before your level unlocks it
-- Use a package before your level unlocks packages
-- Skip reserved rate on Reservation when no package is selected
-- Steal an exclusive package that is already held
-- Set daily media budget below your level minimum
+If you remember only five words: **create fee**, **daily media budget**, **buying type**, **floor**, **view**.
 
 ---
 
-## 8. Advertiser levels (tiers)
+## 4. Marketplace ON vs OFF (what changes for you)
 
-Who: Every publisher account with media activity.
-What: Level based on recent media spend behavior (last period of activity), not a self-declared company size.
-Why: Unlocks Reservation, packages, and can change create-fee multiplier, daily media minimum, and list rate multiplier.
-Where: Shown on pricing / create; stamped on the campaign at create; visible on buying summary.
-How admins set it: Admin → Progression → advertiser tiers (name, monthly spend minimum, create-fee multiplier, media daily minimum, unlock reservation, unlock packages, list multiplier).
+### Marketplace OFF
+- New campaign buying type = **Standard**
+- You pay create fee (if any)
+- Views use the platform flat price
+- You do **not** fill max bid, reserved rate, package, or agency marketplace fields
 
-Typical pattern (names can change in admin):
-- Lower level: Auction, lower minimums
-- Mid level: more unlocks
-- Higher level: Reservation + packages, higher list rates / minimums
+### Marketplace ON
+- New campaign must be **Auction** or **Reservation**
+- You **cannot** pick Standard for a new campaign
+- You see floor price and your advertiser level after the map pin
+- Old Standard campaigns that already exist still keep working
 
-0 create-fee multiplier can mean create fee waived for that level (media money still matters).
-
----
-
-## 9. Floors, geo, peak, and busy network
-
-Who: All marketplace creates and ranking math.
-What: Minimum price per view that bids and reserved rates must meet.
-When: Live at pricing and at create. Can move with time of day and fill.
-Why: Protects inventory value; raises price when demand or premium geo is higher.
-Where: Admin Progression marketplace floors (base, Ethiopia, global) plus peak window and optional dynamic floor when fill is high.
-
-Publisher view: one clear floor number and short help text. Peak / busy can raise the floor.
+Nothing else weird: you still need map pin, daily media budget, creatives, schedule, and an Active-style status before ads can show.
 
 ---
 
-## 10. Packages and exclusivity
+## 5. Your first campaign (publisher walkthrough)
 
-Who: Publishers whose level unlocks packages; admins who catalog packages.
-What: Named offers with fixed rate, optional flight fee, buying type, minimum level, placement, exclusive flag / category.
-When: On Reservation create when packages are unlocked.
-Why: Sell tournament / season / premium certainty the way sponsorship packages work elsewhere.
-Where: Publisher package picker; Admin Progression packages list.
+Same on **web** and **Flutter**.
 
-Exclusive:
-- At booking: only one non-archived packaged campaign may hold that exclusive bucket.
-- While serving: exclusivity filter keeps one winner per bucket among eligible campaigns.
+### Step A - Prepare money
+1. Open Ads.
+2. Put enough money in the **ads wallet** for the create fee (and later for views only if admin turned live settle ON).
 
-If exclusive is taken: public error that the exclusive package is already held.
+### Step B - Start create
+1. Campaigns → Create.
+2. Drop the **map pin** (required). This is how Dama knows location pricing.
+3. Read the pricing help: floor, level, minimum daily media budget, packages (if unlocked).
 
----
+### Step C - Fill the simple fields
+1. Title and creative type.
+2. **Daily media budget** (must be greater than zero, and at least your level minimum when marketplace is on).
 
-## 11. Agency
+### Step D - Choose buying type (only if marketplace ON)
 
-Who: Publishers working with an agency; admin who enables agency.
-What: Optional "agency managed" on create.
-When: Only if admin turned agency on.
-Why: Agencies managing brands may pay a small percent of create fee and media pacing (percent set by admin).
-Where: Create checkbox; buying summary shows agency label; create-fee preview with agency flag refreshes the fee.
+**If you choose Auction**
+1. Enter **max bid** ≥ floor.
+2. Do not expect a marketplace package on Auction (packages are for Reservation-style locks).
 
-Public publisher screens do not show the internal agency percent number to everyone. Admins set that percent in Progression.
+**If you choose Reservation**
+- Option 1: pick a **package** from the list (if your level unlocks packages). The package sets the rate. Exclusive packages fail if already taken.
+- Option 2: no package → type a **reserved rate** ≥ floor (required).
 
----
+**Agency checkbox** (only if shown)
+- Turn on if an agency runs this campaign for the brand.
+- Create fee preview may go up a little.
+- Leave off if you are the brand yourself.
 
-## 12. While ads run (who wins the slot)
+### Step E - Create
+1. Confirm.
+2. Wallet pays create fee (+ package flight fee if any).
+3. If wallet is short, create fails cleanly. Top up and try again.
 
-Who: Players seeing lobby or in-match ads; system choosing which campaign shows.
-What: Among eligible campaigns, higher **rank score** wins scarce attention.
-How eligibility still works (same family as before):
-1. Campaign must be servable and match geo / placement / package rules.
-2. Schedule and first-show / repeat rules for in-match.
-3. Daily media budget and period impression caps.
-4. Then rank.
-
-Rank (marketplace Auction / Reservation):
-- Uses bid or reserved rate (with floor rules) × placement × viewport × level list multiplier.
-- Agency percent and high-rated audience premium are **not** used to decide who wins the slot.
-- Those multipliers still affect **how fast budget is used** (and optional live wallet settle).
-
-Exclusive packages: after rank, exclusivity keeps one winner per exclusive bucket.
-
-Players only see the creative. They do not see bids, floors, or wallet math.
+### Step F - After create (still required)
+1. Upload creatives (desktop / tablet / phone as you need).
+2. Set schedule and caps.
+3. Set status so it can serve (Active / servable).
+4. Notice **Buying summary** is locked. You cannot edit buying type, bid, reserved rate, package, or agency later. Need a different buy? Create a new campaign.
 
 ---
 
-## 13. On each view (charge and pace)
+## 6. What happens when a player might see your ad
 
-What happens when a view is counted:
-1. System computes the effective cost for that view (base rate, placement, viewport, level list multiplier; plus agency and audience when those apply).
-2. View counts toward daily media budget and period caps.
-3. If **impression wallet settle** is OFF (default): no extra wallet debit per view. Prepaid create fee already happened; daily budget paces how many views can run.
-4. If **impression wallet settle** is ON: wallet must cover that view or the view is blocked with a clear top-up message.
+Think of a gate checklist, then a "who wins" step.
 
-High-rated audience:
-- Admin sets a rating threshold and multiplier.
-- When the viewer is at or above that rating, media cost for pacing / settle can be higher.
-- This does not by itself replace rank competition.
+1. Is the campaign Active / servable?
+2. Does location match?
+3. Does placement match (lobby or in-match)?
+4. Does schedule allow showing now?
+5. Is daily media budget still available?
+6. Are period view caps still OK?
+7. If several campaigns pass: **higher rank wins** the scarce slot.
+8. Exclusive package rule: only one winner per exclusive bucket.
+9. Player sees only the creative. They never see your bid or wallet.
 
----
+### Paying for that view
+- **Live settle OFF (default):** no extra wallet pull per view. Daily media budget just limits how many views can run. Create fee was already paid.
+- **Live settle ON:** wallet must cover that view or the show is blocked with a top-up message.
 
-## 14. After create / reporting
-
-Who: Publisher and admin.
-What:
-- Analytics: impressions, reach, clicks, and related publisher metrics as today.
-- Invoice PDF: estimate uses base rate × views; notes that create fees and optional live settle are separate.
-- Campaign detail buying summary: buying type, rates (per view), package, level, agency, locked blurb.
-- Admin Ads console: same buying summary read-only for support and ops.
-
-Cannot: Edit marketplace buying fields after create; reopen auto-closed campaigns; force a show when eligibility fails.
+Agency percent and high-rated audience can make each view "use up" budget faster. They do **not** pick the winner by themselves.
 
 ---
 
-## 15. Admin must have / must know / must control
+## 7. After the campaign runs (reporting)
 
-Where: Admin → Progression (marketplace, floors, tiers, packages, agency, audience, create fees, impression settle) and Admin → Ads (runtime + campaign buying summary).
-
-### Master switches
-- Marketplace on / off
-- Auction on / off
-- Reservation on / off
-- Default buying type when marketplace is on (Auction or Reservation; not Standard)
-
-### Money and floors
-- Ethiopia and global campaign create fees (currencies from payment settings)
-- Floor prices (base / Ethiopia / global)
-- Peak hours and optional dynamic floor when fill is high
-- Placement and viewport multipliers
-- Agency on + agency spend percent
-- Impression wallet settle on / off (default off)
-- Audience high-rating minimum + multiplier
-
-### Advertiser levels
-- Code / label / blurb
-- Monthly spend minimum to reach the level
-- Create-fee multiplier (including waive)
-- Media daily minimum
-- Unlock reservation
-- Unlock packages
-- List CPM / list rate multiplier
-
-### Packages catalog
-- Code, labels, buying type (Auction or Reservation when marketplace on; Standard packages are not used as marketplace catalog rows)
-- Fixed rate (must be greater than zero and sensible vs floors)
-- Flight fee
-- Minimum level
-- Placement
-- Exclusive + optional category
-- Enabled / disabled
-
-### Ads console
-- Read buying summary on campaign detail
-- Runtime playback bounds still apply as in the Ads ops bible
-- Do not promise publishers they can edit bid/package after create
-
-### Operator habits
-1. Confirm marketplace switches match the market you want (SMB simple vs full marketplace).
-2. Keep floors and create fees in real currencies.
-3. Review exclusive package conflicts when publishers report "package taken."
-4. Only turn impression wallet settle on when wallet top-up UX and support are ready.
-5. Skim stuck campaigns and runtime as in the daily ads checklist.
+1. Open analytics: how many views, clicks, and related numbers.
+2. Download **invoice** PDF if you need a document. Estimate uses base rate × views. Create fees and optional live settle are called out separately.
+3. Pause / close when needed. Auto-closed after end date cannot reopen.
 
 ---
 
-## 16. End-to-end story (one brand)
+## 8. Across apps (same product, four seats)
 
-1. Admin turns marketplace on, enables Auction and Reservation, sets floors and tiers, adds one exclusive tournament package.
-2. Publisher opens Ads on web or Flutter, drops a map pin, sees floor and level.
-3. Chooses Reservation, picks the tournament package (or enters reserved rate), sets daily media budget, pays create fee (plus flight fee if any).
-4. Uploads desktop / tablet / phone creatives, sets schedule, sets Active.
-5. During eligible live games, system picks winners by rank and exclusivity; players see the creative.
-6. Daily budget paces views. If settle is off, no per-view debit. If settle is on, wallet must cover each view.
-7. Publisher checks analytics and downloads invoice. Buying type stays locked on the campaign.
+| Seat | What it does in plain words |
+|------|-----------------------------|
+| **Server (API)** | The referee. Checks prices, create rules, who wins, counts views, takes wallet money when allowed, returns clear error text |
+| **Web** | Browser Ads screens for create + detail |
+| **Flutter** | Phone/tablet Ads screens. Same rules as web |
+| **Admin** | Turns marketplace on/off, sets floors and packages, reviews campaign Buying summary |
 
----
-
-## 17. End-to-end story (two brands compete)
-
-1. Two brands both choose Auction for the same busy lobby inventory.
-2. Both bid at or above the floor. The higher rank score gets the scarce slot first.
-3. Prices rise with competition and floors without anyone declaring "we are richer."
-4. A third brand buys an exclusive package for a cup final so they are not outbid mid-flight.
+Public screens: floor, bid, reserved rate, packages, friendly errors.
+Admin-only: exact percents, deep multipliers, settle switch, catalog editing.
 
 ---
 
-## 18. Do / Do not
+## 9. Admin chapter (must know / must control)
 
-### Publishers do
-- Read floor and level before creating
-- Set daily media budget at or above the minimum
-- Upload creatives for the screens you care about
-- Top up wallet before create (and before views if settle is on)
+If you are not an admin, skip to Section 11.
 
-### Publishers do not
-- Expect to change bid / package after create
-- Expect Standard create while marketplace is on
-- Expect Reservation or packages before unlock
-- Expect refund of create fee on delete
+### What you control (Progression + Ads)
+| Control | Plain meaning |
+|---------|---------------|
+| Marketplace on/off | Offer Auction/Reservation on new creates, or keep Standard only |
+| Auction on/off | Allow bidding style |
+| Reservation on/off | Allow fixed-rate / package style |
+| Default buying type | Suggested choice when marketplace is on |
+| Create fees (Ethiopia / global) | Setup fee amounts |
+| Flat unit cost | Standard path price per view |
+| Floor prices | Minimum bid / reserved rate |
+| Peak / busy floor | Raise minimum when time is hot or fill is high |
+| Placement / viewport multipliers | Make some slots or screens cost more in the math |
+| Advertiser levels | Unlock Reservation/packages; set minimums from recent activity |
+| Packages | Ready-made offers, exclusive flags, flight fees |
+| Agency on + percent | Allow agency checkbox and the small percent |
+| High-rated audience | Extra cost when viewer rating is high |
+| Impression wallet settle | OFF = budget pacing only; ON = pay each view from wallet |
+| Ads console Buying summary | Read-only support view of how a campaign was bought |
 
-### Admins do
-- Price inventory and scarcity (floors, packages, peak)
-- Unlock features by spend level
-- Keep create fee and media rules clear in Progression
+### Admin do
+- Price scarce attention (floors, packages, peak).
+- Unlock features by real activity levels.
+- Keep settle OFF until support and top-up flow are ready.
 
-### Admins do not
-- Charge more only because a company name "sounds big" with no better inventory
-- Leave marketplace on with both Auction and Reservation off (defaults are repaired to a safe pair)
-- Put secret keys or internal percents into public publisher copy
-
----
-
-## 19. Troubleshooting (plain)
-
-| Symptom | Likely meaning | What to try |
-|---------|----------------|-------------|
-| Cannot choose Standard | Marketplace is on | Use Auction or Reservation, or ask admin if marketplace should be off |
-| Bid rejected | Below floor | Raise bid to the shown floor |
-| Must enter reserved rate | Reservation without package | Enter reserved rate at or above floor, or pick a package |
-| Reservation locked | Level too low or reservation disabled | Grow media activity / ask admin about unlocks |
-| Package locked / invalid | Level or catalog | Pick another package or unlock packages |
-| Exclusive package taken | Another active campaign holds it | Wait, use another package, or archive the holder (ops) |
-| Daily media below minimum | Level rule | Raise daily budget |
-| Create failed fee | Wallet short | Top up ads wallet |
-| Ad view blocked for balance | Impression settle is on | Top up wallet |
-| Buying fields missing on edit | By design | Create a new campaign |
+### Admin do not
+- Charge more only because a company name "sounds big."
+- Leave marketplace on with both Auction and Reservation disabled.
+- Expect publishers to edit bid/package after create.
 
 ---
 
-## 20. How this connects to the rest of ads
+## 10. Two short end-to-end stories
 
-| Topic | Where to read more |
-|-------|--------------------|
-| Creatives, schedule, caps, auto-close, publisher URLs | Dama_Ads_And_Admin_Ops_Guide |
-| Wallet top-up, KYC, receipts, payouts | Dama_Wallet_Payments_And_Compliance_Guide |
-| Roles and full product map | Dama_Complete_App_Guide |
-| Deploy / env hosts | docs/ops-deploy.md (operators) |
+### Story A - Small brand, marketplace off
+1. Creates Standard campaign, pays create fee.
+2. Uploads creatives, sets daily media budget, goes Active.
+3. Views use flat platform price. Daily budget stops overspending.
 
-Money still uses the shared wallet ledger under the Ads shell. Marketplace adds **how media is priced and chosen**, without removing the old Standard path when marketplace is off.
+### Story B - Two brands want the same busy lobby (marketplace on)
+1. Both choose Auction and bid above the floor.
+2. Higher rank gets the scarce slot first.
+3. A third brand buys an exclusive Reservation package for a cup final so they are not outbid mid-event.
+4. Nobody was taxed for "looking rich." They paid for scarce attention or certainty.
 
 ---
 
-## 21. Money formula (plain)
+## 11. FAQ (first-day confusion)
 
-Revenue idea:
-- Auction spend when brands compete
-- Reservation and package premiums for certainty
-- Geo and peak floors
-- Optional live per-view settle when admin turns it on
+**What is buying type?**
+How you agree to pay for views: Standard (simple flat), Auction (max bid), or Reservation (fixed rate / package).
 
-Still plus create fees when those are not waived by level.
+**What is max bid?**
+On Auction: the most you will pay per view. Must be at least the floor.
 
-That is the same playbook as auction + reserved premium inventory elsewhere, adapted to Dama's prepaid wallet and in-match / lobby ads.
+**What is reserved rate?**
+On Reservation without a package: the fixed per-view price you lock. Must be at least the floor.
+
+**What is a package?**
+A ready-made offer admin created. It usually sets the rate for you. May cost an extra flight fee at create. May be exclusive.
+
+**What is the agency flag?**
+Optional "managed by an agency." May add a small percent. Only if admin enabled it.
+
+**Why can't I edit bid later?**
+By design. Buying choices are locked after create so the deal stays clear. Create a new campaign to change them.
+
+**Why was Standard missing?**
+Marketplace is on. New campaigns must use Auction or Reservation.
+
+**Why did create fail?**
+Common reasons: wallet short for create fee; bid/rate below floor; daily budget below level minimum; exclusive package taken; Reservation not unlocked yet.
+
+**Do players see my bid?**
+No. Players only see the creative.
+
+**Is this Meta/YouTube copy-paste?**
+Same money idea (sell scarce attention + competition + VIP locks), built for Dama's wallet and in-game ads. Not a copy of their screens.
+
+---
+
+## 12. Cheat sheet (print this)
+
+1. **Create fee** = pay once to open the campaign.
+2. **Daily media budget** = max for views per day.
+3. **Marketplace off** = Standard only (simple).
+4. **Marketplace on** = Auction (max bid) or Reservation (reserved rate or package).
+5. **Floor** = minimum allowed price per view right now.
+6. **Package** = ready-made Reservation offer; exclusive means only one active holder.
+7. **Agency flag** = optional; may add a small percent.
+8. **Rank** = who wins scarce slots (bid/rate math). Agency/audience affect cost pacing, not that winner pick.
+9. **Settle default OFF** = no live per-view wallet pull.
+10. **Locked after create** = buying type, bid, reserved rate, package, agency.
+
+---
+
+## 13. Related reading
+
+| Need | Guide |
+|------|-------|
+| Creatives, schedule, pause, auto-close, publisher URLs | `Dama_Ads_And_Admin_Ops_Guide` |
+| Wallet top-up, KYC, receipts | `Dama_Wallet_Payments_And_Compliance_Guide` |
+| Whole app roles | `Dama_Complete_App_Guide` |
+
+Money still uses the shared ads wallet. Marketplace only changes **how views are priced and chosen**, and keeps Standard when marketplace is off.

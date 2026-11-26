@@ -25,7 +25,7 @@ Where: `/ads/*`, Flutter Publisher shell
 10. Set servable status (Draft / Active / Paused / Archived) from the detail form or bulk row selection
 11. Save
 
-Full marketplace bible (Auction, Reservation, floors, levels, packages, agency, settle): `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
+First-day plain dictionary + walkthrough (what bid, reserved rate, package, agency mean): `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
 
 ### Campaigns table
 - Status column, impressions/clicks/reach, daily spend cap, View, and row actions (including **Delete** when the campaign has zero impressions and zero clicks; otherwise archive)

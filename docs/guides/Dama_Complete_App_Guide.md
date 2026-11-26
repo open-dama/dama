@@ -390,26 +390,38 @@ Full rules: Dama_Competition_Formats_Guide (Unlimited seats).
 
 Full examples and every term spelled out: see Dama_Competition_Formats_Guide.
 
-## 9. Ads overview
+## 9. Ads overview (day-one plain)
 
-Publisher: create campaign, pay create fee, creative, schedule, analytics, invoice.
-Admin: global playback policy, console overrides, and (on Progression) marketplace switches, floors, advertiser levels, packages, agency, audience premium, optional per-view wallet settle.
-Ads may appear in lobby and inside eligible live matches when schedule and eligibility pass.
+Think of an ad campaign like hiring a poster in a busy game hall.
 
-### Marketplace in one page (plain)
-- Marketplace **off**: new campaigns use Standard (create fee + flat price per view).
-- Marketplace **on**: new campaigns use **Auction** (max bid) or **Reservation** (fixed rate or package). Standard is blocked for new creates. Old Standard campaigns still run.
-- Floor price is the minimum bid / reserved rate. It can differ by country and rise at peak or busy times.
-- Advertiser level comes from recent media activity (not "we are rich"). Higher levels can unlock Reservation and packages.
-- Packages can include a flight fee and exclusivity (only one active holder).
-- Agency managed (optional) may add a small percent when admin enables it.
-- Who wins a scarce slot: higher rank from bid/reserved × placement × screen size × level list multiplier. Agency and high-rated audience affect cost pacing, not that rank score.
-- Optional impression wallet settle (admin, default off): each view needs wallet balance. When off, create fee is prepaid and daily media budget paces views.
-- Buying type, bid, reserved rate, package, and agency are **locked after create**.
-- Across apps: **API (server)** enforces pricing/create/rank/views; **Web** and **Flutter** share the publisher create/detail UI; **Admin** owns switches, floors, levels, packages, agency, audience, settle, and read-only Buying summary. Invoice estimate uses base rate × views; create fees and optional live settle are separate.
-- How money grows (plain): sell scarcer better attention (floors, peak, geo, lobby/live placements, packages, exclusivity) and let Auction competition raise spend. Do not tax "rich companies" for the name alone. Small businesses keep Standard when marketplace is off, or lower levels when it is on.
+**Always true**
+1. Publisher pays a one-time **create fee** from the ads wallet to open the campaign.
+2. Sets a **daily media budget** (max money for views that day). Required, greater than zero.
+3. Uploads creatives, sets schedule, sets Active so it can show.
+4. Ads may appear in lobby or in eligible live matches when rules pass.
+5. Players only see the creative. They never see bids or wallet math.
 
-Full human bible: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`. Publisher ops: `Dama_Ads_And_Admin_Ops_Guide`.
+**Two money styles**
+| Style | Plain meaning |
+|-------|----------------|
+| **Standard** | Simple. Create fee + one flat platform price per view. Used when marketplace is off. |
+| **Marketplace on** | Choose **Auction** (your max price per view; you compete) or **Reservation** (fixed price per view, or a ready-made **package**). |
+
+**Words that confuse people**
+| Word | Plain meaning |
+|------|----------------|
+| Floor | Lowest allowed price per view right now |
+| Max bid | Auction: most you will pay per view |
+| Reserved rate | Reservation: fixed price per view if you do not pick a package |
+| Package | Ready-made offer (sets the rate; may be exclusive = only one active holder) |
+| Agency flag | Optional "an agency runs this"; may add a small percent |
+| Locked after create | Buying type, bid, reserved rate, package, agency cannot be edited later |
+
+**Who wins when many want the same slot:** higher offer math wins. Agency / high-rated audience affect how fast budget is used, not that winner pick alone.
+**Live pay-per-view from wallet:** admin option, default off.
+
+Full first-day dictionary + walkthrough: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
+Day-to-day ads ops: `Dama_Ads_And_Admin_Ops_Guide`.
 
 ---
 
