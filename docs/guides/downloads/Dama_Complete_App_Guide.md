@@ -9,7 +9,7 @@ Dama is an online international draughts (also called international checkers / d
 - Read Section 1 (roles) so you know which audience you are.
 - Read Section 2 (glossary) whenever a word feels technical.
 - Follow the step-by-step paths for your job (play, host, publish ads, or admin).
-- Use companion bibles for deep dives: Play and Matchmaking, Competition Formats, Wallet and Compliance, Ads and Admin Ops.
+- Use companion bibles for deep dives: Play and Matchmaking, Competition Formats, Wallet and Compliance, Host Trust, Ads and Admin Ops, Ad Marketplace (Auction and Reservation).
 
 Every major topic below answers: Who, What, When, Why, Where, How.
 
@@ -77,9 +77,10 @@ How: Create -> pay host fee -> share -> Start -> players check-in/Ready or arena
 
 ### 1.6 Ads publisher / ad creator
 Who: Signed-in user of the Ads shell.
-What: Create campaigns, pay create fee, upload creatives, schedule, analytics, nested ads wallet/receipts.
-Cannot: Change global ad playback policy (admin); invent placements outside server rules.
+What: Create campaigns, pay create fee, upload creatives, schedule, analytics, nested ads wallet/receipts. When marketplace is on, choose Auction (max bid per view) or Reservation (fixed rate or package); advertiser level can unlock reservation and packages.
+Cannot: Change global ad playback policy (admin); invent placements outside server rules; edit buying type / bid / package / agency after create; choose Standard create while marketplace is on.
 Where: `/ads/dashboard`, `/ads/campaigns`, Flutter Publisher shell.
+Deep dive: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
 
 ### 1.7 Platform admin / superadmin
 Who: Operators of the separate Admin Console app with console roles and permissions.
@@ -132,6 +133,11 @@ Where: Telegram DMs; bridge configured in Admin -> Payments -> Telegram ops.
 | Bracket | Tree of matches (especially knockout) |
 | Arena | Timed continuous queue inside a cup |
 | Ads campaign | Publisher schedule that can show inside eligible matches |
+| Ad marketplace | Optional Auction / Reservation buying with floors, levels, and packages (admin switch) |
+| Auction (ads) | Max bid per view; competition helps decide who wins scarce slots |
+| Reservation (ads) | Fixed rate per view or package for more predictable premium buys |
+| Advertiser level | Publisher tier from recent media activity (unlocks reservation / packages) |
+| Ad package | Named fixed-rate offer; may be exclusive so only one active holder |
 | Dual-actuator | Console and Telegram can both review the same money item; first success wins |
 
 ---
@@ -386,9 +392,24 @@ Full examples and every term spelled out: see Dama_Competition_Formats_Guide.
 
 ## 9. Ads overview
 
-Publisher: create campaign, pay fee, creative, schedule, analytics.
-Admin: global playback policy and console overrides.
-Ads may appear inside eligible live matches when schedule and eligibility pass.
+Publisher: create campaign, pay create fee, creative, schedule, analytics, invoice.
+Admin: global playback policy, console overrides, and (on Progression) marketplace switches, floors, advertiser levels, packages, agency, audience premium, optional per-view wallet settle.
+Ads may appear in lobby and inside eligible live matches when schedule and eligibility pass.
+
+### Marketplace in one page (plain)
+- Marketplace **off**: new campaigns use Standard (create fee + flat price per view).
+- Marketplace **on**: new campaigns use **Auction** (max bid) or **Reservation** (fixed rate or package). Standard is blocked for new creates. Old Standard campaigns still run.
+- Floor price is the minimum bid / reserved rate. It can differ by country and rise at peak or busy times.
+- Advertiser level comes from recent media activity (not "we are rich"). Higher levels can unlock Reservation and packages.
+- Packages can include a flight fee and exclusivity (only one active holder).
+- Agency managed (optional) may add a small percent when admin enables it.
+- Who wins a scarce slot: higher rank from bid/reserved × placement × screen size × level list multiplier. Agency and high-rated audience affect cost pacing, not that rank score.
+- Optional impression wallet settle (admin, default off): each view needs wallet balance. When off, create fee is prepaid and daily media budget paces views.
+- Buying type, bid, reserved rate, package, and agency are **locked after create**.
+- Across apps: **API (server)** enforces pricing/create/rank/views; **Web** and **Flutter** share the publisher create/detail UI; **Admin** owns switches, floors, levels, packages, agency, audience, settle, and read-only Buying summary. Invoice estimate uses base rate × views; create fees and optional live settle are separate.
+- How money grows (plain): sell scarcer better attention (floors, peak, geo, lobby/live placements, packages, exclusivity) and let Auction competition raise spend. Do not tax "rich companies" for the name alone. Small businesses keep Standard when marketplace is off, or lower levels when it is on.
+
+Full human bible: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`. Publisher ops: `Dama_Ads_And_Admin_Ops_Guide`.
 
 ---
 
@@ -410,7 +431,7 @@ Permissions gate every sensitive page. Superadmin usually has all; admin usually
 
 Player: Google sign-in; VS-AI; queue pair; invite 60s preset; friend+DM; spectate; KYC paths; wallet top-up; join free cup; Ready; portal pages.
 Organizer: Fund wallet; create public and private cups; test each enabled format including Arena Unlimited catalog size (null or high max); Ready and arena; prize path.
-Publisher: Fund wallet; create campaign; schedule; analytics move; invoice/receipt.
+Publisher: Fund wallet; create campaign (Standard, or Auction/Reservation when marketplace on); schedule; analytics; invoice/receipt.
 Admin: Role+permissions; currency/geo; banks; match_clock (incl. pause); Official cup + catalog; flags; receipt/payout review; Telegram Ready if used.
 
 ---
@@ -456,7 +477,9 @@ Menu labels come from database navigation settings.
 - Dama_Play_And_Matchmaking_Guide
 - Dama_Competition_Formats_Guide
 - Dama_Wallet_Payments_And_Compliance_Guide
+- Dama_Host_Trust_And_Scammer_Protection_Guide
 - Dama_Ads_And_Admin_Ops_Guide
+- Dama_Ad_Marketplace_Auction_And_Reservation_Guide
 
 
 ---
@@ -496,10 +519,11 @@ Menu labels come from database navigation settings.
 4. Clock ends; standings freeze; top arena points wins.
 
 ### Story E - Ads publisher
-1. Opens Ads dashboard, creates campaign, pays create fee.
-2. Uploads creative, sets schedule and caps, sets status servable.
-3. During live matches that pass eligibility, ads can show.
-4. Checks analytics next morning; downloads invoice.
+1. Opens Ads dashboard. If marketplace is on, sees floor and advertiser level after the map pin.
+2. Creates campaign: Standard when marketplace off; or Auction bid / Reservation rate or package when marketplace on. Pays create fee (and package flight fee if any).
+3. Uploads device creatives, sets schedule and caps, sets status servable. Buying fields stay locked.
+4. During eligible lobby / live matches, ads can show. Daily media budget paces views.
+5. Checks analytics next morning; downloads invoice.
 
 ### Story F - Admin money ops
 1. Opens Admin Receipts; approves a pending manual top-up.
@@ -557,7 +581,9 @@ Almost every button label, empty state, and toast comes from the database (produ
 2. Play and Matchmaking Bible
 3. Competition Formats Bible
 4. Wallet and Compliance Bible
-5. Ads and Admin Ops Bible
-6. Then practice on staging: guest AI, queue, invite, stop game, free cup Ready, manual receipt approve
+5. Host Trust and Scammer Protection Bible
+6. Ads and Admin Ops Bible
+7. Ad Marketplace (Auction and Reservation) Bible
+8. Then practice on staging: guest AI, queue, invite, stop game, free cup Ready, manual receipt approve, ads create with marketplace on/off
 
 
