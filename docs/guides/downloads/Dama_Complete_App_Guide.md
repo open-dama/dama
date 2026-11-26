@@ -420,7 +420,7 @@ Think of an ad campaign like hiring a poster in a busy game hall.
 **Who wins when many want the same slot:** higher offer math wins. Agency / high-rated audience affect how fast budget is used, not that winner pick alone.
 **Live pay-per-view from wallet:** admin option, default off.
 
-Full first-day dictionary + walkthrough: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide`.
+Full first-day dictionary, **buying types end to end** (what / why / when / advantages / differences), FAQ, and cheat sheet: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide` (read Section 4 first for buying types).
 Day-to-day ads ops: `Dama_Ads_And_Admin_Ops_Guide`.
 
 ---
