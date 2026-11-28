@@ -151,10 +151,13 @@ class NotificationBellButton extends StatefulWidget {
     super.key,
     required this.accessToken,
     this.onNavigateHref,
+    this.onInboxOpenChanged,
   });
 
   final String accessToken;
   final void Function(String href)? onNavigateHref;
+  /// Phase B soft gate parity with web notificationInboxOpen.
+  final ValueChanged<bool>? onInboxOpenChanged;
 
   @override
   State<NotificationBellButton> createState() => _NotificationBellButtonState();
@@ -287,19 +290,24 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
   Future<void> _openPanel() async {
     final chrome = _chrome;
     if (chrome == null) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: damaColorsOf(context).card,
-      builder: (ctx) => _NotificationSheet(
-        accessToken: widget.accessToken,
-        chrome: chrome,
-        restUrl: _rest,
-        unreadCount: _unreadCount,
-        onMarked: () => unawaited(_loadUnread()),
-        onNavigateHref: widget.onNavigateHref,
-      ),
-    );
+    widget.onInboxOpenChanged?.call(true);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: damaColorsOf(context).card,
+        builder: (ctx) => _NotificationSheet(
+          accessToken: widget.accessToken,
+          chrome: chrome,
+          restUrl: _rest,
+          unreadCount: _unreadCount,
+          onMarked: () => unawaited(_loadUnread()),
+          onNavigateHref: widget.onNavigateHref,
+        ),
+      );
+    } finally {
+      widget.onInboxOpenChanged?.call(false);
+    }
     if (mounted) unawaited(_loadUnread());
   }
 

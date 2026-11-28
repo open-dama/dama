@@ -50,6 +50,12 @@ func (a *AdsAPI) viewportMaxVideoBytes() (int64, bool) {
 }
 
 func campaignPublicCreativeFields(c store.AdCampaign) map[string]any {
+	return campaignPublicCreativeFieldsWithPackage(c, nil)
+}
+
+// campaignPublicCreativeFieldsWithPackage adds package_code + lobby_takeover for clients
+// that prefer Phase C takeover inventory on soft interstitial.
+func campaignPublicCreativeFieldsWithPackage(c store.AdCampaign, pkgs []store.AdPackage) map[string]any {
 	videoID := c.YouTubeVideoID
 	if strings.HasPrefix(videoID, "stub_") {
 		videoID = ""
@@ -86,6 +92,15 @@ func campaignPublicCreativeFields(c store.AdCampaign) map[string]any {
 	}
 	if videoID != "" {
 		row["video_id"] = videoID
+	}
+	if pkgCode := strings.TrimSpace(c.PackageCode); pkgCode != "" {
+		row["package_code"] = pkgCode
+		if pkg, ok := store.PackageByCode(pkgs, pkgCode); ok {
+			// Stamp true when flag is set OR code is the seeded takeover SKU.
+			row["lobby_takeover"] = pkg.LobbyTakeover ||
+				strings.EqualFold(strings.TrimSpace(pkg.Code), "lobby_takeover") ||
+				strings.EqualFold(pkgCode, "lobby_takeover")
+		}
 	}
 	return row
 }
@@ -166,12 +181,15 @@ func lobbyPlaybackChromeKeys(settings *store.SettingsStore) map[string]any {
 	keys := []string{
 		"lobby_rotate_section_title", "lobby_rotate_section_blurb",
 		"lobby_rotate_enabled_label", "lobby_rotate_interval_label",
+		"lobby_soft_section_title", "lobby_soft_section_blurb",
+		"lobby_soft_enabled_label", "lobby_idle_threshold_label",
 		"freq_caps_section_title", "freq_caps_section_blurb",
 		"freq_cap_campaign_hour_label", "freq_cap_campaign_day_label",
 		"freq_cap_campaign_session_label",
 		"freq_cap_placement_hour_label", "freq_cap_placement_day_label",
 		"freq_cap_placement_session_label",
 		"freq_cap_min_gap_label",
+		"package_lobby_takeover_label", "package_lobby_takeover_blurb",
 	}
 	out := make(map[string]any, len(keys))
 	for _, k := range keys {

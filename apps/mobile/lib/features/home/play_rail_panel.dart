@@ -154,6 +154,8 @@ class PlayRailPanel extends StatefulWidget {
     this.initialDmThreadId,
     this.initialChallengeOpponent,
     this.onChallengeOpponentConsumed,
+    this.onChallengeOpponentPresentChanged,
+    this.onRequireSignIn,
     this.onComposeSheetChanged,
   });
 
@@ -188,6 +190,13 @@ class PlayRailPanel extends StatefulWidget {
   final Future<void> Function(PiecePaletteId) onPiecePalette;
   final RailChallengeOpponent? initialChallengeOpponent;
   final VoidCallback? onChallengeOpponentConsumed;
+
+  /// Soft interstitial ship-gate: true while an invite opponent chip is selected
+  /// or the opponent typeahead query is non-empty.
+  final ValueChanged<bool>? onChallengeOpponentPresentChanged;
+
+  /// Soft ship-gate: challenge-rail sign-in must wrap HomePage soft block.
+  final Future<String?> Function()? onRequireSignIn;
 
   @override
   State<PlayRailPanel> createState() => _PlayRailPanelState();
@@ -565,6 +574,14 @@ class _PlayRailPanelState extends State<PlayRailPanel>
     }
   }
 
+  void _notifyChallengeOpponentPresent() {
+    final chip = (_challengeOpponent?.username ?? '').trim().isNotEmpty;
+    final typing = _opponentQueryCtrl.text.trim().isNotEmpty ||
+        _opponentSearch.trim().isNotEmpty;
+    final present = chip || typing;
+    widget.onChallengeOpponentPresentChanged?.call(present);
+  }
+
   void _applyInitialOpponent({bool fromInit = false}) {
     final o = widget.initialChallengeOpponent;
     if (o == null) return;
@@ -584,6 +601,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.onTab(0);
+      _notifyChallengeOpponentPresent();
       widget.onChallengeOpponentConsumed?.call();
     });
   }
@@ -966,11 +984,13 @@ class _PlayRailPanelState extends State<PlayRailPanel>
   }
 
   void _onOpponentQueryChanged(String v) {
+    _notifyChallengeOpponentPresent();
     _opponentSearchDebounce?.cancel();
     final ms = _searchDebounceMs;
     _opponentSearchDebounce = Timer(Duration(milliseconds: ms), () {
       if (!mounted) return;
       setState(() => _opponentSearch = v);
+      _notifyChallengeOpponentPresent();
       unawaited(_loadOpponentSearch());
     });
   }
@@ -982,6 +1002,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
     _opponentSearchResults = const [];
     _opponentSearchLoading = false;
     _opponentQueryCtrl.clear();
+    _notifyChallengeOpponentPresent();
   }
 
   void _pickOpponentFromSearch(RailPlayer player) {
@@ -1000,6 +1021,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
       );
       _clearOpponentSearch();
     });
+    _notifyChallengeOpponentPresent();
   }
 
   Widget _typeaheadPlayerTile(
@@ -1870,6 +1892,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
       _newSub = 1;
       _clearOpponentSearch();
     });
+    _notifyChallengeOpponentPresent();
     widget.onTab(0);
   }
 
@@ -1954,6 +1977,7 @@ class _PlayRailPanelState extends State<PlayRailPanel>
         if (_challengeOpponent == null && target.isNotEmpty) {
           setState(() =>
               _challengeOpponent = RailChallengeOpponent(username: target));
+          _notifyChallengeOpponentPresent();
         }
       }
     } catch (_) {
@@ -2883,7 +2907,12 @@ class _PlayRailPanelState extends State<PlayRailPanel>
         if (!signedIn)
           OutlinedButton(
             onPressed: () {
-              unawaited(showSignInDialog(context));
+              final requireSignIn = widget.onRequireSignIn;
+              if (requireSignIn != null) {
+                unawaited(requireSignIn());
+              } else {
+                unawaited(showSignInDialog(context));
+              }
             },
             child: Text(c.signInToChallenge),
           )
@@ -3145,10 +3174,13 @@ class _PlayRailPanelState extends State<PlayRailPanel>
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 18),
-            onPressed: () => setState(() {
-              _challengeOpponent = null;
-              _clearOpponentSearch();
-            }),
+            onPressed: () {
+              setState(() {
+                _challengeOpponent = null;
+                _clearOpponentSearch();
+              });
+              _notifyChallengeOpponentPresent();
+            },
           ),
         ],
       ),

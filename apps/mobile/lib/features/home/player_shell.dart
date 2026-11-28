@@ -15,7 +15,6 @@ import 'package:dama_mobile/features/auth/auth_providers.dart';
 import 'package:dama_mobile/features/auth/sign_in_dialog.dart';
 import 'package:dama_mobile/features/events/community_player_chrome_soft.dart';
 import 'package:dama_mobile/features/events/events_shell.dart';
-import 'package:dama_mobile/features/game/game_lobby_page.dart';
 import 'package:dama_mobile/features/game/matchmaking_page.dart';
 import 'package:dama_mobile/features/game/spectate_page.dart';
 import 'package:dama_mobile/features/home/dashboard_page.dart';
@@ -126,6 +125,10 @@ class _PlayerShellState extends State<PlayerShell> {
           _tourJoinCode = null;
           _tourEpoch = c.epoch;
         });
+        final rk = _tabs[i].routeKey.trim();
+        PlayerShellController.instance.setActiveRouteKey(
+          rk.isEmpty ? 'home' : rk,
+        );
         return;
       }
       final i = _tabs.indexWhere((t) => t.routeKey.trim() == 'tournaments');
@@ -137,6 +140,7 @@ class _PlayerShellState extends State<PlayerShell> {
         _tourJoinCode = c.tournamentsJoinCode;
         _tourEpoch = c.epoch;
       });
+      PlayerShellController.instance.setActiveRouteKey('tournaments');
     }
 
     if (_loading || _tabs.isEmpty) {
@@ -233,7 +237,10 @@ class _PlayerShellState extends State<PlayerShell> {
   Future<String?> _ensureToken() async {
     final auth = context.read<AuthCubit>().state;
     if (auth.isAuthenticated) return auth.token;
-    return showSignInDialog(context);
+    // Soft ship-gate: IndexedStack home stays mounted under the sign-in dialog.
+    return PlayerShellController.instance.withCriticalFlowOverlay(
+      () => showSignInDialog(context),
+    );
   }
 
   IconData _iconFor(String routeKey, {required bool selected}) {
@@ -299,8 +306,9 @@ class _PlayerShellState extends State<PlayerShell> {
 
   Widget _pageFor(String routeKey, String? token) {
     switch (routeKey) {
+      // Play tab is the home lobby surface (Phase A/B/C monetization lives on HomePage).
       case 'play':
-        return const GameLobbyPage();
+        return const HomePage();
       case 'matchmaking':
         if (token == null || token.isEmpty) {
           return const _AuthRequiredPlaceholder();
@@ -451,6 +459,7 @@ class _PlayerShellState extends State<PlayerShell> {
       if (token == null) return;
     }
     setState(() => _index = i);
+    PlayerShellController.instance.setActiveRouteKey(key);
   }
 
   void _openRailMenu() {
@@ -481,18 +490,23 @@ class _PlayerShellState extends State<PlayerShell> {
     if (key == 'tournaments_mine') {
       PlayerShellController.instance.openTournaments(source: 'all');
       final i = _tabs.indexWhere((t) => t.routeKey.trim() == 'tournaments');
-      if (i >= 0) setState(() => _index = i);
+      if (i >= 0) {
+        setState(() => _index = i);
+        PlayerShellController.instance.setActiveRouteKey('tournaments');
+      }
       return;
     }
     if (key == 'host_tournament') {
       final hostToken = await _ensureToken();
       if (!mounted || hostToken == null || hostToken.isEmpty) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => EventsShell(
-            accessToken: hostToken,
-            initialRouteKey: 'events_list',
-            initialOpenCreate: true,
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EventsShell(
+              accessToken: hostToken,
+              initialRouteKey: 'events_list',
+              initialOpenCreate: true,
+            ),
           ),
         ),
       );
@@ -501,9 +515,11 @@ class _PlayerShellState extends State<PlayerShell> {
     if (key == 'transfer') {
       final tok = await _ensureToken();
       if (!mounted || tok == null || tok.isEmpty) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ManualTransferPage(accessToken: tok),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ManualTransferPage(accessToken: tok),
+          ),
         ),
       );
       return;
@@ -511,35 +527,45 @@ class _PlayerShellState extends State<PlayerShell> {
     if (key == 'wallet') {
       final tok = await _ensureToken();
       if (!mounted || tok == null || tok.isEmpty) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => WalletPage(token: tok)),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => WalletPage(token: tok)),
+        ),
       );
       return;
     }
     if (key == 'ads_publisher' || key == 'ads' || key == 'ads_dashboard') {
       final tok = await _ensureToken();
       if (!mounted || tok == null || tok.isEmpty) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PublisherShell(accessToken: tok)),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PublisherShell(accessToken: tok)),
+        ),
       );
       return;
     }
     if (key == 'leaderboard') {
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => LeaderboardPage()),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => LeaderboardPage()),
+        ),
       );
       return;
     }
     if (key == 'status' || key == 'platform_stats') {
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PlatformStatsPage()),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PlatformStatsPage()),
+        ),
       );
       return;
     }
     if (key == 'spectate') {
       final tok = context.read<AuthCubit>().state.token;
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => SpectatePage(accessToken: tok)),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => SpectatePage(accessToken: tok)),
+        ),
       );
       return;
     }
@@ -549,10 +575,13 @@ class _PlayerShellState extends State<PlayerShell> {
       final i = _tabs.indexWhere((t) => t.routeKey.trim() == 'matchmaking');
       if (i >= 0) {
         setState(() => _index = i);
+        PlayerShellController.instance.setActiveRouteKey('matchmaking');
         return;
       }
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => MatchmakingPage(token: tok)),
+      await PlayerShellController.instance.withCriticalFlowOverlay(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => MatchmakingPage(token: tok)),
+        ),
       );
       return;
     }
@@ -561,7 +590,12 @@ class _PlayerShellState extends State<PlayerShell> {
         final rk = t.routeKey.trim();
         return rk == 'play' || rk == 'home';
       });
-      if (i >= 0) setState(() => _index = i);
+      if (i >= 0) {
+        setState(() => _index = i);
+        PlayerShellController.instance.setActiveRouteKey(
+          _tabs[i].routeKey.trim().isEmpty ? 'home' : _tabs[i].routeKey.trim(),
+        );
+      }
       return;
     }
   }

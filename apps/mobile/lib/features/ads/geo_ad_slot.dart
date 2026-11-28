@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dama_mobile/core/ads/ad_viewer_session.dart';
+import 'package:dama_mobile/core/ads/lobby_soft_pause.dart';
 import 'package:dama_mobile/core/cache/query_cache.dart';
 import 'package:dama_mobile/core/geo/device_locate.dart';
 import 'package:dama_mobile/core/network/api_config.dart';
@@ -9,6 +10,7 @@ import 'package:dama_mobile/core/ads/resolve_viewport_creative.dart';
 import 'package:dama_mobile/core/theme/dama_theme.dart';
 import 'package:dama_mobile/core/types/types.dart';
 import 'package:dama_mobile/features/ads/viewport_ad_creative.dart';
+import 'package:dama_mobile/features/home/player_shell_controller.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -24,6 +26,8 @@ class GeoAdSlot extends StatefulWidget {
 class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
   ServedAdCampaign? _ad;
   String? _impressedShowKey;
+  /// Last painted serve generation awaiting impress (web showKey parity).
+  String? _pendingShowKey;
   String? _lobbyPlacement;
   ViewportBreakpoints? _viewportBreakpoints;
   Map<String, String>? _scheduleChrome;
@@ -39,14 +43,62 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    LobbySoftPause.open.addListener(_onSoftPauseChanged);
+    PlayerShellController.instance.addListener(_onShellRouteChanged);
     unawaited(_load(showSkeleton: true));
   }
 
   @override
   void dispose() {
+    LobbySoftPause.open.removeListener(_onSoftPauseChanged);
+    PlayerShellController.instance.removeListener(_onShellRouteChanged);
     WidgetsBinding.instance.removeObserver(this);
     _rotateTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Depend on ModalRoute so Navigator push/pop re-arms or pauses rotate.
+    final _ = ModalRoute.of(context)?.isCurrent;
+    _armRotateTimer();
+    unawaited(_flushPendingImpress());
+  }
+
+  /// Phase A: rotate only while home/play lobby tab is selected (IndexedStack keep-alive).
+  bool get _homeLobbySurfaceActive {
+    final key = PlayerShellController.instance.activeRouteKey.trim();
+    return key.isEmpty || key == 'home' || key == 'play';
+  }
+
+  /// Web surfaceActive parity: pause tile under pushed wallet/matchmaking/profile routes.
+  bool get _routeIsCurrent {
+    final route = ModalRoute.of(context);
+    if (route == null) return true;
+    return route.isCurrent;
+  }
+
+  bool get _canImpressSurface {
+    return _appVisible &&
+        _homeLobbySurfaceActive &&
+        _routeIsCurrent &&
+        !LobbySoftPause.open.value;
+  }
+
+  void _onSoftPauseChanged() {
+    if (LobbySoftPause.open.value) {
+      _rotateTimer?.cancel();
+      return;
+    }
+    _armRotateTimer();
+    // Soft fail / close: bill the painted tile if impress was skipped (web parity).
+    unawaited(_flushPendingImpress());
+  }
+
+  void _onShellRouteChanged() {
+    _armRotateTimer();
+    unawaited(_flushPendingImpress());
   }
 
   @override
@@ -55,19 +107,44 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
     if (visible == _appVisible) return;
     _appVisible = visible;
     if (visible) {
-      _armRotateTimer();
+      // Web useAdPlaybackQuery focus/refetch parity: pick up admin rotate knobs.
+      unawaited(_refreshPlaybackKnobs());
+      unawaited(_flushPendingImpress());
     } else {
       _rotateTimer?.cancel();
     }
   }
 
+  /// Refresh Phase A rotate knobs without a full geo re-serve.
+  Future<void> _refreshPlaybackKnobs() async {
+    try {
+      if (!await _loadPlacement()) return;
+      if (!mounted) return;
+      _armRotateTimer();
+    } catch (_) {
+      // Keep prior knobs on transient failure.
+    }
+  }
+
   void _armRotateTimer() {
     _rotateTimer?.cancel();
-    if (!_appVisible || !_lobbyRotateEnabled || _lobbyRotateSeconds < 1) {
+    if (!_appVisible ||
+        !_homeLobbySurfaceActive ||
+        !_routeIsCurrent ||
+        !_lobbyRotateEnabled ||
+        _lobbyRotateSeconds < 1 ||
+        LobbySoftPause.open.value) {
       return;
     }
     _rotateTimer = Timer.periodic(Duration(seconds: _lobbyRotateSeconds), (_) {
-      if (!mounted || !_appVisible || _lastCacheKey.isEmpty) return;
+      if (!mounted ||
+          !_appVisible ||
+          !_homeLobbySurfaceActive ||
+          !_routeIsCurrent ||
+          _lastCacheKey.isEmpty ||
+          LobbySoftPause.open.value) {
+        return;
+      }
       QueryCache.invalidate(_lastCacheKey);
       unawaited(
         _fetchAndApply(_lastQs, _lastCacheKey, recordImpression: true),
@@ -85,10 +162,8 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
     final place = (chrome?['placement_lobby']?.toString() ?? '').trim();
     if (place.isEmpty) return false;
     _lobbyPlacement = place;
-    final rotateRaw = pb['lobby_rotate_enabled'];
-    _lobbyRotateEnabled = rotateRaw == true ||
-        rotateRaw?.toString().toLowerCase() == 'true' ||
-        rotateRaw?.toString() == '1';
+    // Phase A: strict true only (web GeoAdSlot === true parity).
+    _lobbyRotateEnabled = pb['lobby_rotate_enabled'] == true;
     final rotateSec = int.tryParse(
           pb['lobby_rotate_interval_seconds']?.toString() ?? '',
         ) ??
@@ -118,7 +193,9 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
         locateUrl: '${ApiConfig.baseUrl}/api/v1/geo/locate',
         preferDeviceGps: FeatureFlagsWire.preferDeviceGpsCached(),
       );
-      if (located == null || located.countryCode.isEmpty) {
+      // Web country|lat parity: empty country is OK when GPS coords are present.
+      if (located == null ||
+          (located.countryCode.isEmpty && located.latitude == null)) {
         if (mounted) setState(() => _loading = false);
         return;
       }
@@ -229,13 +306,37 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
     });
     if (!recordImpression) return;
     // One impression per successful serve apply (rotate re-shows count again).
-    final showKey =
+    // Do not burn impressed under soft/surface skip (web unpaid-showKey parity).
+    _pendingShowKey =
         '${chosen.id}:${DateTime.now().millisecondsSinceEpoch}';
+    await _flushPendingImpress(
+      viewerOverride: viewer,
+      sessionOverride: session,
+    );
+  }
+
+  Future<void> _flushPendingImpress({
+    String? viewerOverride,
+    String? sessionOverride,
+  }) async {
+    if (!mounted) return;
+    final chosen = _ad;
+    final showKey = (_pendingShowKey ?? '').trim();
+    if (chosen == null || chosen.id.isEmpty || showKey.isEmpty) return;
     if (_impressedShowKey == showKey) return;
+    if (!_canImpressSurface) return;
     final placement = (_lobbyPlacement ?? '').trim();
     if (placement.isEmpty) return;
-    _impressedShowKey = showKey;
+    final viewer =
+        (viewerOverride ?? _lastQs['viewer_key'] ?? await AdViewerSession.viewerKey())
+            .trim();
+    final session =
+        (sessionOverride ?? _lastQs['session_key'] ?? await AdViewerSession.sessionKey())
+            .trim();
+    if (viewer.isEmpty || session.isEmpty) return;
+    if (!_canImpressSurface || _impressedShowKey == showKey) return;
     String? viewport;
+    final bp = _viewportBreakpoints;
     if (bp != null && mounted) {
       final width = MediaQuery.sizeOf(context).width;
       viewport = resolveViewportSlot(width, bp).name;
@@ -248,12 +349,19 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
     if (viewport != null && viewport.isNotEmpty) {
       body['viewport'] = viewport;
     }
-    await http.post(
+    final res = await http.post(
       Uri.parse(
           '${ApiConfig.baseUrl}/api/v1/ads/campaigns/${chosen.id}/impression'),
       headers: {'Content-Type': 'application/json', 'X-Device-Id': viewer},
       body: jsonEncode(body),
     );
+    // Soft / surface / visibility may flip during the await (web unpaid-showKey
+    // parity). Do not consume showKey if the tile is no longer eligible.
+    if (!_canImpressSurface) return;
+    // Mark only after a successful bill so soft min-gap misses can retry later.
+    if (res.statusCode < 300) {
+      _impressedShowKey = showKey;
+    }
   }
 
   Future<void> _onTap() async {
@@ -267,59 +375,66 @@ class _GeoAdSlotState extends State<GeoAdSlot> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = damaColorsOf(context);
-    if (_loading) return const GeoAdSlotSkeleton();
-    final ad = _ad;
-    final title = ad?.title;
-    if (ad == null || title == null || title.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final bp = _viewportBreakpoints;
-    if (bp == null) {
-      return const SizedBox.shrink();
-    }
-    final source = viewportSourceFromServed(ad);
-    final width = MediaQuery.sizeOf(context).width;
-    final picked = pickCampaignCreative(
-      source,
-      resolveViewportSlot(width, bp),
-    );
-    var videoId = picked.videoId.trim();
-    if (isStubVideoId(videoId)) videoId = '';
-    final imageUrl = resolvePublicMediaUrl(picked.imageUrl);
-    final hasCreative = videoId.isNotEmpty || imageUrl.isNotEmpty;
-    // Exact-slot serve: hide lobby tile when this screen has no creative.
-    if (!hasCreative) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: Material(
-        color: tokens.card,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: _onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: TextStyle(
-                        color: tokens.gold, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
-                ViewportAdCreative(
-                  source: source,
-                  breakpoints: _viewportBreakpoints,
-                  scheduleChrome: _scheduleChrome,
-                  maxWidth: double.infinity,
+    // Soft owns the lobby surface (one creative at a time): hide the tile visually.
+    return ValueListenableBuilder<bool>(
+      valueListenable: LobbySoftPause.open,
+      builder: (context, softOpen, _) {
+        if (softOpen) return const SizedBox.shrink();
+        final tokens = damaColorsOf(context);
+        if (_loading) return const GeoAdSlotSkeleton();
+        final ad = _ad;
+        final title = ad?.title;
+        if (ad == null || title == null || title.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final bp = _viewportBreakpoints;
+        if (bp == null) {
+          return const SizedBox.shrink();
+        }
+        final source = viewportSourceFromServed(ad);
+        final width = MediaQuery.sizeOf(context).width;
+        final picked = pickCampaignCreative(
+          source,
+          resolveViewportSlot(width, bp),
+        );
+        var videoId = picked.videoId.trim();
+        if (isStubVideoId(videoId)) videoId = '';
+        final imageUrl = resolvePublicMediaUrl(picked.imageUrl);
+        final hasCreative = videoId.isNotEmpty || imageUrl.isNotEmpty;
+        // Exact-slot serve: hide lobby tile when this screen has no creative.
+        if (!hasCreative) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: Material(
+            color: tokens.card,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: _onTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                            color: tokens.gold, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    ViewportAdCreative(
+                      source: source,
+                      breakpoints: _viewportBreakpoints,
+                      scheduleChrome: _scheduleChrome,
+                      maxWidth: double.infinity,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

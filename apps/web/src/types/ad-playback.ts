@@ -244,6 +244,8 @@ export type AdScheduleChrome = {
   marketplace_unavailable?: string;
   package_exclusive_label?: string;
   package_exclusive_blurb?: string;
+  package_lobby_takeover_label?: string;
+  package_lobby_takeover_blurb?: string;
   err_package_exclusive_taken?: string;
   err_impression_wallet_insufficient?: string;
   marketplace_fields_locked_blurb?: string;
@@ -397,6 +399,11 @@ export type AdPlayback = {
   lobby_rotate_interval_seconds?: number;
   lobby_rotate_interval_min?: number;
   lobby_rotate_interval_max?: number;
+  /** Phase B soft interstitial after idle dwell (default off until admin enables). */
+  lobby_soft_interstitial_enabled?: boolean;
+  lobby_idle_threshold_seconds?: number;
+  lobby_idle_threshold_min?: number;
+  lobby_idle_threshold_max?: number;
   freq_cap_campaign_per_hour?: number;
   freq_cap_campaign_per_day?: number;
   freq_cap_campaign_per_session?: number;
@@ -412,7 +419,8 @@ export type InMatchEligibilityRequest = {
   game_elapsed_seconds: number;
   seconds_since_last_ad?: number | null;
   viewer_key: string;
-  session_key?: string;
+  /** Required for cross-placement session freq caps (API fail-closed without it). */
+  session_key: string;
   country: string;
   region?: string;
   district?: string;

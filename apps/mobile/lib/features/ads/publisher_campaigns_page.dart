@@ -976,6 +976,12 @@ class _PublisherCampaignsPageState extends State<PublisherCampaignsPage> {
                           if (picked.exclusive &&
                               _c('package_exclusive_blurb').isNotEmpty)
                             _c('package_exclusive_blurb'),
+                          if (picked.lobbyTakeover &&
+                              _c('package_lobby_takeover_label').isNotEmpty)
+                            _c('package_lobby_takeover_label'),
+                          if (picked.lobbyTakeover &&
+                              _c('package_lobby_takeover_blurb').isNotEmpty)
+                            _c('package_lobby_takeover_blurb'),
                         ];
                         if (lines.isEmpty) return const SizedBox.shrink();
                         return Padding(

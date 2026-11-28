@@ -48,6 +48,10 @@ type Props = {
   chrome: PlayRailChromeReady;
   initialOpponent?: ChallengeOpponent | null;
   onClearOpponent?: () => void;
+  /** Soft interstitial ship-gate: lift chip select/clear to HomePlayHub. */
+  onOpponentChange?: (opponent: ChallengeOpponent | null) => void;
+  /** Soft ship-gate: true while typeahead query is non-empty (desktop compose-adjacent). */
+  onOpponentSearchPending?: (pending: boolean) => void;
   signedIn: boolean;
   /** @deprecated Prefer global SignInModal; kept for call-site compat. */
   loginHref?: string;
@@ -63,6 +67,8 @@ export function CreateChallengeForm({
   chrome,
   initialOpponent,
   onClearOpponent,
+  onOpponentChange,
+  onOpponentSearchPending,
   signedIn,
   loginHref: _loginHref,
   timeControlPresets,
@@ -99,6 +105,20 @@ export function CreateChallengeForm({
   useEffect(() => {
     if (initialOpponent) setOpponent(initialOpponent);
   }, [initialOpponent]);
+
+  // Flutter onChallengeOpponentPresentChanged parity: soft blocks while chip is set.
+  useEffect(() => {
+    onOpponentChange?.(opponent);
+  }, [opponent, onOpponentChange]);
+
+  // Soft blocks while the opponent typeahead has a non-empty query (chip not yet picked).
+  useEffect(() => {
+    const pending = !opponent && Boolean(query.trim());
+    onOpponentSearchPending?.(pending);
+    return () => {
+      onOpponentSearchPending?.(false);
+    };
+  }, [query, opponent, onOpponentSearchPending]);
 
   const liveOpponent = usePublicPlayerQuery(opponent?.id, Boolean((opponent?.id || "").trim()));
   const opponentThumb = (

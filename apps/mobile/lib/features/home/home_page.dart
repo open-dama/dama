@@ -12,6 +12,7 @@ import 'package:dama_mobile/core/theme/theme_toggle_button.dart';
 import 'package:dama_mobile/core/types/types.dart';
 import 'package:dama_mobile/core/ui/shimmer_skeletons.dart';
 import 'package:dama_mobile/features/ads/geo_ad_slot.dart';
+import 'package:dama_mobile/features/ads/lobby_soft_interstitial.dart';
 import 'package:dama_mobile/features/ads/publisher_shell.dart';
 import 'package:dama_mobile/features/auth/auth_cubit.dart';
 import 'package:dama_mobile/features/auth/auth_providers.dart';
@@ -29,6 +30,7 @@ import 'package:dama_mobile/features/game/smart_board_shell.dart';
 import 'package:dama_mobile/features/game/game_lobby_page.dart';
 import 'package:dama_mobile/features/game/match_board_page.dart';
 import 'package:dama_mobile/features/game/matchmaking_page.dart';
+import 'package:dama_mobile/features/game/matchmaking_realtime.dart';
 import 'package:dama_mobile/features/game/spectate_page.dart';
 import 'package:dama_mobile/features/leaderboard/leaderboard_page.dart';
 import 'package:dama_mobile/features/legal/legal_page.dart';
@@ -92,11 +94,18 @@ class _HomePageState extends State<HomePage> {
   /// Phone/tablet compose: hide AppBar + top SafeArea so the sheet reaches screen top.
   bool _railComposeOpen = false;
 
+  /// Phase B: block soft interstitial during enroll / sign-in / pushed critical flows.
+  bool _softAdBlocked = false;
+  /// Web notificationInboxOpen soft gate parity.
+  bool _notificationInboxOpen = false;
+
   /// Players sub: 0 friends, 1 requests, 2 all (notification deep-link).
   int _playersSub = 2;
   String? _dmDeepLinkRequestId;
   String? _dmDeepLinkThreadId;
   RailChallengeOpponent? _railChallengeOpponent;
+  /// Soft gate: panel invite chip still selected after deep-link consume.
+  bool _challengeOpponentPresent = false;
   String? _pendingChallengeToken;
   bool _acceptingChallenge = false;
 
@@ -123,6 +132,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    // IndexedStack keep-alive: rebuild soft gates when shell tab changes.
+    PlayerShellController.instance.addListener(_onShellRouteChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_tryAcceptPendingChallenge());
       if (mounted) unawaited(_tryOpenEventsDeepLink());
@@ -216,8 +227,19 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
+  void _onShellRouteChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Home/play lobby tab visible (web lobbySurfaceVisible parity).
+  bool get _homeShellActive {
+    final key = PlayerShellController.instance.activeRouteKey.trim();
+    return key.isEmpty || key == 'home' || key == 'play';
+  }
+
   @override
   void dispose() {
+    PlayerShellController.instance.removeListener(_onShellRouteChanged);
     unawaited(_otpSessionSub?.cancel());
     super.dispose();
   }
@@ -493,6 +515,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     _acceptingChallenge = true;
+    if (mounted) setState(() {});
     final failMsg = _playRailChrome?.toastChallengeAcceptFailed ?? '';
     var scheduleRetry = false;
     var silentRetry = false;
@@ -544,6 +567,9 @@ class _HomePageState extends State<HomePage> {
       _pendingChallengeToken = null;
       _challengeAcceptRetries = 0;
       if (!mounted) return;
+      // Phase B: soft latch through board push (invite/queue match-start parity).
+      final mm = MatchmakingRealtimeScope.maybeOf(context);
+      mm?.latchEnteringMatch();
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MatchBoardPage(
@@ -553,6 +579,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
+      mm?.clearEnteringMatch();
     } catch (_) {
       // Network blip - silent retry a few times; toast once then stop.
       _challengeAcceptRetries += 1;
@@ -569,6 +596,7 @@ class _HomePageState extends State<HomePage> {
       }
     } finally {
       _acceptingChallenge = false;
+      if (mounted) setState(() {});
       if (scheduleRetry && _pendingChallengeToken != null && mounted) {
         Future<void>.delayed(
           Duration(milliseconds: silentRetry ? 800 : 400),
@@ -649,7 +677,7 @@ class _HomePageState extends State<HomePage> {
   Future<String?> _ensureToken() async {
     final auth = context.read<AuthCubit>().state;
     if (auth.isAuthenticated) return auth.token;
-    return showSignInDialog(context);
+    return _withSoftAdBlocked(() => showSignInDialog(context));
   }
 
   Future<void> _openSecondary(ClientNavLink link) async {
@@ -674,9 +702,13 @@ class _HomePageState extends State<HomePage> {
     if (key == 'dashboard') {
       final dashToken = await _ensureToken();
       if (!mounted || dashToken == null || dashToken.isEmpty) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-            builder: (_) => DashboardPage(accessToken: dashToken)),
+      // IndexedStack keeps Home soft idle alive under dashboard (wallet/KYC parity).
+      await _withSoftAdBlocked(
+        () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => DashboardPage(accessToken: dashToken),
+          ),
+        ),
       );
       return;
     }
@@ -796,7 +828,10 @@ class _HomePageState extends State<HomePage> {
       default:
         return;
     }
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    // IndexedStack keeps Home soft idle alive under pushed routes (wallet/KYC/profile).
+    await _withSoftAdBlocked(
+      () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)),
+    );
   }
 
   Future<void> _loadAuthChrome() async {
@@ -927,19 +962,30 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<T> _withSoftAdBlocked<T>(Future<T> Function() run) async {
+    if (mounted) setState(() => _softAdBlocked = true);
+    try {
+      return await run();
+    } finally {
+      if (mounted) setState(() => _softAdBlocked = false);
+    }
+  }
+
   /// After enroll / seated Join: cup lobby via shell Tournaments tab + focusId.
   Future<void> _openTournamentCupLobby(String tournamentId) async {
     final id = tournamentId.trim();
     if (id.isEmpty) return;
     if (!mounted) return;
-    final token = await _ensureToken();
-    if (!mounted || token == null) return;
-    PlayerShellController.instance.openTournaments(
-      source: 'official',
-      focusId: id,
-    );
-    if (!mounted) return;
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    await _withSoftAdBlocked(() async {
+      final token = await _ensureToken();
+      if (!mounted || token == null) return;
+      PlayerShellController.instance.openTournaments(
+        source: 'official',
+        focusId: id,
+      );
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    });
   }
 
   Future<void> _onEnroll(RestTournament t) async {
@@ -968,13 +1014,15 @@ class _HomePageState extends State<HomePage> {
       final pay = await _loadPayChrome();
       if (!mounted) return;
       try {
-        final res = await http.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/v1/tournaments/${t.id}/enroll'),
-          headers: {
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-          },
-          body: '{}',
+        final res = await _withSoftAdBlocked(
+          () => http.post(
+            Uri.parse('${ApiConfig.baseUrl}/api/v1/tournaments/${t.id}/enroll'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: '{}',
+          ),
         );
         if (!mounted) return;
         if (res.statusCode == 409) {
@@ -1017,15 +1065,17 @@ class _HomePageState extends State<HomePage> {
       }
       return;
     }
-    final enrolled = await showPaymentEnrollDialog(
-      context,
-      tournament: t,
-      prizePoolLabels: home != null ? PrizePoolCardLabels.fromHome(home) : null,
+    final enrolled = await _withSoftAdBlocked(
+      () => showPaymentEnrollDialog(
+        context,
+        tournament: t,
+        prizePoolLabels: home != null ? PrizePoolCardLabels.fromHome(home) : null,
+      ),
     );
     if (!mounted) return;
     await _loadHome();
     if (!mounted) return;
-    if (enrolled) await _openTournamentCupLobby(t.id);
+    if (enrolled == true) await _openTournamentCupLobby(t.id);
   }
 
   @override
@@ -1033,7 +1083,33 @@ class _HomePageState extends State<HomePage> {
     final tokens = damaColorsOf(context);
     final signInLabel = (_authChrome?.navSignInLabel ?? '').trim();
     final signOutLabel = (_authChrome?.signOutActionLabel ?? '').trim();
-    return Scaffold(
+    final mmRt = MatchmakingRealtimeScope.maybeOf(context);
+    // Web HomePlayHub softInterstitialBlocked parity: any outgoing invite blocks
+    // soft (dismissed wait UI still means match-start in flight).
+    // Prefill / selected invite chip is compose-adjacent; no soft interrupt.
+    final challengeOpponentPending =
+        _challengeOpponentPresent ||
+        ((_railChallengeOpponent?.username ?? '').trim().isNotEmpty);
+    final softBlocked = !_homeShellActive ||
+        _railComposeOpen ||
+        _softAdBlocked ||
+        PlayerShellController.instance.criticalFlowOverlay ||
+        _notificationInboxOpen ||
+        _acceptingChallenge ||
+        ((_pendingChallengeToken ?? '').trim().isNotEmpty) ||
+        challengeOpponentPending ||
+        (_liveAiToken != null &&
+            _liveAiDepth != null &&
+            _liveAiTimeControlSeconds != null) ||
+        mmRt?.viewerQueued == true ||
+        mmRt?.incoming != null ||
+        ((mmRt?.outgoingInviteId ?? '').trim().isNotEmpty) ||
+        mmRt?.enteringMatch == true ||
+        ((mmRt?.matchedP1 ?? '').trim().isNotEmpty) ||
+        ((mmRt?.matchedP2 ?? '').trim().isNotEmpty);
+    return LobbySoftIdleHost(
+      blocked: softBlocked,
+      child: Scaffold(
       appBar: _railComposeOpen
           ? null
           : AppBar(
@@ -1046,7 +1122,9 @@ class _HomePageState extends State<HomePage> {
                       if (signInLabel.isEmpty) return const SizedBox.shrink();
                       return TextButton(
                         onPressed: () {
-                          unawaited(showSignInDialog(context));
+                          unawaited(
+                            _withSoftAdBlocked(() => showSignInDialog(context)),
+                          );
                         },
                         child: Text(signInLabel),
                       );
@@ -1062,12 +1140,18 @@ class _HomePageState extends State<HomePage> {
                         if (token.isNotEmpty)
                           NotificationBellButton(
                             accessToken: token,
+                            onInboxOpenChanged: (open) {
+                              if (!mounted) return;
+                              setState(() => _notificationInboxOpen = open);
+                            },
                             onNavigateHref: (href) {
                               unawaited(
-                                navigateNotificationHref(
-                                  context,
-                                  href: href,
-                                  accessToken: token,
+                                _withSoftAdBlocked(
+                                  () => navigateNotificationHref(
+                                    context,
+                                    href: href,
+                                    accessToken: token,
+                                  ),
                                 ),
                               );
                             },
@@ -1080,9 +1164,12 @@ class _HomePageState extends State<HomePage> {
                             if (value == 'profile') {
                               final tok = await _ensureToken();
                               if (!mounted || tok == null) return;
-                              await nav.push(
-                                MaterialPageRoute(
-                                  builder: (_) => ProfilePage(accessToken: tok),
+                              await _withSoftAdBlocked(
+                                () => nav.push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        ProfilePage(accessToken: tok),
+                                  ),
                                 ),
                               );
                               return;
@@ -1090,9 +1177,11 @@ class _HomePageState extends State<HomePage> {
                             if (value == 'wallet') {
                               final tok = await _ensureToken();
                               if (!mounted || tok == null) return;
-                              await nav.push(
-                                MaterialPageRoute(
-                                  builder: (_) => WalletPage(token: tok),
+                              await _withSoftAdBlocked(
+                                () => nav.push(
+                                  MaterialPageRoute(
+                                    builder: (_) => WalletPage(token: tok),
+                                  ),
                                 ),
                               );
                               return;
@@ -1230,9 +1319,12 @@ class _HomePageState extends State<HomePage> {
                             final nav = Navigator.of(context);
                             final token = await _ensureToken();
                             if (!mounted || token == null) return;
-                            await nav.push(
-                              MaterialPageRoute(
-                                builder: (_) => MatchmakingPage(token: token),
+                            await _withSoftAdBlocked(
+                              () => nav.push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      MatchmakingPage(token: token),
+                                ),
                               ),
                             );
                           },
@@ -1242,6 +1334,13 @@ class _HomePageState extends State<HomePage> {
                               setState(() => _railChallengeOpponent = null);
                             }
                           },
+                          onChallengeOpponentPresentChanged: (present) {
+                            if (_challengeOpponentPresent == present) return;
+                            setState(() => _challengeOpponentPresent = present);
+                          },
+                          onRequireSignIn: () => _withSoftAdBlocked(
+                            () => showSignInDialog(context),
+                          ),
                           tournaments: _tournaments,
                           homeChrome: _homeChrome,
                           tournamentsLoading: _homeLoading,
@@ -1359,6 +1458,7 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
             ),
+      ),
     );
   }
 }
@@ -1390,6 +1490,8 @@ class _HomePlayHub extends StatefulWidget {
     required this.onPlayMatch,
     this.initialChallengeOpponent,
     this.onChallengeOpponentConsumed,
+    this.onChallengeOpponentPresentChanged,
+    this.onRequireSignIn,
     required this.tournaments,
     required this.homeChrome,
     required this.tournamentsLoading,
@@ -1425,6 +1527,8 @@ class _HomePlayHub extends StatefulWidget {
   final Future<void> Function() onPlayMatch;
   final RailChallengeOpponent? initialChallengeOpponent;
   final VoidCallback? onChallengeOpponentConsumed;
+  final ValueChanged<bool>? onChallengeOpponentPresentChanged;
+  final Future<String?> Function()? onRequireSignIn;
   final List<RestTournament> tournaments;
   final HomeSurfaceChrome? homeChrome;
   final bool tournamentsLoading;
@@ -1522,6 +1626,9 @@ class _HomePlayHubState extends State<_HomePlayHub> {
             onPiecePalette: w.onPiecePalette,
             initialChallengeOpponent: w.initialChallengeOpponent,
             onChallengeOpponentConsumed: w.onChallengeOpponentConsumed,
+            onChallengeOpponentPresentChanged:
+                w.onChallengeOpponentPresentChanged,
+            onRequireSignIn: w.onRequireSignIn,
             onComposeSheetChanged: _setComposeSheet,
           );
           // Rail tabs are New Game | Games | Players; live tournament strip

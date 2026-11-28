@@ -28,6 +28,8 @@ class MatchmakingRealtimeController extends ChangeNotifier {
   List<MatchClockPreset> _tcPresets = const [];
   bool connected = false;
   int? queueSize;
+  /// This viewer is in the global find-match queue (Phase B soft-ad gate).
+  bool viewerQueued = false;
   MatchInvite? incoming;
   String? outgoingInviteId;
   String? outgoingToUsername;
@@ -38,6 +40,15 @@ class MatchmakingRealtimeController extends ChangeNotifier {
   bool inviteActionBusy = false;
   Timer? _outgoingPoll;
   bool _enteringMatch = false;
+  /// Invalidates prior soft-latch clear timers (stale clear must not kill a new latch).
+  int _enteringGen = 0;
+
+  /// Match-start latch (web lastMatch parity for Phase B soft gate).
+  bool get enteringMatch => _enteringMatch;
+
+  /// Sync read for soft mid-flight (web `isEnteringMatchSync` parity).
+  /// Prefer this over waiting for HomePage `blocked` to rebuild.
+  bool isEnteringMatchSync() => _enteringMatch;
 
   /// Called when another (or same) client uploads a new avatar.
   void Function(String userId, String? thumbUrl, String? fullUrl)?
@@ -51,6 +62,12 @@ class MatchmakingRealtimeController extends ChangeNotifier {
 
   MatchmakingChrome? get chrome => _chrome;
   PlayRailChrome? get railChrome => _railChrome;
+
+  void setViewerQueued(bool queued) {
+    if (viewerQueued == queued) return;
+    viewerQueued = queued;
+    notifyListeners();
+  }
 
   /// Accept-dialog body: from + rated/unrated + color + TC label (DB only).
   String formatIncomingInviteBody(MatchInvite invite) {
@@ -102,8 +119,11 @@ class MatchmakingRealtimeController extends ChangeNotifier {
     outgoingDismissed = false;
     matchedP1 = null;
     matchedP2 = null;
+    _enteringMatch = false;
+    _enteringGen += 1;
     lastStatusToast = null;
     queueSize = null;
+    viewerQueued = false;
     connected = false;
     notifyListeners();
     if (token == null || token.isEmpty) return;
@@ -256,8 +276,47 @@ class MatchmakingRealtimeController extends ChangeNotifier {
     lastStatusToast = _chrome?.toastInviteAccepted;
     notifyListeners();
     _openMatchCallback?.call(gid);
-    Future<void>.delayed(const Duration(milliseconds: 800), () {
+    // Keep soft blocked past invite clear until board route typically owns the
+    // surface (home softBlocked uses enteringMatch; !_homeShellActive follows).
+    _scheduleEnteringMatchClear();
+  }
+
+  /// Soft + seat latch for queue/REST instant match (home softBlocked parity).
+  /// Returns false when a match-start latch is already in flight (coalesce).
+  bool latchEnteringMatch({String? player1Id, String? player2Id}) {
+    if (_enteringMatch) return false;
+    _enteringMatch = true;
+    matchedP1 = player1Id;
+    matchedP2 = player2Id;
+    viewerQueued = false;
+    outgoingInviteId = null;
+    outgoingToUsername = null;
+    outgoingDismissed = false;
+    notifyListeners();
+    _scheduleEnteringMatchClear(clearSeats: true);
+    return true;
+  }
+
+  void clearEnteringMatch() {
+    _enteringGen += 1;
+    _enteringMatch = false;
+    matchedP1 = null;
+    matchedP2 = null;
+    notifyListeners();
+  }
+
+  void _scheduleEnteringMatchClear({bool clearSeats = false}) {
+    final gen = ++_enteringGen;
+    // Fallback if board route never mounts; ModalRoute + clearEnteringMatch are primary.
+    Future<void>.delayed(const Duration(milliseconds: 8000), () {
+      if (gen != _enteringGen) return;
+      if (!_enteringMatch) return;
       _enteringMatch = false;
+      if (clearSeats) {
+        matchedP1 = null;
+        matchedP2 = null;
+      }
+      notifyListeners();
     });
   }
 
@@ -328,12 +387,14 @@ class MatchmakingRealtimeController extends ChangeNotifier {
           final gid = msg['game_id']?.toString();
           if (gid != null && gid.isNotEmpty) {
             // Navigate only - no game-start.mp3 over VS intro / board open.
-            matchedP1 = msg['player1_id']?.toString();
-            matchedP2 = msg['player2_id']?.toString();
-            outgoingInviteId = null;
-            outgoingToUsername = null;
-            outgoingDismissed = false;
-            notifyListeners();
+            // Soft: coalesce latch (invite _enterAcceptedMatch parity); ignore
+            // duplicate/delayed WS so an early clear cannot unblock mid handoff.
+            if (!latchEnteringMatch(
+              player1Id: msg['player1_id']?.toString(),
+              player2Id: msg['player2_id']?.toString(),
+            )) {
+              break;
+            }
             Future<void>.delayed(const Duration(milliseconds: 900), () {
               _openMatchCallback?.call(gid);
             });
@@ -605,7 +666,10 @@ class _MatchmakingRealtimeHostState extends State<MatchmakingRealtimeHost> {
           mode: 'pvp',
         ),
       ),
-    );
+    ).whenComplete(() {
+      // Board route owned soft via ModalRoute; drop latch when returning to lobby.
+      _controller.clearEnteringMatch();
+    });
   }
 
   void _onCtrl() {

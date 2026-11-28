@@ -28,6 +28,11 @@ type AdPlaybackConfig struct {
 	LobbyRotateIntervalSeconds int  `json:"lobby_rotate_interval_seconds"`
 	LobbyRotateIntervalMin     int  `json:"lobby_rotate_interval_min"`
 	LobbyRotateIntervalMax     int  `json:"lobby_rotate_interval_max"`
+	// Lobby soft interstitial after idle dwell (Phase B). Opt-in; default off.
+	LobbySoftInterstitialEnabled bool `json:"lobby_soft_interstitial_enabled"`
+	LobbyIdleThresholdSeconds    int  `json:"lobby_idle_threshold_seconds"`
+	LobbyIdleThresholdMin        int  `json:"lobby_idle_threshold_min"`
+	LobbyIdleThresholdMax        int  `json:"lobby_idle_threshold_max"`
 	// Viewer frequency caps across lobby + in-match. 0 disables that cap.
 	FreqCapCampaignPerHour     int    `json:"freq_cap_campaign_per_hour"`
 	FreqCapCampaignPerDay      int    `json:"freq_cap_campaign_per_day"`
@@ -381,6 +386,9 @@ func (c *AdPlaybackConfig) validateBoundsPresent() error {
 	if c.LobbyRotateIntervalMin < 1 || c.LobbyRotateIntervalMax < c.LobbyRotateIntervalMin {
 		return errors.New("ad_playback lobby_rotate interval bounds incomplete")
 	}
+	if c.LobbyIdleThresholdMin < 1 || c.LobbyIdleThresholdMax < c.LobbyIdleThresholdMin {
+		return errors.New("ad_playback lobby_idle_threshold bounds incomplete")
+	}
 	if c.FreqCapCampaignPerHour < 0 || c.FreqCapCampaignPerDay < 0 || c.FreqCapCampaignPerSession < 0 {
 		return errors.New("ad_playback freq_cap campaign bounds incomplete")
 	}
@@ -412,6 +420,9 @@ func (c *AdPlaybackConfig) validateValues() error {
 	if c.LobbyRotateIntervalSeconds < c.LobbyRotateIntervalMin || c.LobbyRotateIntervalSeconds > c.LobbyRotateIntervalMax {
 		return fmt.Errorf("lobby_rotate_interval_seconds must be between %d and %d", c.LobbyRotateIntervalMin, c.LobbyRotateIntervalMax)
 	}
+	if c.LobbyIdleThresholdSeconds < c.LobbyIdleThresholdMin || c.LobbyIdleThresholdSeconds > c.LobbyIdleThresholdMax {
+		return fmt.Errorf("lobby_idle_threshold_seconds must be between %d and %d", c.LobbyIdleThresholdMin, c.LobbyIdleThresholdMax)
+	}
 	return nil
 }
 
@@ -437,33 +448,39 @@ func (s *SettingsStore) SetAdPlayback(ctx context.Context, cfg AdPlaybackConfig)
 	cfg.ConsoleCampaignsLimit = cur.ConsoleCampaignsLimit
 	cfg.LobbyRotateIntervalMin = cur.LobbyRotateIntervalMin
 	cfg.LobbyRotateIntervalMax = cur.LobbyRotateIntervalMax
+	cfg.LobbyIdleThresholdMin = cur.LobbyIdleThresholdMin
+	cfg.LobbyIdleThresholdMax = cur.LobbyIdleThresholdMax
 	if err := cfg.validateValues(); err != nil {
 		return err
 	}
 	payload := map[string]any{
-		"non_skippable_seconds":          cfg.NonSkippableSeconds,
-		"first_show_after_game_seconds":  cfg.FirstShowAfterGameSeconds,
-		"default_interval_seconds":       cfg.DefaultIntervalSeconds,
-		"non_skippable_min":              cfg.NonSkippableMin,
-		"non_skippable_max":              cfg.NonSkippableMax,
-		"first_show_min":                 cfg.FirstShowMin,
-		"first_show_max":                 cfg.FirstShowMax,
-		"interval_min":                   cfg.IntervalMin,
-		"interval_max":                   cfg.IntervalMax,
-		"impression_cap_min":             cfg.ImpressionCapMin,
-		"console_campaigns_limit":        cfg.ConsoleCampaignsLimit,
-		"lobby_rotate_enabled":           cfg.LobbyRotateEnabled,
-		"lobby_rotate_interval_seconds":  cfg.LobbyRotateIntervalSeconds,
-		"lobby_rotate_interval_min":      cfg.LobbyRotateIntervalMin,
-		"lobby_rotate_interval_max":      cfg.LobbyRotateIntervalMax,
-		"freq_cap_campaign_per_hour":     cfg.FreqCapCampaignPerHour,
-		"freq_cap_campaign_per_day":      cfg.FreqCapCampaignPerDay,
-		"freq_cap_campaign_per_session":  cfg.FreqCapCampaignPerSession,
-		"freq_cap_placement_per_hour":    cfg.FreqCapPlacementPerHour,
-		"freq_cap_placement_per_day":     cfg.FreqCapPlacementPerDay,
-		"freq_cap_placement_per_session": cfg.FreqCapPlacementPerSession,
-		"freq_cap_min_gap_seconds":       cfg.FreqCapMinGapSeconds,
-		"source":                         "database",
+		"non_skippable_seconds":            cfg.NonSkippableSeconds,
+		"first_show_after_game_seconds":    cfg.FirstShowAfterGameSeconds,
+		"default_interval_seconds":         cfg.DefaultIntervalSeconds,
+		"non_skippable_min":                cfg.NonSkippableMin,
+		"non_skippable_max":                cfg.NonSkippableMax,
+		"first_show_min":                   cfg.FirstShowMin,
+		"first_show_max":                   cfg.FirstShowMax,
+		"interval_min":                     cfg.IntervalMin,
+		"interval_max":                     cfg.IntervalMax,
+		"impression_cap_min":               cfg.ImpressionCapMin,
+		"console_campaigns_limit":          cfg.ConsoleCampaignsLimit,
+		"lobby_rotate_enabled":             cfg.LobbyRotateEnabled,
+		"lobby_rotate_interval_seconds":    cfg.LobbyRotateIntervalSeconds,
+		"lobby_rotate_interval_min":        cfg.LobbyRotateIntervalMin,
+		"lobby_rotate_interval_max":        cfg.LobbyRotateIntervalMax,
+		"lobby_soft_interstitial_enabled":  cfg.LobbySoftInterstitialEnabled,
+		"lobby_idle_threshold_seconds":     cfg.LobbyIdleThresholdSeconds,
+		"lobby_idle_threshold_min":         cfg.LobbyIdleThresholdMin,
+		"lobby_idle_threshold_max":         cfg.LobbyIdleThresholdMax,
+		"freq_cap_campaign_per_hour":       cfg.FreqCapCampaignPerHour,
+		"freq_cap_campaign_per_day":        cfg.FreqCapCampaignPerDay,
+		"freq_cap_campaign_per_session":    cfg.FreqCapCampaignPerSession,
+		"freq_cap_placement_per_hour":      cfg.FreqCapPlacementPerHour,
+		"freq_cap_placement_per_day":       cfg.FreqCapPlacementPerDay,
+		"freq_cap_placement_per_session":   cfg.FreqCapPlacementPerSession,
+		"freq_cap_min_gap_seconds":         cfg.FreqCapMinGapSeconds,
+		"source":                           "database",
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

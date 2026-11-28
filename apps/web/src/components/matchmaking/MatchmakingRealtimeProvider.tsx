@@ -85,6 +85,13 @@ type MatchmakingRealtimeValue = {
   incoming: MatchInviteIncoming | null;
   outgoing: OutgoingInvite | null;
   lastMatch: MatchFoundPayload | null;
+  /** Invite-accept / match-start navigation in flight (Phase B soft gate). */
+  enteringMatch: boolean;
+  /**
+   * Sync read of the match-start latch (navigatingMatchRef).
+   * Soft tryShow must call this mid-flight; React `enteringMatch` can lag one frame.
+   */
+  isEnteringMatchSync: () => boolean;
   inviteActionPending: "accept" | "decline" | "cancel" | null;
   send: (payload: Record<string, unknown>) => boolean;
   clearIncoming: () => void;
@@ -94,6 +101,17 @@ type MatchmakingRealtimeValue = {
   cancelOutgoing: () => void;
   /** Open outgoing wait UI from REST create response (WS invite_sent is confirmation). */
   noteOutgoing: (invite: OutgoingInvite) => void;
+  /**
+   * Soft latch for REST instant join / challenge accept (Flutter latchEnteringMatch parity).
+   * Returns false when a match-start handoff is already in flight.
+   */
+  beginEnteringMatch: (opts?: {
+    gameId?: string;
+    player1Id?: string;
+    player2Id?: string;
+  }) => boolean;
+  /** Clear soft handoff latch once the board URL owns the surface. */
+  clearEnteringMatch: () => void;
 };
 
 const MatchmakingRealtimeContext = createContext<MatchmakingRealtimeValue | null>(null);
@@ -130,10 +148,14 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
     "accept" | "decline" | "cancel" | null
   >(null);
   const [lastMatch, setLastMatch] = useState<MatchFoundPayload | null>(null);
+  const [enteringMatch, setEnteringMatch] = useState(false);
   /** Sync latch - React state alone can double-fire before re-render. */
   const inviteActionLatchRef = useRef<string | null>(null);
   const enterAcceptedMatchRef = useRef<(gameId: string) => void>(() => undefined);
   const navigatingMatchRef = useRef(false);
+  /** Invalidates prior soft-latch clear timers (stale clear must not kill a new latch). */
+  const enteringGenRef = useRef(0);
+  const scheduleEnteringMatchClearRef = useRef<(ms: number) => void>(() => undefined);
 
   const clearIncoming = useCallback(() => {
     setIncoming(null);
@@ -194,11 +216,53 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
     setOutgoingDismissed(false);
   }, []);
 
+  const scheduleEnteringMatchClear = useCallback((ms: number) => {
+    const gen = ++enteringGenRef.current;
+    window.setTimeout(() => {
+      if (enteringGenRef.current !== gen) return;
+      navigatingMatchRef.current = false;
+      setEnteringMatch(false);
+      setLastMatch(null);
+    }, ms);
+  }, []);
+  scheduleEnteringMatchClearRef.current = scheduleEnteringMatchClear;
+
+  const clearEnteringMatch = useCallback(() => {
+    enteringGenRef.current += 1;
+    navigatingMatchRef.current = false;
+    setEnteringMatch(false);
+    setLastMatch(null);
+  }, []);
+
+  const isEnteringMatchSync = useCallback(() => navigatingMatchRef.current, []);
+
+  const beginEnteringMatch = useCallback(
+    (opts?: { gameId?: string; player1Id?: string; player2Id?: string }) => {
+      if (navigatingMatchRef.current) return false;
+      navigatingMatchRef.current = true;
+      setEnteringMatch(true);
+      const gid = (opts?.gameId || "").trim();
+      if (gid) {
+        setLastMatch({
+          gameId: gid,
+          player1Id: opts?.player1Id,
+          player2Id: opts?.player2Id,
+        });
+      }
+      // Fallback if board URL never lands; HomePlayHub clears early on playBoardVisible.
+      scheduleEnteringMatchClear(8000);
+      return true;
+    },
+    [scheduleEnteringMatchClear],
+  );
+
   const enterAcceptedMatch = useCallback(
     (gameId: string) => {
       const gid = gameId.trim();
       if (!gid || navigatingMatchRef.current) return;
       navigatingMatchRef.current = true;
+      // Soft must stay blocked after invite clears until board route owns the surface.
+      setEnteringMatch(true);
       playInviteResolvedChime();
       // No match_found/game-start thud: board opens into VS intro; that clip
       // sounded like a doubled piece-put on every 2D/3D start. Invite chime only.
@@ -209,7 +273,7 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       if (chrome?.toast_invite_accepted) toast.success(chrome.toast_invite_accepted);
       window.setTimeout(() => {
         router.push(`/?gameId=${gid}&mode=pvp`);
-        navigatingMatchRef.current = false;
+        scheduleEnteringMatchClearRef.current(8000);
       }, 500);
     },
     [chrome?.toast_invite_accepted, clearIncoming, clearOutgoing, router],
@@ -279,6 +343,9 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       setOutgoingDismissed(false);
       setQueueSize(null);
       setLastMatch(null);
+      setEnteringMatch(false);
+      navigatingMatchRef.current = false;
+      enteringGenRef.current += 1;
       return;
     }
     const base = apiWsUrl();
@@ -382,7 +449,11 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
         }
         if (msg.type === "match_found" && msg.game_id) {
           // Toast + navigate only - no game-start.mp3 (piece-put thud over VS intro).
+          // Coalesce with invite enterAcceptedMatch so stacked WS cannot clear soft mid handoff.
+          if (navigatingMatchRef.current) return;
+          navigatingMatchRef.current = true;
           clearOutgoing();
+          setEnteringMatch(true);
           setLastMatch({
             gameId: msg.game_id,
             player1Id: msg.player1_id,
@@ -391,6 +462,8 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
           if (chrome?.toast_match_found) toast.success(chrome.toast_match_found);
           window.setTimeout(() => {
             router.push(`/?gameId=${msg.game_id}&mode=pvp`);
+            // Fallback; HomePlayHub clearEnteringMatch runs when board URL owns surface.
+            scheduleEnteringMatchClearRef.current(8000);
           }, 900);
           return;
         }
@@ -473,6 +546,8 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       incoming,
       outgoing,
       lastMatch,
+      enteringMatch,
+      isEnteringMatchSync,
       inviteActionPending,
       send,
       clearIncoming,
@@ -481,6 +556,8 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       dismissOutgoing,
       cancelOutgoing,
       noteOutgoing,
+      beginEnteringMatch,
+      clearEnteringMatch,
     }),
     [
       connected,
@@ -488,6 +565,8 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       incoming,
       outgoing,
       lastMatch,
+      enteringMatch,
+      isEnteringMatchSync,
       inviteActionPending,
       send,
       clearIncoming,
@@ -496,6 +575,8 @@ export function MatchmakingRealtimeProvider({ children }: { children: ReactNode 
       dismissOutgoing,
       cancelOutgoing,
       noteOutgoing,
+      beginEnteringMatch,
+      clearEnteringMatch,
     ],
   );
 

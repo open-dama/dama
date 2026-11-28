@@ -25,6 +25,15 @@ type ShellChromeState = {
    */
   suppressSmartBoardPop: boolean;
   setSuppressSmartBoardPop: (value: boolean) => void;
+  /**
+   * Phase B soft interstitial is open. GeoAdSlot pauses rotate so only one
+   * lobby creative is active at a time (tile + overlay never both impress).
+   */
+  lobbySoftOpen: boolean;
+  setLobbySoftOpen: (value: boolean) => void;
+  /** Player notification inbox popover open (soft interstitial hard gate). */
+  notificationInboxOpen: boolean;
+  setNotificationInboxOpen: (value: boolean) => void;
 };
 
 export const useShellChromeStore = create<ShellChromeState>((set, get) => ({
@@ -50,5 +59,15 @@ export const useShellChromeStore = create<ShellChromeState>((set, get) => ({
   setSuppressSmartBoardPop: (suppressSmartBoardPop) => {
     if (get().suppressSmartBoardPop === suppressSmartBoardPop) return;
     set({ suppressSmartBoardPop });
+  },
+  lobbySoftOpen: false,
+  setLobbySoftOpen: (lobbySoftOpen) => {
+    if (get().lobbySoftOpen === lobbySoftOpen) return;
+    set({ lobbySoftOpen });
+  },
+  notificationInboxOpen: false,
+  setNotificationInboxOpen: (notificationInboxOpen) => {
+    if (get().notificationInboxOpen === notificationInboxOpen) return;
+    set({ notificationInboxOpen });
   },
 }));

@@ -93,6 +93,8 @@ export type ProgressionPayload = {
     sort_order: number;
     exclusive?: boolean;
     exclusive_category?: string;
+    /** Phase C: soft-interrupt lobby inventory SKU. */
+    lobby_takeover?: boolean;
   }>;
   /** Absolute player web origin for challenge/share deep links (may be empty until set). */
   web_app_origin?: string;

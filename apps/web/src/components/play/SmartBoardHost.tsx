@@ -485,12 +485,12 @@ export function SmartBoardHost({ active, popSignal = false, className, children 
         ref={hostRef}
         className={cn(
           "relative flex min-h-0 w-full min-w-0 flex-col overscroll-none max-lg:box-border max-lg:[touch-action:none]",
-          // Inline/hug: full section width. Pop only: regular side inset (not edge-to-edge).
-          !topped && "max-lg:px-0",
+          // Minimized and maximized: same full host width (no max-only side gutters).
+          "max-lg:px-0",
           topped
             ? // Pop covers sticky header (z-50). Leave room for the play rail so
               // character fields stay tappable (compose) under the popped board.
-              "pointer-events-none fixed inset-x-0 top-0 z-[60] w-full max-w-none overflow-hidden bg-transparent pb-0 h-auto max-h-[calc(100svh-var(--dama-bottom-nav-height,0px)-var(--dama-play-rail-min,13.75rem))] pt-[env(safe-area-inset-top,0px)] max-lg:px-3"
+              "pointer-events-none fixed inset-x-0 top-0 z-[60] w-full max-w-none overflow-hidden bg-transparent pb-0 h-auto max-h-[calc(100svh-var(--dama-bottom-nav-height,0px)-var(--dama-play-rail-min,13.75rem))] pt-[env(safe-area-inset-top,0px)]"
             : live
               ? "h-auto overflow-hidden"
               : "h-full overflow-hidden",

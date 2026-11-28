@@ -218,6 +218,9 @@ function scheduleChromeComplete(chrome: AdScheduleChrome | undefined): boolean {
 export function useAdPlaybackQuery(enabled: boolean) {
   return useQuery({
     staleTime: QueryStale.platform,
+    // Flutter resume parity: pick up admin rotate/soft knobs when the tab refocuses
+    // (global query client disables focus refetch).
+    refetchOnWindowFocus: true,
     queryKey: adPlaybackQueryKey(),
     enabled,
     queryFn: async () => {

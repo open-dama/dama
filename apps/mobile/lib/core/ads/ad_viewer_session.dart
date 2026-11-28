@@ -21,7 +21,7 @@ class AdViewerSession {
     return created;
   }
 
-  /// Lives for this app process only. Shared by GeoAdSlot + InMatchAdOverlay.
+  /// Lives for this app process only. Shared by GeoAdSlot + InMatchAdOverlay + LobbySoftInterstitial.
   static Future<String> sessionKey() async {
     if (_processSessionKey != null && _processSessionKey!.isNotEmpty) {
       return _processSessionKey!;

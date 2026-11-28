@@ -86,6 +86,8 @@ export type AdPackage = {
   sort_order: number;
   exclusive?: boolean;
   exclusive_category?: string;
+  /** Phase C: soft-interrupt lobby inventory SKU. */
+  lobby_takeover?: boolean;
 };
 
 /** GraphQL `publisherDashboard` selection (codegen). */
@@ -122,6 +124,9 @@ export type ServedAd = {
   video_id_desktop?: string;
   video_id_tablet?: string;
   video_id_mobile?: string;
+  package_code?: string;
+  /** Phase C: prefer for lobby soft interstitial when package is lobby takeover. */
+  lobby_takeover?: boolean;
 };
 
 export type ViewportCreativeSlot = "desktop" | "tablet" | "mobile";
