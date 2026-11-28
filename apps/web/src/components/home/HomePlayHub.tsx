@@ -2,7 +2,9 @@
 
 import MatchmakingPage from "@/app/(player)/matchmaking/page";
 import { GeoAdSlot } from "@/components/ads/GeoAdSlot";
+import { LobbySoftInterstitial } from "@/components/ads/LobbySoftInterstitial";
 import { useOptionalSignInModal } from "@/components/auth/SignInModal";
+import { useOptionalMatchmakingRealtime } from "@/components/matchmaking/MatchmakingRealtimeProvider";
 import { HomePreviewBoard } from "@/components/home/HomePreviewBoard";
 import { PlatformStatsPage } from "@/components/home/PlatformStatsPage";
 import { BoardColorsPopover } from "@/components/play-rail/BoardColorsPopover";
@@ -39,6 +41,7 @@ import { useEventsPlayerChromeQuery } from "@/hooks/query/useEventsPlayerChromeQ
 import { useEventsPublicListQuery } from "@/hooks/query/useEventsPublicListQuery";
 import { useHomeChromeQuery } from "@/hooks/query/useHomeChromeQuery";
 import { useMatchmakingChromeQuery } from "@/hooks/query/useMatchmakingChromeQuery";
+import { useMatchmakingStatusQuery } from "@/hooks/query/useMatchmakingStatusQuery";
 import { usePlayChromeQuery } from "@/hooks/query/usePlayChromeQuery";
 import {
   isPlayRailChromeReady,
@@ -151,6 +154,8 @@ type HomePlayHubProps = {
   onEnrollTournament?: (t: Tournament) => void;
   /** Set by parent PaymentEnrollModal after paid enroll (avoids re-opening enroll on deep-link). */
   enrolledTournamentIdLatch?: string | null;
+  /** Parent PaymentEnrollModal open: block Phase B soft interstitial. */
+  enrollModalOpen?: boolean;
 };
 
 function formatClock(seconds: number): string {
@@ -296,6 +301,7 @@ export function HomePlayHub({
   blurb: heroBlurb,
   onEnrollTournament,
   enrolledTournamentIdLatch,
+  enrollModalOpen = false,
 }: HomePlayHubProps) {
   const [railTab, setRailTab] = useState<RailTab>("new");
   const immersiveChat = useShellChromeStore((s) => s.immersiveChat);
@@ -304,6 +310,8 @@ export function HomePlayHub({
   const [dmDeepLink, setDmDeepLink] = useState<{ dm?: string; thread?: string }>({});
   const [newSub, setNewSub] = useState<NewSub>("ai");
   const [challengeOpponent, setChallengeOpponent] = useState<ChallengeOpponent | null>(null);
+  /** Soft gate: opponent typeahead query non-empty (desktop, no chip yet). */
+  const [challengeOpponentSearchPending, setChallengeOpponentSearchPending] = useState(false);
   const [boardView, setBoardView] = useBoardViewMode();
   /** Idle 3D WebGL first paint - false keeps full-column host (no 52svh board-only stamp). */
   const [preview3dPainted, setPreview3dPainted] = useState(false);
@@ -402,6 +410,11 @@ export function HomePlayHub({
   // Persist verified GeoIP → users.country_code while play hub is open (OAuth may miss private IPs).
   useDetectBrowserCountryQuery(signedIn);
   const signInModal = useOptionalSignInModal();
+  const mmRealtime = useOptionalMatchmakingRealtime();
+  const mmStatusQuery = useMatchmakingStatusQuery(token);
+  const railComposeSheet = useShellChromeStore((s) => s.railComposeSheet);
+  /** Phase B soft gate while deep-link challenge accept is in flight. */
+  const [challengeAcceptBusy, setChallengeAcceptBusy] = useState(false);
 
   const aiLabel = (play?.play_computer_action || "").trim();
   const matchLabel = (play?.find_1v1_action || mm?.find_match_action || "").trim();
@@ -468,6 +481,7 @@ export function HomePlayHub({
     }
     if (challengeAcceptInFlight.has(tok)) return;
     challengeAcceptInFlight.add(tok);
+    setChallengeAcceptBusy(true);
     void (async () => {
       try {
         const { data } = await restClient.post<{
@@ -484,10 +498,14 @@ export function HomePlayHub({
           /* ignore */
         }
         if (gid) {
+          // Phase B soft latch through board nav (invite/queue match-start parity).
+          mmRealtime?.beginEnteringMatch({ gameId: gid });
           router.replace(`/?gameId=${encodeURIComponent(gid)}&mode=pvp`);
+          setChallengeAcceptBusy(false);
           return;
         }
         challengeAcceptInFlight.delete(tok);
+        setChallengeAcceptBusy(false);
         try {
           sessionStorage.removeItem(guardKey);
         } catch {
@@ -501,6 +519,7 @@ export function HomePlayHub({
         const msg = e instanceof Error ? e.message : "";
         const needsOtp = /verification required/i.test(msg);
         challengeAcceptInFlight.delete(tok);
+        setChallengeAcceptBusy(false);
         if (needsOtp) {
           // Keep ?challenge=; SessionSecurity OTP overlay; effect retries after verify.
           return;
@@ -514,6 +533,7 @@ export function HomePlayHub({
   }, [
     flagsQuery.data?.otp_required,
     hydrated,
+    mmRealtime,
     otpSessionOk,
     railChrome,
     router,
@@ -684,6 +704,12 @@ export function HomePlayHub({
   useEffect(() => {
     if (playBoardVisible || aiLive || keepPlayGameId) setPlayBoardLatched(true);
   }, [playBoardVisible, aiLive, keepPlayGameId]);
+
+  // Phase B: drop match-start soft latch once the board URL owns the surface.
+  useEffect(() => {
+    if (!playBoardVisible) return;
+    mmRealtime?.clearEnteringMatch();
+  }, [playBoardVisible, mmRealtime]);
 
   useEffect(() => {
     if (spectateVisible) setSpectateLatched(true);
@@ -891,8 +917,13 @@ export function HomePlayHub({
     publicView === "tournaments" || publicView === "events" || showMatchmakingPage;
   const embedAiActive = Boolean(aiLive && !leavePlayBrowse && !playBoardVisible);
   // Lobby owns the preview SmartBoard FAB only while it is the visible surface.
+  // Phase B soft also uses this: tournaments/events browse is not home lobby dwell.
   const lobbySurfaceVisible =
-    !playBoardVisible && !spectateVisible && !showMatchmakingPage && !embedAiActive;
+    !playBoardVisible &&
+    !spectateVisible &&
+    !showMatchmakingPage &&
+    !embedAiActive &&
+    !centerBrowse;
   // Play + Spectate: hide instead of unmount (matchmaking keep-alive parity).
   const showPlayKeepAlive = playBoardLatched && !embedAiActive;
   const boardsKeepAlive = (
@@ -1096,7 +1127,7 @@ export function HomePlayHub({
         {/* No padded wrapper / no loading skeleton - both created a ghost band under the board.
             Unmount lobby YouTube while a match is live - iframe audio steals AudioContext
             and swallows board put-down SFX (Chess.com: no competing media beside the board). */}
-        {!liveActive ? <GeoAdSlot hideUntilReady /> : null}
+        {!liveActive ? <GeoAdSlot hideUntilReady surfaceActive={lobbySurfaceVisible} /> : null}
         {/* Frozen main tabs (all breakpoints); body scrolls in PlayRailScrollPort. */}
         <div
           className={cn(playRailStickyMainClass, "grid grid-cols-3")}
@@ -1240,6 +1271,19 @@ export function HomePlayHub({
                   /* ignore */
                 }
                 setChallengeOpponent(null);
+              }}
+              onChallengeOpponentChange={(opp) => {
+                setChallengeOpponent((prev) => {
+                  const prevName = (prev?.username || "").trim();
+                  const nextName = (opp?.username || "").trim();
+                  if (prevName === nextName && (prev?.id || "").trim() === (opp?.id || "").trim()) {
+                    return prev;
+                  }
+                  return opp;
+                });
+              }}
+              onChallengeOpponentSearchPending={(pending) => {
+                setChallengeOpponentSearchPending((prev) => (prev === pending ? prev : pending));
               }}
               loginHref={loginHref}
             />
@@ -1488,11 +1532,49 @@ export function HomePlayHub({
   // Remounting on every `/?view=match` nav was the flicker vs tournaments (center swap only).
   // Embedded AI unmounts on tournaments/events/matchmaking same-render; resume boards stay latched.
   // Lobby stays mounted (hidden) under board/spectate so Play nav-back never remount-shimmers.
+  const cupLobbyOpenId = (cupLobby.selectedId || "").trim();
+  const cupLobbyEnrolled =
+    localEnrolledIds.has(cupLobbyOpenId) ||
+    tournaments.find((t) => t.id === cupLobbyOpenId)?.viewer_enrolled === true;
+
+  const notificationInboxOpen = useShellChromeStore((s) => s.notificationInboxOpen);
+  // Pending deep-link challenge (OTP wait / preflight) is match-start adjacent.
+  const challengeDeepLinkPending = Boolean((searchParams.get("challenge") || "").trim());
+  // Prefill invite chip (/?opponent= or session restore) is compose-adjacent; no soft interrupt.
+  const challengeOpponentPending = Boolean(
+    (searchParams.get("opponent") || "").trim() ||
+      (challengeOpponent?.username || "").trim() ||
+      challengeOpponentSearchPending,
+  );
+  // Phase B: soft interstitial only while home lobby is the visible surface and no
+  // critical flow is open (queue/invite/match start/enroll/compose/sign-in/inbox).
+  // Wallet/KYC live on separate player routes (hub unmounts); Flutter blocks via push wrap.
+  const softInterstitialBlocked =
+    !lobbySurfaceVisible ||
+    playBoardVisible ||
+    Boolean((gameIdParam || "").trim()) ||
+    modeParam === "pvp" ||
+    railComposeSheet ||
+    Boolean(signInModal?.open) ||
+    Boolean(immersiveChat) ||
+    cupLobby.open ||
+    enrollModalOpen ||
+    notificationInboxOpen ||
+    challengeDeepLinkPending ||
+    challengeOpponentPending ||
+    challengeAcceptBusy ||
+    mmStatusQuery.data?.queued === true ||
+    Boolean(mmRealtime?.incoming) ||
+    Boolean(mmRealtime?.outgoing) ||
+    Boolean(mmRealtime?.lastMatch) ||
+    mmRealtime?.enteringMatch === true;
+
   if (embedAiActive && aiLive) {
     return (
       <>
         {boardsKeepAlive}
         {matchKeepAlive}
+        <LobbySoftInterstitial blocked={softInterstitialBlocked} />
         <div
           className={cn("min-h-0 w-full flex-1", showMatchmakingPage && "hidden")}
           aria-hidden={showMatchmakingPage}
@@ -1512,15 +1594,11 @@ export function HomePlayHub({
     );
   }
 
-  const cupLobbyOpenId = (cupLobby.selectedId || "").trim();
-  const cupLobbyEnrolled =
-    localEnrolledIds.has(cupLobbyOpenId) ||
-    tournaments.find((t) => t.id === cupLobbyOpenId)?.viewer_enrolled === true;
-
   return (
     <>
       {boardsKeepAlive}
       {matchKeepAlive}
+      <LobbySoftInterstitial blocked={softInterstitialBlocked} />
       <div
         className={cn("min-h-0 w-full flex-1", !lobbySurfaceVisible && "hidden")}
         aria-hidden={!lobbySurfaceVisible}

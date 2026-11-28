@@ -83,6 +83,7 @@ class AdPackage {
     this.sortOrder = 0,
     this.exclusive = false,
     this.exclusiveCategory = '',
+    this.lobbyTakeover = false,
   });
 
   final String code;
@@ -97,11 +98,14 @@ class AdPackage {
   final int sortOrder;
   final bool exclusive;
   final String exclusiveCategory;
+  /// Phase C: soft-interrupt lobby inventory SKU.
+  final bool lobbyTakeover;
 
   factory AdPackage.fromJson(Map<String, dynamic> json) {
     final fixedRaw = json['fixed_cpm'];
     final feeRaw = json['flight_fee'];
     final sortRaw = json['sort_order'];
+    // Strict true only (web/admin Phase C stamp parity).
     return AdPackage(
       code: (json['code'] as String? ?? '').trim(),
       title: (json['title'] as String? ?? '').trim(),
@@ -115,6 +119,7 @@ class AdPackage {
       sortOrder: sortRaw is num ? sortRaw.toInt() : 0,
       exclusive: json['exclusive'] == true,
       exclusiveCategory: (json['exclusive_category'] as String? ?? '').trim(),
+      lobbyTakeover: json['lobby_takeover'] == true,
     );
   }
 }
@@ -155,6 +160,8 @@ class ServedAdCampaign {
     this.videoIdDesktop,
     this.videoIdTablet,
     this.videoIdMobile,
+    this.packageCode,
+    this.lobbyTakeover = false,
   });
 
   final String id;
@@ -167,6 +174,9 @@ class ServedAdCampaign {
   final String? videoIdDesktop;
   final String? videoIdTablet;
   final String? videoIdMobile;
+  final String? packageCode;
+  /// Phase C: prefer for lobby soft interstitial when package is lobby takeover.
+  final bool lobbyTakeover;
 
   factory ServedAdCampaign.fromJson(Map<String, dynamic> json) {
     return ServedAdCampaign(
@@ -180,6 +190,9 @@ class ServedAdCampaign {
       videoIdDesktop: json['video_id_desktop']?.toString(),
       videoIdTablet: json['video_id_tablet']?.toString(),
       videoIdMobile: json['video_id_mobile']?.toString(),
+      packageCode: json['package_code']?.toString(),
+      // Strict true only (web soft prefer + serve stamp parity).
+      lobbyTakeover: json['lobby_takeover'] == true,
     );
   }
 }

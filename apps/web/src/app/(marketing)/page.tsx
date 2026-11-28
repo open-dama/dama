@@ -116,6 +116,7 @@ function LandingBody() {
           eyebrow={eyebrow}
           blurb={blurb}
           enrolledTournamentIdLatch={enrolledTournamentIdLatch}
+          enrollModalOpen={Boolean(enrollTournament)}
           onEnrollTournament={(t) => void onTournamentCta(t)}
         />
       </Suspense>

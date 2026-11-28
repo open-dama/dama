@@ -16,6 +16,10 @@ export type AdPlayback = {
   lobby_rotate_interval_seconds: number;
   lobby_rotate_interval_min: number;
   lobby_rotate_interval_max: number;
+  lobby_soft_interstitial_enabled: boolean;
+  lobby_idle_threshold_seconds: number;
+  lobby_idle_threshold_min: number;
+  lobby_idle_threshold_max: number;
   freq_cap_campaign_per_hour: number;
   freq_cap_campaign_per_day: number;
   freq_cap_campaign_per_session: number;
@@ -33,6 +37,8 @@ export type AdPlaybackUpdatePayload = Pick<
   | "default_interval_seconds"
   | "lobby_rotate_enabled"
   | "lobby_rotate_interval_seconds"
+  | "lobby_soft_interstitial_enabled"
+  | "lobby_idle_threshold_seconds"
   | "freq_cap_campaign_per_hour"
   | "freq_cap_campaign_per_day"
   | "freq_cap_campaign_per_session"
@@ -188,6 +194,10 @@ export type AdRuntimeChrome = {
   lobby_rotate_section_blurb?: string;
   lobby_rotate_enabled_label?: string;
   lobby_rotate_interval_label?: string;
+  lobby_soft_section_title?: string;
+  lobby_soft_section_blurb?: string;
+  lobby_soft_enabled_label?: string;
+  lobby_idle_threshold_label?: string;
   freq_caps_section_title?: string;
   freq_caps_section_blurb?: string;
   freq_cap_campaign_hour_label?: string;
@@ -197,6 +207,8 @@ export type AdRuntimeChrome = {
   freq_cap_placement_day_label?: string;
   freq_cap_placement_session_label?: string;
   freq_cap_min_gap_label?: string;
+  package_lobby_takeover_label?: string;
+  package_lobby_takeover_blurb?: string;
 };
 
 export type ViewportCreativeSlot = "desktop" | "tablet" | "mobile";

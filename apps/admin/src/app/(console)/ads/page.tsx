@@ -799,6 +799,8 @@ export default function ConsoleAdsRuntimePage() {
   const [interval, setIntervalSec] = useState<number | null>(null);
   const [lobbyRotateOn, setLobbyRotateOn] = useState(true);
   const [lobbyRotateSec, setLobbyRotateSec] = useState<number | null>(null);
+  const [lobbySoftOn, setLobbySoftOn] = useState(false);
+  const [lobbyIdleSec, setLobbyIdleSec] = useState<number | null>(null);
   const [freqCampHour, setFreqCampHour] = useState<number | null>(null);
   const [freqCampDay, setFreqCampDay] = useState<number | null>(null);
   const [freqCampSession, setFreqCampSession] = useState<number | null>(null);
@@ -813,8 +815,11 @@ export default function ConsoleAdsRuntimePage() {
     setNonSkip(pb.non_skippable_seconds);
     setFirstShow(pb.first_show_after_game_seconds);
     setIntervalSec(pb.default_interval_seconds);
-    setLobbyRotateOn(pb.lobby_rotate_enabled !== false);
+    // Strict true only (player GeoAdSlot === true parity; seed defaults true).
+    setLobbyRotateOn(pb.lobby_rotate_enabled === true);
     setLobbyRotateSec(pb.lobby_rotate_interval_seconds ?? null);
+    setLobbySoftOn(pb.lobby_soft_interstitial_enabled === true);
+    setLobbyIdleSec(pb.lobby_idle_threshold_seconds ?? null);
     setFreqCampHour(pb.freq_cap_campaign_per_hour ?? null);
     setFreqCampDay(pb.freq_cap_campaign_per_day ?? null);
     setFreqCampSession(pb.freq_cap_campaign_per_session ?? null);
@@ -1239,6 +1244,47 @@ export default function ConsoleAdsRuntimePage() {
               </div>
               <div className="space-y-2 border-t border-[var(--dama-border)] pt-4">
                 <h3 className="text-sm font-semibold">
+                  {(chrome.lobby_soft_section_title || "").trim() || "Lobby soft interstitial"}
+                </h3>
+                <p className="text-xs text-[var(--dama-muted)]">
+                  {(chrome.lobby_soft_section_blurb || "").trim()}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={lobbySoftOn}
+                      onChange={(e) => setLobbySoftOn(e.target.checked)}
+                      disabled={savePlayback.isPending}
+                    />
+                    {(chrome.lobby_soft_enabled_label || "").trim() || "Lobby soft interstitial"}
+                  </label>
+                  <Field
+                    id="ads-lobby-idle-threshold"
+                    label={
+                      (chrome.lobby_idle_threshold_label || "").trim() ||
+                      "Lobby idle threshold (seconds)"
+                    }
+                  >
+                    <Input
+                      id="ads-lobby-idle-threshold"
+                      type="number"
+                      min={playbackQuery.data?.playback.lobby_idle_threshold_min}
+                      max={playbackQuery.data?.playback.lobby_idle_threshold_max}
+                      value={lobbyIdleSec ?? ""}
+                      onChange={(e) => {
+                        const digits = sanitizeIntegerInput(e.target.value);
+                        setLobbyIdleSec(digits === "" ? null : Number(digits));
+                      }}
+                      inputMode="numeric"
+                      placeholder={chrome.platform_default_placeholder}
+                      disabled={savePlayback.isPending || lobbyIdleSec == null}
+                    />
+                  </Field>
+                </div>
+              </div>
+              <div className="space-y-2 border-t border-[var(--dama-border)] pt-4">
+                <h3 className="text-sm font-semibold">
                   {(chrome.freq_caps_section_title || "").trim() || "Viewer frequency caps"}
                 </h3>
                 <p className="text-xs text-[var(--dama-muted)]">
@@ -1381,6 +1427,7 @@ export default function ConsoleAdsRuntimePage() {
                   firstShow == null ||
                   interval == null ||
                   lobbyRotateSec == null ||
+                  lobbyIdleSec == null ||
                   freqCampHour == null ||
                   freqCampDay == null ||
                   freqCampSession == null ||
@@ -1395,6 +1442,7 @@ export default function ConsoleAdsRuntimePage() {
                     firstShow == null ||
                     interval == null ||
                     lobbyRotateSec == null ||
+                    lobbyIdleSec == null ||
                     freqCampHour == null ||
                     freqCampDay == null ||
                     freqCampSession == null ||
@@ -1411,6 +1459,8 @@ export default function ConsoleAdsRuntimePage() {
                     default_interval_seconds: interval,
                     lobby_rotate_enabled: lobbyRotateOn,
                     lobby_rotate_interval_seconds: lobbyRotateSec,
+                    lobby_soft_interstitial_enabled: lobbySoftOn,
+                    lobby_idle_threshold_seconds: lobbyIdleSec,
                     freq_cap_campaign_per_hour: freqCampHour,
                     freq_cap_campaign_per_day: freqCampDay,
                     freq_cap_campaign_per_session: freqCampSession,

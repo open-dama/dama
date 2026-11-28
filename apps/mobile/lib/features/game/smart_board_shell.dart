@@ -417,16 +417,14 @@ class _SmartBoardShellState extends State<SmartBoardShell>
 
   Widget _boardColumn({required bool expanded}) {
     // No in-tree FAB - portaled below board so it cannot be cropped or cover clocks.
-    // Inline: full section width. Pop only: regular side inset (web max-lg:px-3 parity).
+    // Minimized and maximized: same full host width (web max-lg:px-0 parity).
     // Always keep Padding in the tree - flipping Padding on/off remounts the board
     // mid pick→put and aborts ply land sync (flicker / freeze).
     final column = _scoped(widget.child, expanded: expanded);
     return KeyedSubtree(
       key: _boardKey,
       child: Padding(
-        padding: expanded
-            ? const EdgeInsets.symmetric(horizontal: 12)
-            : EdgeInsets.zero,
+        padding: EdgeInsets.zero,
         child: column,
       ),
     );

@@ -71,7 +71,8 @@ Future<DeviceLocateResult?> postGeoLocate({
   final loc = decoded['location'];
   if (loc is! Map<String, dynamic>) return null;
   final cc = (loc['country_code'] ?? '').toString().trim().toUpperCase();
-  if (cc.isEmpty) return null;
+  // Web country|lat parity: keep GPS when locate returns empty country_code.
+  if (cc.isEmpty && (latitude == null || longitude == null)) return null;
   final region = (loc['region'] ?? '').toString().trim();
   final city = (loc['city'] ?? '').toString().trim();
   return DeviceLocateResult(

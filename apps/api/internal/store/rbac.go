@@ -188,7 +188,7 @@ func (s *SettingsStore) UpsertClientEnumsRBAC(ctx context.Context, roles, consol
 		UPDATE platform_settings
 		SET value = value || $1::jsonb, updated_at = NOW()
 		WHERE key = 'client_enums'
-	`, patch)
+	`, string(patch))
 	if err != nil {
 		return err
 	}

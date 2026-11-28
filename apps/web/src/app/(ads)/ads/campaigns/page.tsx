@@ -1153,7 +1153,25 @@ export default function AdsCampaignsPage() {
                                     (pageChrome.package_exclusive_blurb || "").trim()
                                       ? (pageChrome.package_exclusive_blurb || "").trim()
                                       : "";
-                                  if (!blurb && !exclusiveLabel && !exclusiveNote) return null;
+                                  const takeoverLabel =
+                                    picked.lobby_takeover === true &&
+                                    (pageChrome.package_lobby_takeover_label || "").trim()
+                                      ? (pageChrome.package_lobby_takeover_label || "").trim()
+                                      : "";
+                                  const takeoverNote =
+                                    picked.lobby_takeover === true &&
+                                    (pageChrome.package_lobby_takeover_blurb || "").trim()
+                                      ? (pageChrome.package_lobby_takeover_blurb || "").trim()
+                                      : "";
+                                  if (
+                                    !blurb &&
+                                    !exclusiveLabel &&
+                                    !exclusiveNote &&
+                                    !takeoverLabel &&
+                                    !takeoverNote
+                                  ) {
+                                    return null;
+                                  }
                                   return (
                                     <div className="mt-2 space-y-1 text-xs text-[var(--dama-muted)]">
                                       {blurb ? <p>{blurb}</p> : null}
@@ -1163,6 +1181,12 @@ export default function AdsCampaignsPage() {
                                         </p>
                                       ) : null}
                                       {exclusiveNote ? <p>{exclusiveNote}</p> : null}
+                                      {takeoverLabel ? (
+                                        <p className="font-medium text-[var(--dama-text)]">
+                                          {takeoverLabel}
+                                        </p>
+                                      ) : null}
+                                      {takeoverNote ? <p>{takeoverNote}</p> : null}
                                     </div>
                                   );
                                 })()

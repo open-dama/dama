@@ -171,10 +171,22 @@ Each card answers: What is it? Why do we need it? Advantage? How is it different
 - **What:** While someone stays on the home lobby, the single lobby ad tile can refresh every N seconds (admin setting, separate from in-match interval). Pauses when the tab/app is not visible.
 - **Why:** Long lobby dwell can show more than one brand over time without stacking ads.
 - **Advantage:** More inventory; still one tile; soft format (not full-screen interrupt).
-- **Different from:** In-match breaks (match clock). Different from Playit-style mid-navigation overlays (later premium phase, not default).
+- **Different from:** In-match breaks (match clock). Different from soft interstitial (Phase B) and lobby takeover packages (Phase C).
+
+### Lobby soft interstitial
+- **What:** Optional full-screen lobby ad after the player lingers idle on home (admin opt-in; default off; separate idle seconds from in-match). Never during compose, invite, opponent chip or typeahead query, pending deep-link challenge, match start (including sync latch before UI blocked rebuilds), notification inbox, web immersive DM panel (Flutter DM sheet is ModalRoute-gated), or wallet/KYC enroll. Soft / rotate / `lobby_takeover` prefer flags are strict boolean true only. Explicit `viewer_key` + `session_key` required on serve / impress / eligibility (header-only device id is not enough). Web and Flutter re-serve immediately before open so a creative the lobby tile just showed is not opened from a stale cache. Soft waits for geo then hides and pauses the lobby tile (one creative); soft fetch is fully out-of-band so enabling soft or a failed attempt does not leave the tile unpaid. Soft waits for viewer + session keys and geo before arming open. Empty, failed, or pre-open soft exits re-arm dwell while the player is still idle and visible (no background idle-timer loop).
+- **Why:** Higher CPM only when dwell is real; protects play conversion.
+- **Advantage:** Soft interrupt inventory without Playit-style spam as the default.
+- **Different from:** Lobby tile rotation (always-on soft tile). Different from in-match breaks.
+
+### Lobby takeover package
+- **What:** Reservation package flag for exclusive lobby soft-interrupt inventory (seeded `lobby_takeover`; clients prefer these creatives for soft interstitial). Catalog validation requires placement lobby, exclusive on, and reservation buying type (empty buying_type fails). Admin Progression UI coerces takeover rows before PUT; API ValidateAdPackageRates rejects bad shape.
+- **Why:** Brand certainty for finals weekends and premium events, not fill-rate chasing.
+- **Advantage:** Fits marketplace Reservation + exclusive story with a higher floor.
+- **Different from:** Normal lobby package (tile inventory). Different from in-match packages.
 
 ### Viewer frequency caps
-- **What:** Limits how often one viewer sees the same campaign or placement (hour/day/session) plus a min gap between any two shows. Applies across lobby and in-match. Session caps use `session_key` stored on each impression event (one shared session key per browser tab on web, one shared process key on Flutter for lobby + in-match). Serve and eligibility rank with these caps; impression re-checks when keys are present so a direct impress cannot write past the limit.
+- **What:** Limits how often one viewer sees the same campaign or placement (hour/day/session) plus a min gap between any two shows. Applies across lobby and in-match. Session caps use `session_key` stored on each impression event (one shared session key per browser tab on web, one shared process key on Flutter for lobby tile + soft interstitial + in-match). Serve and eligibility rank with these caps. Lobby serve returns empty campaigns without both keys. Eligibility returns `show=false` / `viewer_keys_required` without both keys. Impression always requires viewer_key + session_key (web mutation requires sessionKey too) and re-checks freq so a direct impress cannot write past the limit. Unknown package codes fail closed on serve and impress.
 - **Why:** Stops one Auction winner from feeling spammy on every surface, including within one browse session.
 - **Advantage:** Professional multi-placement hygiene. Zero on a cap disables that rule.
 - **Different from:** Campaign period impression caps (campaign totals, not per-viewer).

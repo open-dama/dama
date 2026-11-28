@@ -301,8 +301,38 @@ if ($useRemoteRedis) {
 }
 Invoke-RedisCli @('DEL', 'dama:adgeo:GLOBAL', 'dama:adgeo:US', 'dama:adgeo:ET') | Out-Null
 $null = Invoke-RestMethod -Method Patch -Uri "$base/api/v1/ads/campaigns/$($camp.id)/status" -Headers $h -ContentType 'application/json' -Body '{"status":"active"}'
-$serveUS = Invoke-RestMethod "$base/api/v1/ads/serve?country=US"
-$serveET = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET"
+# Phase A ship-gate: ranked serve requires viewer_key + session_key.
+$smokeServeViewer = "e2e_smoke_serve_$u"
+$smokeServeSess = "e2e_smoke_serve_sess_$u"
+$serveKeys = "viewer_key=$smokeServeViewer&session_key=$smokeServeSess"
+$serveNoKeys = Invoke-RestMethod "$base/api/v1/ads/serve?country=US"
+$serveHeaderOnly = Invoke-RestMethod -Headers @{ "X-Device-Id" = "e2e_smoke_header_only_$u" } "$base/api/v1/ads/serve?country=US"
+$serveNoKeyCount = @($serveNoKeys.campaigns).Count
+$headerOnlyCount = @($serveHeaderOnly.campaigns).Count
+Add-Result 'ads_serve_keys_required' ($serveNoKeyCount -eq 0 -and $headerOnlyCount -eq 0) "no_keys=$serveNoKeyCount header_only=$headerOnlyCount"
+# Phase A/B public playback knobs + Phase C takeover seed (rbac-ads remains the deep gate).
+$pbLobby = Invoke-RestMethod "$base/api/v1/ads/playback"
+$lobbyKnobsOk = (
+  $null -ne $pbLobby.lobby_rotate_enabled -and
+  $null -ne $pbLobby.lobby_soft_interstitial_enabled -and
+  [int]$pbLobby.lobby_rotate_interval_seconds -ge 1 -and
+  [int]$pbLobby.lobby_idle_threshold_seconds -ge 1 -and
+  $null -ne $pbLobby.freq_cap_campaign_per_session -and
+  $null -ne $pbLobby.freq_cap_placement_per_session -and
+  $null -ne $pbLobby.freq_cap_min_gap_seconds
+)
+Add-Result 'ads_lobby_playback_knobs' $lobbyKnobsOk "rotate=$($pbLobby.lobby_rotate_enabled) soft=$($pbLobby.lobby_soft_interstitial_enabled) rot_sec=$($pbLobby.lobby_rotate_interval_seconds)"
+$eligNoKeys = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/in-match/eligibility" -ContentType 'application/json' -Body (@{
+    game_elapsed_seconds = 20
+    seconds_since_last_ad = 999
+    country = 'US'
+  } | ConvertTo-Json)
+Add-Result 'ads_elig_keys_required' (
+  $eligNoKeys.show -ne $true -and
+  [string]$eligNoKeys.reason -eq 'viewer_keys_required'
+) "reason=$($eligNoKeys.reason)"
+$serveUS = Invoke-RestMethod "$base/api/v1/ads/serve?country=US&$serveKeys"
+$serveET = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET&$serveKeys"
 $usHit = @($serveUS.campaigns) | Where-Object { $_.id -eq $camp.id }
 $etHit = @($serveET.campaigns) | Where-Object { $_.id -eq $camp.id }
 Add-Result 'ads_geo_redis' ($null -ne $usHit -and $null -eq $etHit) "us=$($null -ne $usHit) et_miss=$($null -eq $etHit)"
@@ -314,8 +344,8 @@ $pinCamp = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns" -Hea
     creative_type = 'image'
   } | ConvertTo-Json -Depth 5)
 $null = Invoke-RestMethod -Method Patch -Uri "$base/api/v1/ads/campaigns/$($pinCamp.id)/status" -Headers $h -ContentType 'application/json' -Body '{"status":"active"}'
-$pinServeET = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET"
-$pinServeUS = Invoke-RestMethod "$base/api/v1/ads/serve?country=US"
+$pinServeET = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET&$serveKeys"
+$pinServeUS = Invoke-RestMethod "$base/api/v1/ads/serve?country=US&$serveKeys"
 $pinEtHit = @($pinServeET.campaigns) | Where-Object { $_.id -eq $pinCamp.id }
 $pinUsHit = @($pinServeUS.campaigns) | Where-Object { $_.id -eq $pinCamp.id }
 Add-Result 'ads_geo_pin_country' ($null -ne $pinEtHit -and $null -eq $pinUsHit) "et=$($null -ne $pinEtHit) us_miss=$($null -eq $pinUsHit)"
@@ -328,15 +358,15 @@ $distCamp = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns" -He
   } | ConvertTo-Json -Depth 5)
 Invoke-RedisCli @('DEL', 'dama:adgeo:ET:addis ababa:bole', 'dama:adgeo:ET:addis ababa', 'dama:adgeo:ET') | Out-Null
 $null = Invoke-RestMethod -Method Patch -Uri "$base/api/v1/ads/campaigns/$($distCamp.id)/status" -Headers $h -ContentType 'application/json' -Body '{"status":"active"}'
-$distHit = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET&region=addis%20ababa&district=bole"
-$distMiss = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET&region=addis%20ababa&district=kirkos"
+$distHit = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET&region=addis%20ababa&district=bole&$serveKeys"
+$distMiss = Invoke-RestMethod "$base/api/v1/ads/serve?country=ET&region=addis%20ababa&district=kirkos&$serveKeys"
 $distOk = @($distHit.campaigns) | Where-Object { $_.id -eq $distCamp.id }
 $distNo = @($distMiss.campaigns) | Where-Object { $_.id -eq $distCamp.id }
 Add-Result 'ads_geo_district' ($null -ne $distOk -and $null -eq $distNo) "hit=$($null -ne $distOk) miss=$($null -eq $distNo)"
 
 # Campaign lifecycle: archive removes from serve; invalid status rejected.
 $arch = Invoke-RestMethod -Method Patch -Uri "$base/api/v1/ads/campaigns/$($camp.id)/status" -Headers $h -ContentType 'application/json' -Body '{"status":"archived"}'
-$serveArch = Invoke-RestMethod "$base/api/v1/ads/serve?country=US"
+$serveArch = Invoke-RestMethod "$base/api/v1/ads/serve?country=US&$serveKeys"
 $archHit = @($serveArch.campaigns) | Where-Object { $_.id -eq $camp.id }
 $badStatus = $false
 try {
@@ -358,8 +388,17 @@ if (-not $campId) {
   $pbSmoke = Invoke-RestMethod "$base/api/v1/ads/playback"
   $placeLobby = [string]$pbSmoke.player_chrome.placement_lobby
   if (-not $placeLobby) { throw "placement_lobby missing from ads/playback player_chrome" }
+  $impNoSessDenied = $false
+  try {
+    Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ viewer_key = "e2e_smoke_nosess_$u"; placement = $placeLobby } | ConvertTo-Json) | Out-Null
+  } catch {
+    $impNoSessDenied = $true
+  }
+  Add-Result 'ads_impress_session_required' $impNoSessDenied 'session_key required'
   $impBefore = [int]((docker exec dama_postgres psql -U dama -d dama -tAc "SELECT impressions FROM ad_campaigns WHERE id='$campId'").ToString().Trim())
-  $impRes = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ placement = $placeLobby } | ConvertTo-Json)
+  $smokeViewer = "e2e_smoke_viewer_$u"
+  $smokeSess = "e2e_smoke_sess_$u"
+  $impRes = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ viewer_key = $smokeViewer; session_key = $smokeSess; placement = $placeLobby } | ConvertTo-Json)
   $clkRes = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/click" -ContentType 'application/json' -Body '{}'
   $impAfter = [int]((docker exec dama_postgres psql -U dama -d dama -tAc "SELECT impressions||':'||clicks FROM ad_campaigns WHERE id='$campId'").ToString().Trim().Split(':')[0])
   $clkAfter = [int]((docker exec dama_postgres psql -U dama -d dama -tAc "SELECT clicks FROM ad_campaigns WHERE id='$campId'").ToString().Trim())
@@ -371,8 +410,9 @@ if (-not $campId) {
   ) "imp=$impBefore->$impAfter clk=$clkAfter"
 
   $vk = "e2e_viewer_$u"
-  $null = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ viewer_key = $vk; placement = $placeLobby } | ConvertTo-Json)
-  $null = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ viewer_key = $vk; placement = $placeLobby } | ConvertTo-Json)
+  $sk = "e2e_sess_reach_$u"
+  $null = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ viewer_key = $vk; session_key = $sk; placement = $placeLobby } | ConvertTo-Json)
+  $null = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ads/campaigns/$campId/impression" -ContentType 'application/json' -Body (@{ viewer_key = $vk; session_key = $sk; placement = $placeLobby } | ConvertTo-Json)
   $reach = [int]((docker exec dama_postgres psql -U dama -d dama -tAc "SELECT unique_reach FROM ad_campaigns WHERE id='$campId'").ToString().Trim())
   Add-Result 'ads_unique_reach' ($reach -ge 1) "unique_reach=$reach"
   $vcBefore = [int]((docker exec dama_postgres psql -U dama -d dama -tAc "SELECT COALESCE(video_completions,0) FROM ad_campaigns WHERE id='$campId'").ToString().Trim())
@@ -454,6 +494,14 @@ $adminLogin = New-E2ESession -Username $u -Email "$u@t.test" -Role 'admin'
 $adminToken = $adminLogin.access_token; if (-not $adminToken) { $adminToken = $adminLogin.accessToken }
 $ah = @{ Authorization = "Bearer $adminToken" }
 Add-Result 'admin_role' ($adminLogin.user.role -eq 'admin') "role=$($adminLogin.user.role)"
+# Phase C: console progression exposes seeded lobby_takeover (public progression omits packages).
+$consoleProgTake = Invoke-RestMethod -Method Get -Uri "$base/api/v1/console/progression" -Headers $ah
+$takeSmoke = @($consoleProgTake.ad_packages) | Where-Object { ([string]$_.code).ToLower() -eq 'lobby_takeover' } | Select-Object -First 1
+Add-Result 'ads_lobby_takeover_seeded' (
+  $null -ne $takeSmoke -and
+  $takeSmoke.lobby_takeover -eq $true -and
+  [string]$takeSmoke.placement -eq 'lobby'
+) "code=$($takeSmoke.code) placement=$($takeSmoke.placement)"
 $consoleNav = Invoke-RestMethod -Uri "$base/api/v1/console/nav" -Headers $ah
 Add-Result 'console_nav_db' (
   $consoleNav.modules.Count -gt 0 -and

@@ -140,6 +140,8 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
         self: _self,
       ),
     );
+    // Phase B: share queue state with keep-alive Home soft interstitial gate.
+    MatchmakingRealtimeScope.maybeOf(context)?.setViewerQueued(queued);
   }
 
   Future<void> refresh({bool showSkeleton = false}) async {
@@ -167,6 +169,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
           _statusReady = true;
           _statusLoading = false;
         });
+        MatchmakingRealtimeScope.maybeOf(context)?.setViewerQueued(queued);
         _persistStatus();
         return;
       }
@@ -190,7 +193,9 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
           mode: 'pvp',
         ),
       ),
-    );
+    ).whenComplete(() {
+      MatchmakingRealtimeScope.maybeOf(context)?.clearEnteringMatch();
+    });
   }
 
   Future<void> _connectQueueWs() async {
@@ -615,10 +620,17 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
       final match = json['match'];
       if (match is Map && match['game_id'] is String) {
         // Silent into board/VS intro (game-start.mp3 sounded like piece-put).
+        final p1 = match['player1_id']?.toString();
+        final p2 = match['player2_id']?.toString();
         setState(() {
-          _matchedP1 = match['player1_id']?.toString();
-          _matchedP2 = match['player2_id']?.toString();
+          _matchedP1 = p1;
+          _matchedP2 = p2;
         });
+        // Phase B: latch home soft via realtime (WS match_found parity).
+        MatchmakingRealtimeScope.maybeOf(context)?.latchEnteringMatch(
+          player1Id: p1,
+          player2Id: p2,
+        );
         await Future<void>.delayed(const Duration(milliseconds: 900));
         _openMatch(match['game_id'] as String);
         return;
@@ -627,6 +639,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
         queued = json['queued'] == true;
         queueSize = (json['queue_size'] as num?)?.toInt() ?? queueSize;
       });
+      MatchmakingRealtimeScope.maybeOf(context)?.setViewerQueued(queued);
       _persistStatus();
     } catch (e) {
       setState(() => error = _chrome?.toastJoinFailed);
@@ -649,6 +662,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
         headers: _auth,
       );
       setState(() => queued = false);
+      MatchmakingRealtimeScope.maybeOf(context)?.setViewerQueued(false);
       if (res.statusCode == 200) {
         final json = jsonDecode(res.body) as Map<String, dynamic>;
         queueSize = (json['queue_size'] as num?)?.toInt() ?? queueSize;
@@ -722,6 +736,7 @@ class _MatchmakingPageState extends State<MatchmakingPage> {
     unawaited(refresh(showSkeleton: !_statusReady));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      MatchmakingRealtimeScope.maybeOf(context)?.setViewerQueued(queued);
       unawaited(_connectQueueWs());
     });
   }

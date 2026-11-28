@@ -886,6 +886,8 @@ const SECTION_KEYS: Record<
     "package_exclusive_label",
     "package_exclusive_category_label",
     "package_exclusive_blurb",
+    "package_lobby_takeover_label",
+    "package_lobby_takeover_blurb",
     "tier_code_label",
     "tier_label_label",
     "tier_monthly_spend_min_label",

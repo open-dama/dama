@@ -50,6 +50,8 @@ type AdPackage struct {
 	// Exclusive: at most one campaign in ExclusiveCategory wins a serve slot (sponsorship).
 	Exclusive         bool   `json:"exclusive"`
 	ExclusiveCategory string `json:"exclusive_category,omitempty"`
+	// LobbyTakeover: Phase C soft-interrupt lobby inventory (clients prefer these for idle interstitial).
+	LobbyTakeover bool `json:"lobby_takeover"`
 }
 
 const (
@@ -391,6 +393,12 @@ func SanitizePackageBuyingTypes(pkgs []AdPackage, marketplaceEnabled bool) []AdP
 	}
 	out := append([]AdPackage{}, pkgs...)
 	for i := range out {
+		// Phase C: never invent a buying_type for lobby_takeover. Empty/legacy must
+		// reach ValidateAdPackageRates so premium SKUs fail closed (explicit reservation).
+		// Match ParseAdPackages: also key off code when the flag is missing on PUT.
+		if out[i].LobbyTakeover || strings.EqualFold(strings.TrimSpace(out[i].Code), "lobby_takeover") {
+			continue
+		}
 		bt := strings.TrimSpace(out[i].BuyingType)
 		if bt == "" || bt == BuyingTypeLegacy {
 			out[i].BuyingType = BuyingTypeReservation
@@ -401,15 +409,28 @@ func SanitizePackageBuyingTypes(pkgs []AdPackage, marketplaceEnabled bool) []AdP
 
 // ValidateAdPackageRates rejects catalog rates that cannot clear create-time floor checks.
 func ValidateAdPackageRates(pkgs []AdPackage, marketplaceEnabled bool) error {
-	if !marketplaceEnabled {
-		return nil
-	}
 	for _, p := range pkgs {
-		if !p.Enabled {
+		code := strings.TrimSpace(p.Code)
+		// Phase C: takeover is premium lobby soft inventory (exclusive reservation shape).
+		// Match Parse/Sanitize: flag OR code (flag may be cleared while code stays).
+		if p.LobbyTakeover || strings.EqualFold(code, "lobby_takeover") {
+			place := strings.ToLower(strings.TrimSpace(p.Placement))
+			if place != "lobby" {
+				return fmt.Errorf("package %s lobby_takeover requires placement lobby", code)
+			}
+			if !p.Exclusive {
+				return fmt.Errorf("package %s lobby_takeover requires exclusive", code)
+			}
+			bt := strings.ToLower(strings.TrimSpace(p.BuyingType))
+			if bt != BuyingTypeReservation {
+				return fmt.Errorf("package %s lobby_takeover requires reservation buying_type", code)
+			}
+		}
+		if !marketplaceEnabled || !p.Enabled {
 			continue
 		}
 		if p.FixedCPM <= 0 {
-			return fmt.Errorf("package %s needs a fixed rate above zero", strings.TrimSpace(p.Code))
+			return fmt.Errorf("package %s needs a fixed rate above zero", code)
 		}
 	}
 	return nil
@@ -432,7 +453,9 @@ func ParseAdPackages(raw []byte) ([]AdPackage, error) {
 		if p.Code == "" || p.Title == "" {
 			continue
 		}
-		if p.BuyingType == "" {
+		// Phase C: do not invent buying_type for lobby_takeover on read.
+		// Empty must stay empty so ValidateAdPackageRates / writers fail closed.
+		if p.BuyingType == "" && !p.LobbyTakeover && !strings.EqualFold(p.Code, "lobby_takeover") {
 			p.BuyingType = BuyingTypeReservation
 		}
 		out = append(out, p)
@@ -480,7 +503,9 @@ func PackageFitsPlacement(pkgPlacement, servePlacement string) bool {
 }
 
 // CampaignFitsServePlacement gates package-bound campaigns to their catalog placement.
-// Unknown/stale package codes fail open so legacy campaigns keep delivering.
+// Unknown/deleted package codes fail closed so a removed lobby_takeover row cannot
+// bill as in_match. Empty package_code stays open (unbundled campaigns).
+// Known packages (including disabled) still enforce placement.
 func CampaignFitsServePlacement(c *AdCampaign, packages []AdPackage, servePlacement string) bool {
 	if c == nil {
 		return false
@@ -490,8 +515,8 @@ func CampaignFitsServePlacement(c *AdCampaign, packages []AdPackage, servePlacem
 		return true
 	}
 	pkg, ok := PackageByCode(packages, code)
-	if !ok || !pkg.Enabled {
-		return true
+	if !ok {
+		return false
 	}
 	return PackageFitsPlacement(pkg.Placement, servePlacement)
 }

@@ -38,27 +38,29 @@ export function useServeAdsQuery(
   const sessionKey = (opts.sessionKey ?? "").trim();
   const refetchIntervalMs = opts.refetchIntervalMs;
   const ready = Boolean(geo && (geo.country || geo.lat != null));
+  // Ship-gate: never fetch lobby serve without both keys (API returns empty anyway;
+  // keep the hook fail-closed so callers cannot omit GeoAdSlot-style gating).
+  const keysReady = Boolean(viewerKey) && Boolean(sessionKey);
   return useQuery({
     /** Ad rotation / serve payloads should refetch on remount after impressions. */
     staleTime: QueryStale.live,
     queryKey: serveAdsQueryKey(geo, viewerKey, sessionKey),
-    enabled: enabled && ready,
+    enabled: enabled && ready && keysReady,
     refetchInterval:
       typeof refetchIntervalMs === "number" && refetchIntervalMs > 0 ? refetchIntervalMs : false,
     refetchIntervalInBackground: false,
     queryFn: async (): Promise<ServedAd[]> => {
-      if (!geo) return [];
+      if (!geo || !viewerKey || !sessionKey) return [];
       const params = new URLSearchParams();
       // Lat/lng optional for GPS reverse + radius; country query ignored by API.
       if (geo.lat != null) params.set("lat", String(geo.lat));
       if (geo.lng != null) params.set("lng", String(geo.lng));
-      if (viewerKey) params.set("viewer_key", viewerKey);
-      if (sessionKey) params.set("session_key", sessionKey);
+      params.set("viewer_key", viewerKey);
+      params.set("session_key", sessionKey);
       const qs = params.toString();
-      const { data } = await restClient.get<{ campaigns: ServedAd[] }>(
-        qs ? `/ads/serve?${qs}` : "/ads/serve",
-        viewerKey ? { headers: { "X-Device-Id": viewerKey } } : undefined,
-      );
+      const { data } = await restClient.get<{ campaigns: ServedAd[] }>(`/ads/serve?${qs}`, {
+        headers: { "X-Device-Id": viewerKey },
+      });
       return data.campaigns ?? [];
     },
   });

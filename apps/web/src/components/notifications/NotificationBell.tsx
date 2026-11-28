@@ -16,6 +16,7 @@ import { useInfinitePanelScroll } from "@/hooks/useInfinitePanelScroll";
 import { useNotificationHrefNavigate } from "@/hooks/useNotificationHrefNavigate";
 import { formatNotificationWhen } from "@/lib/format-notification-when";
 import { cn } from "@/lib/utils";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import type { NotificationItem } from "@/types/notifications";
 import { Bell } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,8 +33,18 @@ function bellAriaWithCount(aria: string, count: number, fmt: string | undefined)
 
 export function NotificationBell({ accessToken }: { accessToken?: string | null }) {
   const [open, setOpen] = useState(false);
+  const setNotificationInboxOpen = useShellChromeStore((s) => s.setNotificationInboxOpen);
   const navigateHref = useNotificationHrefNavigate();
   const unread = useNotificationsUnread(accessToken);
+
+  useEffect(() => {
+    setNotificationInboxOpen(open);
+  }, [open, setNotificationInboxOpen]);
+  useEffect(() => {
+    return () => {
+      setNotificationInboxOpen(false);
+    };
+  }, [setNotificationInboxOpen]);
   const resolvedPageSize =
     unread.data?.chrome?.list_page_size && unread.data.chrome.list_page_size > 0
       ? unread.data.chrome.list_page_size

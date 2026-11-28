@@ -1422,6 +1422,7 @@ func (a *PaymentsAPI) AdminConsoleChrome(w http.ResponseWriter, r *http.Request)
 			"package_fixed_cpm_label", "package_flight_fee_label", "package_min_tier_label",
 			"package_placement_label", "package_enabled_label",
 			"package_exclusive_label", "package_exclusive_category_label", "package_exclusive_blurb",
+			"package_lobby_takeover_label", "package_lobby_takeover_blurb",
 			"tier_code_label", "tier_label_label", "tier_monthly_spend_min_label",
 			"tier_create_fee_multiplier_label", "tier_media_daily_min_label",
 			"tier_unlock_reservation_label", "tier_unlock_packages_label",

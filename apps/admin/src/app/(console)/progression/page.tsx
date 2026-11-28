@@ -120,6 +120,7 @@ function emptyAdPackage(sortOrder: number): PackageEditorRow {
     sort_order: sortOrder,
     exclusive: false,
     exclusive_category: "",
+    lobby_takeover: false,
   };
 }
 
@@ -370,21 +371,28 @@ export default function ConsoleProgressionPage() {
     );
     setAdPackages(
       Array.isArray(data.ad_packages)
-        ? data.ad_packages.map((p, i) => ({
-            rowKey: newEditorRowKey(),
-            code: p.code || "",
-            title: p.title || "",
-            blurb: p.blurb || "",
-            buying_type: (p.buying_type || "auction").trim(),
-            fixed_cpm: p.fixed_cpm ?? 0,
-            flight_fee: p.flight_fee ?? 0,
-            min_tier: p.min_tier || "",
-            placement: p.placement || "",
-            enabled: p.enabled !== false,
-            sort_order: typeof p.sort_order === "number" ? p.sort_order : i,
-            exclusive: p.exclusive === true,
-            exclusive_category: p.exclusive_category || "",
-          }))
+        ? data.ad_packages.map((p, i) => {
+            const code = (p.code || "").trim();
+            const takeover = p.lobby_takeover === true || code.toLowerCase() === "lobby_takeover";
+            // Phase C: do not invent buying_type for takeover SKUs on hydrate.
+            const buyRaw = (p.buying_type || "").trim();
+            return {
+              rowKey: newEditorRowKey(),
+              code,
+              title: p.title || "",
+              blurb: p.blurb || "",
+              buying_type: takeover ? buyRaw : buyRaw || "auction",
+              fixed_cpm: p.fixed_cpm ?? 0,
+              flight_fee: p.flight_fee ?? 0,
+              min_tier: p.min_tier || "",
+              placement: p.placement || "",
+              enabled: p.enabled !== false,
+              sort_order: typeof p.sort_order === "number" ? p.sort_order : i,
+              exclusive: p.exclusive === true,
+              exclusive_category: p.exclusive_category || "",
+              lobby_takeover: p.lobby_takeover === true,
+            };
+          })
         : [],
     );
     setMarketplaceHydrated(true);
@@ -408,6 +416,10 @@ export default function ConsoleProgressionPage() {
     setAdPackages((prev) => {
       let changed = false;
       const next = prev.map((p) => {
+        const code = (p.code || "").trim().toLowerCase();
+        const takeover = p.lobby_takeover === true || code === "lobby_takeover";
+        // Phase C: never invent buying_type for takeover (flag or code).
+        if (takeover) return p;
         const buy = (p.buying_type || "").trim();
         if (buy === "legacy" || !buy) {
           changed = true;
@@ -2168,6 +2180,44 @@ export default function ConsoleProgressionPage() {
                                       />
                                     </Field>
                                     <Field
+                                      id={`pkg-lobby-takeover-${index}`}
+                                      label={(chrome.package_lobby_takeover_label || "").trim()}
+                                      description={
+                                        (chrome.package_lobby_takeover_blurb || "").trim() ||
+                                        undefined
+                                      }
+                                    >
+                                      <div className="flex min-h-10 items-center gap-2 pt-1">
+                                        <Checkbox
+                                          id={`pkg-lobby-takeover-${index}`}
+                                          checked={pkg.lobby_takeover === true}
+                                          onCheckedChange={(v) =>
+                                            setAdPackages((prev) =>
+                                              prev.map((row, i) => {
+                                                if (i !== index) return row;
+                                                if (v !== true) {
+                                                  return { ...row, lobby_takeover: false };
+                                                }
+                                                // Phase C shape: lobby + exclusive reservation.
+                                                return {
+                                                  ...row,
+                                                  lobby_takeover: true,
+                                                  placement: "lobby",
+                                                  exclusive: true,
+                                                  exclusive_category:
+                                                    (row.exclusive_category || "").trim() ||
+                                                    (row.code || "").trim() ||
+                                                    "lobby_takeover",
+                                                  buying_type: "reservation",
+                                                };
+                                              }),
+                                            )
+                                          }
+                                          disabled={!isAdmin || save.isPending}
+                                        />
+                                      </div>
+                                    </Field>
+                                    <Field
                                       id={`pkg-enabled-${index}`}
                                       label={(chrome.package_enabled_label || "").trim()}
                                     >
@@ -2368,23 +2418,41 @@ export default function ConsoleProgressionPage() {
                           list_cpm_multiplier: t.list_cpm_multiplier,
                         }));
                         const packagesOut = adPackages.map((p, i) => {
-                          let buy = (p.buying_type || defaultBuyingType || "auction").trim();
-                          if (marketplaceEnabled === true && (buy === "legacy" || !buy)) {
+                          const code = p.code.trim().toLowerCase();
+                          // Phase C: flag OR seeded code (API Validate matches this).
+                          const takeover = p.lobby_takeover === true || code === "lobby_takeover";
+                          let buy = (p.buying_type || "").trim();
+                          if (!takeover) {
+                            buy = (buy || defaultBuyingType || "auction").trim();
+                            if (marketplaceEnabled === true && (buy === "legacy" || !buy)) {
+                              buy = "reservation";
+                            }
+                          }
+                          // Phase C: save-time coerce for takeover SKUs (flag or code).
+                          if (takeover) {
                             buy = "reservation";
                           }
+                          const place = takeover
+                            ? "lobby"
+                            : (p.placement || "").trim() || undefined;
+                          const exclusive = takeover ? true : p.exclusive === true;
+                          const exclusiveCategory = takeover
+                            ? (p.exclusive_category || "").trim() || code || "lobby_takeover"
+                            : (p.exclusive_category || "").trim() || undefined;
                           return {
-                            code: p.code.trim().toLowerCase(),
+                            code,
                             title: p.title.trim(),
                             blurb: (p.blurb || "").trim() || undefined,
                             buying_type: buy,
                             fixed_cpm: p.fixed_cpm,
                             flight_fee: p.flight_fee,
                             min_tier: p.min_tier.trim(),
-                            placement: (p.placement || "").trim() || undefined,
+                            placement: place,
                             enabled: p.enabled,
                             sort_order: Number.isFinite(p.sort_order) ? p.sort_order : i,
-                            exclusive: p.exclusive === true,
-                            exclusive_category: (p.exclusive_category || "").trim() || undefined,
+                            exclusive,
+                            exclusive_category: exclusiveCategory,
+                            lobby_takeover: takeover,
                           };
                         });
                         if (marketplaceEnabled === true) {

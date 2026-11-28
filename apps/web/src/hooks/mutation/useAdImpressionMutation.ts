@@ -8,27 +8,30 @@ export function useAdImpressionMutation() {
     mutationFn: async (vars: {
       campaignId: string;
       viewerKey: string;
-      sessionKey?: string;
+      // Ship-gate: session caps require session_key on every impress (API fail-closed too).
+      sessionKey: string;
       placement: string;
       viewport?: string;
     }) => {
       if (!vars.placement.trim()) {
         throw new Error("placement required");
       }
+      const viewerKey = vars.viewerKey.trim();
+      const sessionKey = vars.sessionKey.trim();
+      if (!viewerKey || !sessionKey) {
+        throw new Error("viewer_key and session_key required");
+      }
       const body: Record<string, string> = {
-        viewer_key: vars.viewerKey,
+        viewer_key: viewerKey,
+        session_key: sessionKey,
         placement: vars.placement,
       };
-      const sessionKey = (vars.sessionKey || "").trim();
-      if (sessionKey) {
-        body.session_key = sessionKey;
-      }
       const viewport = (vars.viewport || "").trim();
       if (viewport) {
         body.viewport = viewport;
       }
       await restClient.post(`/ads/campaigns/${vars.campaignId}/impression`, body, {
-        headers: { "X-Device-Id": vars.viewerKey },
+        headers: { "X-Device-Id": viewerKey },
       });
     },
     onSuccess: () => {

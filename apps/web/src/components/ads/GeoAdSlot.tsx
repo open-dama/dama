@@ -16,21 +16,27 @@ import {
   pickCampaignCreative,
   resolveViewportSlot,
 } from "@/lib/resolve-viewport-creative";
+import { useShellChromeStore } from "@/store/shell-chrome";
 import { useEffect, useRef, useState } from "react";
 
 type GeoAdSlotProps = {
   /** When true, render nothing until a real creative is ready (no skeleton band under the board). */
   hideUntilReady?: boolean;
+  /** Phase A: only rotate while the home lobby surface is the visible surface. */
+  surfaceActive?: boolean;
 };
 
 /** Player-facing geo ad slot: serves from API, records impression once, click on creative. */
-export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
+export function GeoAdSlot({ hideUntilReady = false, surfaceActive = true }: GeoAdSlotProps) {
   const geoQuery = usePlayerGeoQuery();
   const geo = geoQuery.data ?? null;
   const geoReady = geoQuery.isFetched && !geoQuery.isLoading;
   const playbackQuery = useAdPlaybackQuery(true);
   const impressed = useRef<string | null>(null);
   const videoCompletedRef = useRef<string | null>(null);
+  const softOpenRef = useRef(false);
+  const surfaceActiveRef = useRef(true);
+  const tabVisibleRef = useRef(true);
   const [viewer, setViewer] = useState("");
   const [session, setSession] = useState("");
   const [tabVisible, setTabVisible] = useState(true);
@@ -45,10 +51,20 @@ export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
     document.addEventListener("visibilitychange", sync);
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
+  const lobbySoftOpen = useShellChromeStore((s) => s.lobbySoftOpen);
+  softOpenRef.current = lobbySoftOpen;
+  surfaceActiveRef.current = surfaceActive;
+  tabVisibleRef.current = tabVisible;
   const lobbyRotateEnabled = playbackQuery.data?.lobby_rotate_enabled === true;
   const lobbyRotateSec = Number(playbackQuery.data?.lobby_rotate_interval_seconds ?? 0);
+  // Pause rotate while soft open, tab hidden, or lobby surface not visible (one creative / no ghost impress).
   const rotateMs =
-    lobbyRotateEnabled && tabVisible && Number.isFinite(lobbyRotateSec) && lobbyRotateSec >= 1
+    lobbyRotateEnabled &&
+    surfaceActive &&
+    tabVisible &&
+    !lobbySoftOpen &&
+    Number.isFinite(lobbyRotateSec) &&
+    lobbyRotateSec >= 1
       ? lobbyRotateSec * 1000
       : false;
   const serveQuery = useServeAdsQuery(geo, {
@@ -84,29 +100,62 @@ export function GeoAdSlot({ hideUntilReady = false }: GeoAdSlotProps) {
         }) ?? null)
       : null;
 
-  const recordImpression = impression.mutate;
-
   useEffect(() => {
     // Match serve gate: both keys required so session caps land on every show.
+    // No impress while lobby surface is hidden or tab is backgrounded (no ghost caps).
     if (!ad?.id || !lobbyPlacement || !viewer || !session) return;
     // One impression per serve refresh (including rotate re-shows of same campaign).
     const showKey = `${ad.id}:${serveQuery.dataUpdatedAt}`;
     if (impressed.current === showKey) return;
-    impressed.current = showKey;
-    recordImpression({
-      campaignId: ad.id,
-      viewerKey: viewer,
-      sessionKey: session,
-      placement: lobbyPlacement,
-      viewport: slot || undefined,
-    });
-  }, [ad, lobbyPlacement, recordImpression, slot, viewer, session, serveQuery.dataUpdatedAt]);
+    // Soft owns lobby while open (one creative). Skip impress without consuming
+    // showKey so a failed soft attempt can still bill this tile serve after pause lifts.
+    // Soft fetches serve out-of-band (does not bump ads-serve dataUpdatedAt).
+    if (lobbySoftOpen) return;
+    if (!surfaceActive || !tabVisible) return;
+    // Mark impressed only after a successful bill so a soft-side min-gap miss
+    // can still flush this painted generation on the next eligible tick.
+    void (async () => {
+      try {
+        await impression.mutateAsync({
+          campaignId: ad.id,
+          viewerKey: viewer,
+          sessionKey: session,
+          placement: lobbyPlacement,
+          viewport: slot || undefined,
+        });
+        // Soft / surface / tab may have flipped during the await. Read refs so
+        // we do not consume showKey from a stale render closure.
+        if (softOpenRef.current || !surfaceActiveRef.current || !tabVisibleRef.current) {
+          return;
+        }
+        impressed.current = showKey;
+      } catch {
+        // Leave showKey unmarked for a later flush/retry.
+      }
+    })();
+  }, [
+    ad,
+    impression,
+    lobbyPlacement,
+    lobbySoftOpen,
+    slot,
+    surfaceActive,
+    tabVisible,
+    viewer,
+    session,
+    serveQuery.dataUpdatedAt,
+  ]);
 
   if (!geoReady || serveQuery.isLoading) {
     return hideUntilReady ? null : <GeoAdSlotSkeleton />;
   }
 
   if (!ad?.title || !breakpoints || !slot) {
+    return null;
+  }
+
+  // Soft owns the lobby surface (one creative at a time): hide the tile visually.
+  if (lobbySoftOpen) {
     return null;
   }
 

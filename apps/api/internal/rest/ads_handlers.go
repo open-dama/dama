@@ -1087,16 +1087,36 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 	pricingCfg := a.Settings.AdPricing()
 	pricingCfg.MarketplaceDefaults()
 	fill := a.Ads.InventoryFillPctApprox(r.Context())
-	pkgs, _ := a.Settings.AdPackages(r.Context())
+	pkgs, pkgErr := a.Settings.AdPackages(r.Context())
 	eligible := make([]store.AdCampaign, 0, len(campaigns))
 	now := time.Now().UTC()
-	const servePlacement = "lobby"
-	pb := a.Settings.AdPlayback()
-	viewerKey := strings.TrimSpace(r.URL.Query().Get("viewer_key"))
-	if viewerKey == "" {
-		viewerKey = strings.TrimSpace(r.Header.Get("X-Device-Id"))
+	// Catalog fit stays on the package token. Freq uses the same placement string
+	// impressions persist (player chrome), so lobby and in-match caps share one ledger.
+	const catalogPlacement = "lobby"
+	freqPlacement := catalogPlacement
+	if a.Settings != nil {
+		if p := strings.TrimSpace(a.Settings.AdPlayerChrome().PlacementLobby); p != "" {
+			freqPlacement = p
+		}
 	}
+	pb := a.Settings.AdPlayback()
+	// Ship-gate: explicit viewer_key + session_key (header-only X-Device-Id is not enough).
+	viewerKey := strings.TrimSpace(r.URL.Query().Get("viewer_key"))
 	sessionKey := strings.TrimSpace(r.URL.Query().Get("session_key"))
+	// Freq caps are ship-gate: empty keys would no-op ViewerFreqBlocksCampaign.
+	if viewerKey == "" || sessionKey == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"country":                         country,
+			"region":                          region,
+			"district":                        district,
+			"campaigns":                       []map[string]any{},
+			"lobby_rotate_enabled":            pb.LobbyRotateEnabled,
+			"lobby_rotate_interval_seconds":   pb.LobbyRotateIntervalSeconds,
+			"lobby_soft_interstitial_enabled": pb.LobbySoftInterstitialEnabled,
+			"lobby_idle_threshold_seconds":    pb.LobbyIdleThresholdSeconds,
+		})
+		return
+	}
 	type ranked struct {
 		c     store.AdCampaign
 		score float64
@@ -1104,10 +1124,16 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 	viewerRating := a.viewerRating(r)
 	rankedList := make([]ranked, 0, len(campaigns))
 	for _, c := range campaigns {
-		if !store.CampaignFitsServePlacement(&c, pkgs, servePlacement) {
+		// Package catalog outage: skip package-bound rows (impress fail-closed parity)
+		// so soft/tile cannot open a creative that cannot be billed.
+		if pkgErr != nil {
+			if strings.TrimSpace(c.PackageCode) != "" {
+				continue
+			}
+		} else if !store.CampaignFitsServePlacement(&c, pkgs, catalogPlacement) {
 			continue
 		}
-		if blocked, err := a.Ads.ViewerFreqBlocksCampaign(r.Context(), viewerKey, sessionKey, c.ID, servePlacement, pb, now); err != nil {
+		if blocked, err := a.Ads.ViewerFreqBlocksCampaign(r.Context(), viewerKey, sessionKey, c.ID, freqPlacement, pb, now); err != nil {
 			continue
 		} else if blocked {
 			continue
@@ -1122,7 +1148,7 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 		}
 		// Conservative pacing viewport so mobile/tablet multipliers cannot overrun daily caps.
 		paceViewport := pricingCfg.PacingViewportSlot()
-		eff := pricingCfg.CampaignEffectiveUnitCost(&c, servePlacement, paceViewport, now, fill, tier)
+		eff := pricingCfg.CampaignEffectiveUnitCost(&c, catalogPlacement, paceViewport, now, fill, tier)
 		eff = pricingCfg.ApplyAgencyMediaMultiplier(eff, c.AgencyManaged)
 		eff = pricingCfg.ApplyAudienceMultiplier(eff, viewerRating)
 		if !c.WithinDailySpendCap(eff, counts.Day) {
@@ -1132,7 +1158,7 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// Rank on inventory+bid only. Audience premium is charged on impress/settle (eff above).
-		score := pricingCfg.CampaignRankScore(&c, servePlacement, now, fill, tier)
+		score := pricingCfg.CampaignRankScore(&c, catalogPlacement, now, fill, tier)
 		rankedList = append(rankedList, ranked{c: c, score: score})
 	}
 	sort.SliceStable(rankedList, func(i, j int) bool {
@@ -1148,15 +1174,17 @@ func (a *AdsAPI) Serve(w http.ResponseWriter, r *http.Request) {
 	// Public ad serve: creative only. No publisher ids, spend caps, or geo targeting internals.
 	public := make([]map[string]any, 0, len(eligible))
 	for _, c := range eligible {
-		public = append(public, campaignPublicCreativeFields(c))
+		public = append(public, campaignPublicCreativeFieldsWithPackage(c, pkgs))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"country":                       country,
-		"region":                        region,
-		"district":                      district,
-		"campaigns":                     public,
-		"lobby_rotate_enabled":          pb.LobbyRotateEnabled,
-		"lobby_rotate_interval_seconds": pb.LobbyRotateIntervalSeconds,
+		"country":                         country,
+		"region":                          region,
+		"district":                        district,
+		"campaigns":                       public,
+		"lobby_rotate_enabled":            pb.LobbyRotateEnabled,
+		"lobby_rotate_interval_seconds":   pb.LobbyRotateIntervalSeconds,
+		"lobby_soft_interstitial_enabled": pb.LobbySoftInterstitialEnabled,
+		"lobby_idle_threshold_seconds":    pb.LobbyIdleThresholdSeconds,
 	})
 }
 
@@ -1175,19 +1203,22 @@ func (a *AdsAPI) Impression(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
 		return
 	}
-	viewerKey := strings.TrimSpace(r.Header.Get("X-Device-Id"))
 	var body impressionBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_body")
 		return
 	}
-	if strings.TrimSpace(body.ViewerKey) != "" {
-		viewerKey = strings.TrimSpace(body.ViewerKey)
-	}
+	// Ship-gate: explicit body viewer_key + session_key (header-only X-Device-Id is not enough).
+	viewerKey := strings.TrimSpace(body.ViewerKey)
 	sessionKey := strings.TrimSpace(body.SessionKey)
 	placement := strings.TrimSpace(body.Placement)
 	if placement == "" {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_placement_required")
+		return
+	}
+	// Freq caps are ship-gate: impress without viewer+session bypasses the ledger.
+	if viewerKey == "" || sessionKey == "" {
+		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_body")
 		return
 	}
 	if a.Settings == nil {
@@ -1218,19 +1249,34 @@ func (a *AdsAPI) Impression(w http.ResponseWriter, r *http.Request) {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_validation_failed")
 		return
 	}
-	// Defense in depth: when clients send viewer/session keys, re-check freq policy
-	// so impress cannot write past caps that already gated serve/eligibility.
-	if viewerKey != "" || sessionKey != "" {
-		pb := a.Settings.AdPlayback()
-		blocked, freqErr := a.Ads.ViewerFreqBlocksCampaign(r.Context(), viewerKey, sessionKey, id, placement, pb, time.Now().UTC())
-		if freqErr != nil {
-			writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_caps_failed")
+	// Package placement fit on billable impress (serve already gates; clients must not
+	// re-bill a lobby-only / lobby_takeover campaign as in_match). Fail closed when the
+	// campaign is package-bound and the catalog cannot be loaded.
+	catalogPlacement := "lobby"
+	if placement == pc.PlacementInMatch {
+		catalogPlacement = "in_match"
+	}
+	pkgs, pkgErr := a.Settings.AdPackages(r.Context())
+	if pkgErr != nil {
+		if strings.TrimSpace(camp.PackageCode) != "" {
+			writeAdsErr(w, a.Settings, http.StatusServiceUnavailable, "err_pricing_unavailable")
 			return
 		}
-		if blocked {
-			writeAdsErr(w, a.Settings, http.StatusTooManyRequests, "err_viewer_freq_cap")
-			return
-		}
+	} else if !store.CampaignFitsServePlacement(camp, pkgs, catalogPlacement) {
+		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_placement")
+		return
+	}
+	// Defense in depth: re-check freq policy so impress cannot write past caps
+	// that already gated serve/eligibility (viewer_key required above).
+	pb := a.Settings.AdPlayback()
+	blocked, freqErr := a.Ads.ViewerFreqBlocksCampaign(r.Context(), viewerKey, sessionKey, id, placement, pb, time.Now().UTC())
+	if freqErr != nil {
+		writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_caps_failed")
+		return
+	}
+	if blocked {
+		writeAdsErr(w, a.Settings, http.StatusTooManyRequests, "err_viewer_freq_cap")
+		return
 	}
 	pricingCfg := a.Settings.AdPricing()
 	pricingCfg.MarketplaceDefaults()
@@ -1495,29 +1541,33 @@ func (a *AdsAPI) Playback(w http.ResponseWriter, r *http.Request) {
 		scheduleChrome[k] = v
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"non_skippable_seconds":          pb.NonSkippableSeconds,
-		"first_show_after_game_seconds":  pb.FirstShowAfterGameSeconds,
-		"default_interval_seconds":       pb.DefaultIntervalSeconds,
-		"non_skippable_min":              pb.NonSkippableMin,
-		"non_skippable_max":              pb.NonSkippableMax,
-		"first_show_min":                 pb.FirstShowMin,
-		"first_show_max":                 pb.FirstShowMax,
-		"interval_min":                   pb.IntervalMin,
-		"interval_max":                   pb.IntervalMax,
-		"impression_cap_min":             pb.ImpressionCapMin,
-		"lobby_rotate_enabled":           pb.LobbyRotateEnabled,
-		"lobby_rotate_interval_seconds":  pb.LobbyRotateIntervalSeconds,
-		"lobby_rotate_interval_min":      pb.LobbyRotateIntervalMin,
-		"lobby_rotate_interval_max":      pb.LobbyRotateIntervalMax,
-		"freq_cap_campaign_per_hour":     pb.FreqCapCampaignPerHour,
-		"freq_cap_campaign_per_day":      pb.FreqCapCampaignPerDay,
-		"freq_cap_campaign_per_session":  pb.FreqCapCampaignPerSession,
-		"freq_cap_placement_per_hour":    pb.FreqCapPlacementPerHour,
-		"freq_cap_placement_per_day":     pb.FreqCapPlacementPerDay,
-		"freq_cap_placement_per_session": pb.FreqCapPlacementPerSession,
-		"freq_cap_min_gap_seconds":       pb.FreqCapMinGapSeconds,
-		"player_chrome":                  player,
-		"schedule_chrome":                scheduleChrome,
+		"non_skippable_seconds":           pb.NonSkippableSeconds,
+		"first_show_after_game_seconds":   pb.FirstShowAfterGameSeconds,
+		"default_interval_seconds":        pb.DefaultIntervalSeconds,
+		"non_skippable_min":               pb.NonSkippableMin,
+		"non_skippable_max":               pb.NonSkippableMax,
+		"first_show_min":                  pb.FirstShowMin,
+		"first_show_max":                  pb.FirstShowMax,
+		"interval_min":                    pb.IntervalMin,
+		"interval_max":                    pb.IntervalMax,
+		"impression_cap_min":              pb.ImpressionCapMin,
+		"lobby_rotate_enabled":            pb.LobbyRotateEnabled,
+		"lobby_rotate_interval_seconds":   pb.LobbyRotateIntervalSeconds,
+		"lobby_rotate_interval_min":       pb.LobbyRotateIntervalMin,
+		"lobby_rotate_interval_max":       pb.LobbyRotateIntervalMax,
+		"lobby_soft_interstitial_enabled": pb.LobbySoftInterstitialEnabled,
+		"lobby_idle_threshold_seconds":    pb.LobbyIdleThresholdSeconds,
+		"lobby_idle_threshold_min":        pb.LobbyIdleThresholdMin,
+		"lobby_idle_threshold_max":        pb.LobbyIdleThresholdMax,
+		"freq_cap_campaign_per_hour":      pb.FreqCapCampaignPerHour,
+		"freq_cap_campaign_per_day":       pb.FreqCapCampaignPerDay,
+		"freq_cap_campaign_per_session":   pb.FreqCapCampaignPerSession,
+		"freq_cap_placement_per_hour":     pb.FreqCapPlacementPerHour,
+		"freq_cap_placement_per_day":      pb.FreqCapPlacementPerDay,
+		"freq_cap_placement_per_session":  pb.FreqCapPlacementPerSession,
+		"freq_cap_min_gap_seconds":        pb.FreqCapMinGapSeconds,
+		"player_chrome":                   player,
+		"schedule_chrome":                 scheduleChrome,
 	})
 }
 
@@ -1542,6 +1592,17 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.GameElapsedSeconds < 0 {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_game_elapsed_required")
+		return
+	}
+	// Freq caps are ship-gate: empty keys would skip ViewerFreqBlocksCampaign session/hour rules.
+	// Explicit body keys only (header-only X-Device-Id is not enough).
+	viewerKeyEarly := strings.TrimSpace(body.ViewerKey)
+	sessionKeyEarly := strings.TrimSpace(body.SessionKey)
+	if viewerKeyEarly == "" || sessionKeyEarly == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"show":   false,
+			"reason": "viewer_keys_required",
+		})
 		return
 	}
 	if a.Settings == nil || a.Settings.AdPlayback().Source != "database" {
@@ -1638,8 +1699,12 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 	pricingCfg := a.Settings.AdPricing()
 	pricingCfg.MarketplaceDefaults()
 	fill := a.Ads.InventoryFillPctApprox(r.Context())
-	pkgs, _ := a.Settings.AdPackages(r.Context())
-	const servePlacement = "in_match"
+	pkgs, pkgErr := a.Settings.AdPackages(r.Context())
+	const catalogPlacement = "in_match"
+	freqPlacement := catalogPlacement
+	if p := strings.TrimSpace(a.Settings.AdPlayerChrome().PlacementInMatch); p != "" {
+		freqPlacement = p
+	}
 	_ = unitCost // fail-closed load above; pacing uses effective CPM below
 
 	type inMatchCandidate struct {
@@ -1658,7 +1723,12 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		if !store.CampaignFitsServePlacement(&c, pkgs, servePlacement) {
+		// Package catalog outage: skip package-bound rows (impress fail-closed parity).
+		if pkgErr != nil {
+			if strings.TrimSpace(c.PackageCode) != "" {
+				continue
+			}
+		} else if !store.CampaignFitsServePlacement(&c, pkgs, catalogPlacement) {
 			continue
 		}
 		nonSkip, firstShow, interval, err := a.Settings.EffectiveAdTiming(&c)
@@ -1708,7 +1778,7 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 			tier = pricingCfg.ResolveAdvertiserTier(0)
 		}
 		paceViewport := pricingCfg.PacingViewportSlot()
-		eff := pricingCfg.CampaignEffectiveUnitCost(&c, servePlacement, paceViewport, now, fill, tier)
+		eff := pricingCfg.CampaignEffectiveUnitCost(&c, catalogPlacement, paceViewport, now, fill, tier)
 		eff = pricingCfg.ApplyAgencyMediaMultiplier(eff, c.AgencyManaged)
 		eff = pricingCfg.ApplyAudienceMultiplier(eff, viewerRating)
 		if !c.WithinDailySpendCap(eff, counts.Day) {
@@ -1727,11 +1797,8 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		viewerKey := strings.TrimSpace(body.ViewerKey)
-		if viewerKey == "" {
-			viewerKey = strings.TrimSpace(r.Header.Get("X-Device-Id"))
-		}
 		sessionKey := strings.TrimSpace(body.SessionKey)
-		if blocked, err := a.Ads.ViewerFreqBlocksCampaign(r.Context(), viewerKey, sessionKey, c.ID, servePlacement, pb, now); err != nil {
+		if blocked, err := a.Ads.ViewerFreqBlocksCampaign(r.Context(), viewerKey, sessionKey, c.ID, freqPlacement, pb, now); err != nil {
 			writeAdsErr(w, a.Settings, http.StatusInternalServerError, "err_caps_failed")
 			return
 		} else if blocked {
@@ -1747,7 +1814,7 @@ func (a *AdsAPI) InMatchEligibility(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// Rank on inventory+bid only. Audience premium is charged on impress/settle (eff above).
-		score := pricingCfg.CampaignRankScore(&c, servePlacement, now, fill, tier)
+		score := pricingCfg.CampaignRankScore(&c, catalogPlacement, now, fill, tier)
 		candidates = append(candidates, inMatchCandidate{
 			c:        c,
 			score:    score,
@@ -1843,39 +1910,76 @@ func (a *AdsAPI) ConsolePlaybackGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type playbackPutBody struct {
-	NonSkippableSeconds        int  `json:"non_skippable_seconds"`
-	FirstShowAfterGameSeconds  int  `json:"first_show_after_game_seconds"`
-	DefaultIntervalSeconds     int  `json:"default_interval_seconds"`
-	LobbyRotateEnabled         bool `json:"lobby_rotate_enabled"`
-	LobbyRotateIntervalSeconds int  `json:"lobby_rotate_interval_seconds"`
-	FreqCapCampaignPerHour     int  `json:"freq_cap_campaign_per_hour"`
-	FreqCapCampaignPerDay      int  `json:"freq_cap_campaign_per_day"`
-	FreqCapCampaignPerSession  int  `json:"freq_cap_campaign_per_session"`
-	FreqCapPlacementPerHour    int  `json:"freq_cap_placement_per_hour"`
-	FreqCapPlacementPerDay     int  `json:"freq_cap_placement_per_day"`
-	FreqCapPlacementPerSession int  `json:"freq_cap_placement_per_session"`
-	FreqCapMinGapSeconds       int  `json:"freq_cap_min_gap_seconds"`
+	NonSkippableSeconds          int  `json:"non_skippable_seconds"`
+	FirstShowAfterGameSeconds    int  `json:"first_show_after_game_seconds"`
+	DefaultIntervalSeconds       int  `json:"default_interval_seconds"`
+	LobbyRotateEnabled           bool `json:"lobby_rotate_enabled"`
+	LobbyRotateIntervalSeconds   int  `json:"lobby_rotate_interval_seconds"`
+	LobbySoftInterstitialEnabled bool `json:"lobby_soft_interstitial_enabled"`
+	LobbyIdleThresholdSeconds    int  `json:"lobby_idle_threshold_seconds"`
+	FreqCapCampaignPerHour       int  `json:"freq_cap_campaign_per_hour"`
+	FreqCapCampaignPerDay        int  `json:"freq_cap_campaign_per_day"`
+	FreqCapCampaignPerSession    int  `json:"freq_cap_campaign_per_session"`
+	FreqCapPlacementPerHour      int  `json:"freq_cap_placement_per_hour"`
+	FreqCapPlacementPerDay       int  `json:"freq_cap_placement_per_day"`
+	FreqCapPlacementPerSession   int  `json:"freq_cap_placement_per_session"`
+	FreqCapMinGapSeconds         int  `json:"freq_cap_min_gap_seconds"`
 }
 
 func (a *AdsAPI) ConsolePlaybackPut(w http.ResponseWriter, r *http.Request) {
+	// Full replace: reject partial bodies so omitted Phase A/B/freq keys cannot zero-wipe.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_body")
+		return
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_body")
+		return
+	}
+	required := []string{
+		"non_skippable_seconds",
+		"first_show_after_game_seconds",
+		"default_interval_seconds",
+		"lobby_rotate_enabled",
+		"lobby_rotate_interval_seconds",
+		"lobby_soft_interstitial_enabled",
+		"lobby_idle_threshold_seconds",
+		"freq_cap_campaign_per_hour",
+		"freq_cap_campaign_per_day",
+		"freq_cap_campaign_per_session",
+		"freq_cap_placement_per_hour",
+		"freq_cap_placement_per_day",
+		"freq_cap_placement_per_session",
+		"freq_cap_min_gap_seconds",
+	}
+	for _, k := range required {
+		if _, ok := probe[k]; !ok {
+			writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_validation_failed")
+			return
+		}
+	}
 	var body playbackPutBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_invalid_body")
 		return
 	}
 	cfg := store.AdPlaybackConfig{
-		NonSkippableSeconds:        body.NonSkippableSeconds,
-		FirstShowAfterGameSeconds:  body.FirstShowAfterGameSeconds,
-		DefaultIntervalSeconds:     body.DefaultIntervalSeconds,
-		LobbyRotateEnabled:         body.LobbyRotateEnabled,
-		LobbyRotateIntervalSeconds: body.LobbyRotateIntervalSeconds,
-		FreqCapCampaignPerHour:     body.FreqCapCampaignPerHour,
-		FreqCapCampaignPerDay:      body.FreqCapCampaignPerDay,
-		FreqCapCampaignPerSession:  body.FreqCapCampaignPerSession,
-		FreqCapPlacementPerHour:    body.FreqCapPlacementPerHour,
-		FreqCapPlacementPerDay:     body.FreqCapPlacementPerDay,
-		FreqCapPlacementPerSession: body.FreqCapPlacementPerSession,
-		FreqCapMinGapSeconds:       body.FreqCapMinGapSeconds,
+		NonSkippableSeconds:          body.NonSkippableSeconds,
+		FirstShowAfterGameSeconds:    body.FirstShowAfterGameSeconds,
+		DefaultIntervalSeconds:       body.DefaultIntervalSeconds,
+		LobbyRotateEnabled:           body.LobbyRotateEnabled,
+		LobbyRotateIntervalSeconds:   body.LobbyRotateIntervalSeconds,
+		LobbySoftInterstitialEnabled: body.LobbySoftInterstitialEnabled,
+		LobbyIdleThresholdSeconds:    body.LobbyIdleThresholdSeconds,
+		FreqCapCampaignPerHour:       body.FreqCapCampaignPerHour,
+		FreqCapCampaignPerDay:        body.FreqCapCampaignPerDay,
+		FreqCapCampaignPerSession:    body.FreqCapCampaignPerSession,
+		FreqCapPlacementPerHour:      body.FreqCapPlacementPerHour,
+		FreqCapPlacementPerDay:       body.FreqCapPlacementPerDay,
+		FreqCapPlacementPerSession:   body.FreqCapPlacementPerSession,
+		FreqCapMinGapSeconds:         body.FreqCapMinGapSeconds,
 	}
 	if err := a.Settings.SetAdPlayback(r.Context(), cfg); err != nil {
 		writeAdsErr(w, a.Settings, http.StatusBadRequest, "err_validation_failed")
@@ -1884,18 +1988,20 @@ func (a *AdsAPI) ConsolePlaybackPut(w http.ResponseWriter, r *http.Request) {
 	if a.Audit != nil {
 		actor := auth.UserIDFromContext(r.Context())
 		a.Audit.Log(r.Context(), &actor, "ads.playback.put", "platform_settings", "ad_playback", map[string]any{
-			"non_skippable_seconds":          body.NonSkippableSeconds,
-			"first_show_after_game_seconds":  body.FirstShowAfterGameSeconds,
-			"default_interval_seconds":       body.DefaultIntervalSeconds,
-			"lobby_rotate_enabled":           body.LobbyRotateEnabled,
-			"lobby_rotate_interval_seconds":  body.LobbyRotateIntervalSeconds,
-			"freq_cap_campaign_per_hour":     body.FreqCapCampaignPerHour,
-			"freq_cap_campaign_per_day":      body.FreqCapCampaignPerDay,
-			"freq_cap_campaign_per_session":  body.FreqCapCampaignPerSession,
-			"freq_cap_placement_per_hour":    body.FreqCapPlacementPerHour,
-			"freq_cap_placement_per_day":     body.FreqCapPlacementPerDay,
-			"freq_cap_placement_per_session": body.FreqCapPlacementPerSession,
-			"freq_cap_min_gap_seconds":       body.FreqCapMinGapSeconds,
+			"non_skippable_seconds":           body.NonSkippableSeconds,
+			"first_show_after_game_seconds":   body.FirstShowAfterGameSeconds,
+			"default_interval_seconds":        body.DefaultIntervalSeconds,
+			"lobby_rotate_enabled":            body.LobbyRotateEnabled,
+			"lobby_rotate_interval_seconds":   body.LobbyRotateIntervalSeconds,
+			"lobby_soft_interstitial_enabled": body.LobbySoftInterstitialEnabled,
+			"lobby_idle_threshold_seconds":    body.LobbyIdleThresholdSeconds,
+			"freq_cap_campaign_per_hour":      body.FreqCapCampaignPerHour,
+			"freq_cap_campaign_per_day":       body.FreqCapCampaignPerDay,
+			"freq_cap_campaign_per_session":   body.FreqCapCampaignPerSession,
+			"freq_cap_placement_per_hour":     body.FreqCapPlacementPerHour,
+			"freq_cap_placement_per_day":      body.FreqCapPlacementPerDay,
+			"freq_cap_placement_per_session":  body.FreqCapPlacementPerSession,
+			"freq_cap_min_gap_seconds":        body.FreqCapMinGapSeconds,
 		})
 	}
 	writeJSON(w, http.StatusOK, a.Settings.AdPlayback())

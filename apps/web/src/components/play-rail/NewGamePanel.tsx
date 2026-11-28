@@ -94,6 +94,8 @@ type Props = {
   matchBlurb?: string;
   challengeOpponent?: ChallengeOpponent | null;
   onClearChallengeOpponent?: () => void;
+  onChallengeOpponentChange?: (opponent: ChallengeOpponent | null) => void;
+  onChallengeOpponentSearchPending?: (pending: boolean) => void;
   loginHref?: string;
 };
 
@@ -123,6 +125,8 @@ export function NewGamePanel({
   matchBlurb,
   challengeOpponent,
   onClearChallengeOpponent,
+  onChallengeOpponentChange,
+  onChallengeOpponentSearchPending,
   loginHref,
 }: Props) {
   const router = useRouter();
@@ -355,6 +359,8 @@ export function NewGamePanel({
                 blurb={matchBlurb}
                 initialOpponent={challengeOpponent}
                 onClearOpponent={onClearChallengeOpponent}
+                onOpponentChange={onChallengeOpponentChange}
+                onOpponentSearchPending={onChallengeOpponentSearchPending}
               />
               <div className="border-t border-[var(--dama-border)] pt-3">
                 {/* Button (not <Link href>) so a compose-open ghost click cannot

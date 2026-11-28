@@ -84,8 +84,18 @@ func TestCampaignFitsServePlacement(t *testing.T) {
 		t.Fatal("no package should fit any placement")
 	}
 	stale := &AdCampaign{PackageCode: "deleted_pkg"}
-	if !CampaignFitsServePlacement(stale, pkgs, "lobby") {
-		t.Fatal("unknown package_code must fail open for legacy delivery")
+	if CampaignFitsServePlacement(stale, pkgs, "lobby") {
+		t.Fatal("unknown package_code must fail closed")
+	}
+	disabledLobby := []AdPackage{
+		{Code: "lobby_takeover", Placement: "lobby", Enabled: false, LobbyTakeover: true},
+	}
+	takeCamp := &AdCampaign{PackageCode: "lobby_takeover"}
+	if !CampaignFitsServePlacement(takeCamp, disabledLobby, "lobby") {
+		t.Fatal("disabled lobby_takeover must still fit lobby")
+	}
+	if CampaignFitsServePlacement(takeCamp, disabledLobby, "in_match") {
+		t.Fatal("disabled lobby_takeover must not fit in_match")
 	}
 }
 
@@ -207,6 +217,35 @@ func TestEstimateCampaignMediaSpend(t *testing.T) {
 	}
 }
 
+func TestParseAdPackagesDoesNotInventTakeoverBuyingType(t *testing.T) {
+	raw := []byte(`{"packages":[
+		{"code":"lobby_takeover","title":"Lobby takeover","lobby_takeover":true,"placement":"lobby","exclusive":true,"buying_type":""},
+		{"code":"starter","title":"Starter","buying_type":""}
+	]}`)
+	got, err := ParseAdPackages(raw)
+	if err != nil {
+		t.Fatalf("ParseAdPackages: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 packages, got %d", len(got))
+	}
+	var take, starter AdPackage
+	for _, p := range got {
+		switch p.Code {
+		case "lobby_takeover":
+			take = p
+		case "starter":
+			starter = p
+		}
+	}
+	if take.BuyingType != "" {
+		t.Fatalf("lobby_takeover empty buying_type must stay empty on parse, got %q", take.BuyingType)
+	}
+	if starter.BuyingType != BuyingTypeReservation {
+		t.Fatalf("non-takeover empty buying_type should default reservation, got %q", starter.BuyingType)
+	}
+}
+
 func TestSanitizePackageBuyingTypes(t *testing.T) {
 	in := []AdPackage{
 		{Code: "a", Title: "A", BuyingType: BuyingTypeLegacy},
@@ -227,6 +266,12 @@ func TestSanitizePackageBuyingTypes(t *testing.T) {
 	if unchanged[0].BuyingType != BuyingTypeLegacy {
 		t.Fatalf("marketplace off must leave legacy, got %s", unchanged[0].BuyingType)
 	}
+	takeByCode := SanitizePackageBuyingTypes([]AdPackage{{
+		Code: "lobby_takeover", Title: "Lobby takeover", BuyingType: "", LobbyTakeover: false,
+	}}, true)
+	if takeByCode[0].BuyingType != "" {
+		t.Fatalf("code lobby_takeover empty buying_type must stay empty, got %q", takeByCode[0].BuyingType)
+	}
 }
 
 func TestValidateAdPackageRates(t *testing.T) {
@@ -244,6 +289,54 @@ func TestValidateAdPackageRates(t *testing.T) {
 	}
 	if err := ValidateAdPackageRates(bad, false); err != nil {
 		t.Fatalf("marketplace off skips rate validation: %v", err)
+	}
+	takeOK := []AdPackage{{
+		Code: "lobby_takeover", Enabled: true, FixedCPM: 25,
+		Placement: "lobby", Exclusive: true, BuyingType: BuyingTypeReservation, LobbyTakeover: true,
+	}}
+	if err := ValidateAdPackageRates(takeOK, true); err != nil {
+		t.Fatalf("valid lobby_takeover: %v", err)
+	}
+	takePlace := []AdPackage{{
+		Code: "lobby_takeover", Enabled: true, FixedCPM: 25,
+		Placement: "in_match", Exclusive: true, BuyingType: BuyingTypeReservation, LobbyTakeover: true,
+	}}
+	if err := ValidateAdPackageRates(takePlace, true); err == nil {
+		t.Fatal("lobby_takeover with in_match placement must fail")
+	}
+	takeExcl := []AdPackage{{
+		Code: "lobby_takeover", Enabled: true, FixedCPM: 25,
+		Placement: "lobby", Exclusive: false, BuyingType: BuyingTypeReservation, LobbyTakeover: true,
+	}}
+	if err := ValidateAdPackageRates(takeExcl, true); err == nil {
+		t.Fatal("lobby_takeover without exclusive must fail")
+	}
+	takeBuy := []AdPackage{{
+		Code: "lobby_takeover", Enabled: true, FixedCPM: 25,
+		Placement: "lobby", Exclusive: true, BuyingType: BuyingTypeAuction, LobbyTakeover: true,
+	}}
+	if err := ValidateAdPackageRates(takeBuy, true); err == nil {
+		t.Fatal("lobby_takeover with auction buying_type must fail")
+	}
+	takeEmptyBuy := []AdPackage{{
+		Code: "lobby_takeover", Enabled: true, FixedCPM: 25,
+		Placement: "lobby", Exclusive: true, BuyingType: "", LobbyTakeover: true,
+	}}
+	if err := ValidateAdPackageRates(takeEmptyBuy, true); err == nil {
+		t.Fatal("lobby_takeover with empty buying_type must fail")
+	}
+	// Progression PUT sanitizes before validate: must not invent reservation for takeover.
+	sanitized := SanitizePackageBuyingTypes(takeEmptyBuy, true)
+	if err := ValidateAdPackageRates(sanitized, true); err == nil {
+		t.Fatal("sanitize must not fill lobby_takeover empty buying_type")
+	}
+	// Code-keyed takeover (flag false) must still enforce shape.
+	takeByCode := []AdPackage{{
+		Code: "lobby_takeover", Enabled: true, FixedCPM: 25,
+		Placement: "in_match", Exclusive: true, BuyingType: BuyingTypeReservation, LobbyTakeover: false,
+	}}
+	if err := ValidateAdPackageRates(takeByCode, true); err == nil {
+		t.Fatal("code lobby_takeover with in_match placement must fail even when flag false")
 	}
 }
 

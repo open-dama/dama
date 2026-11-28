@@ -35,6 +35,7 @@ import { useAuthHydrated, useAuthStore } from "@/store/auth";
 import { isMatchmakingChromeReady } from "@/types/matchmaking-chrome";
 import type { MatchmakingSelfCard } from "@/types/player";
 import { Swords, Timer } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
@@ -49,6 +50,7 @@ function useIsClient() {
 
 export default function MatchmakingPage() {
   const isClient = useIsClient();
+  const router = useRouter();
   const hydrated = useAuthHydrated();
   const token = useAuthStore((s) => s.token);
   const user = useAuthStore((s) => s.user);
@@ -195,6 +197,17 @@ export default function MatchmakingPage() {
               onClick={() => {
                 joinMutation.mutate(undefined, {
                   onSuccess: (data) => {
+                    const gid = (data.match?.game_id || "").trim();
+                    if (gid) {
+                      // REST instant match: soft latch + board (Flutter join parity).
+                      realtime.beginEnteringMatch({
+                        gameId: gid,
+                        player1Id: data.match?.player1_id,
+                        player2Id: data.match?.player2_id,
+                      });
+                      router.push(`/?gameId=${encodeURIComponent(gid)}&mode=pvp`);
+                      return;
+                    }
                     setQueued(true);
                     if (typeof data.queue_size === "number") setQueueSize(data.queue_size);
                     else void refetchStatus();

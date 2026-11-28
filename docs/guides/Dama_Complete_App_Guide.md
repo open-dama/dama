@@ -422,11 +422,22 @@ Think of an ad campaign like hiring a poster in a busy game hall.
 
 **Lobby vs in-match (plain)**
 - In-match: timed breaks on the match clock (first show + interval); one ad per break.
-- Lobby: one home tile. Optional **tile rotation** every N seconds while you stay on lobby and the app is visible (admin on/off + interval). Still one ad at a time. Not a full-screen interrupt.
-- Viewer frequency caps (hour/day/session, placement, min gap) limit how often the same person sees the same campaign or placement across lobby and in-match.
+- Lobby: one home tile. Still one ad at a time. Not a full-screen interrupt by default.
+
+**Phase A lobby tile rotation + viewer caps**
+- Optional **tile rotation** every N seconds while you stay on lobby and the app is visible (admin on/off + interval). Separate from in-match first show / interval.
+- Viewer frequency caps (hour/day/session, placement, min gap) limit how often the same person sees the same campaign or placement across lobby and in-match. Clients send `viewer_key` + `session_key` on serve, eligibility, and impression so session caps work (one tab on web; one app process on Flutter). Serve returns empty without both keys; eligibility returns `viewer_keys_required` without both keys; impression rejects without both keys.
+
+**Phase B soft interstitial (admin opt-in, default off)**
+- After idle dwell on the home lobby only (`lobby_idle_threshold_seconds`), one soft full-screen ad may show. Dismiss returns to lobby; play conversion stays protected.
+- Blocked while compose, sign-in, cup enroll, wallet/KYC or other critical pushed flows, queue, invite in/out, prefilled challenge opponent chip (URL, session, web/Flutter typeahead query or chip), pending deep-link challenge (`?challenge=` / Flutter `_pendingChallengeToken`, including OTP wait), match start / board URL handoff (web and Flutter sync-latch via `isEnteringMatchSync` / `_matchStartLatchSync` so soft cannot impress one frame before UI blocked rebuilds), web immersive DM panel (Flutter DM uses a modal sheet so ModalRoute already blocks soft), or notification inbox is open; while tournaments/events browse hides the play lobby; and while another shell tab hides the lobby (web `lobbySurfaceVisible`; Flutter IndexedStack keep-alive gated by `PlayerShellController.activeRouteKey` home/play plus ModalRoute and `criticalFlowOverlay` for shell rail pushes). Soft / rotate / `lobby_takeover` prefer flags are strict boolean true only. Serve / impress / eligibility need explicit `viewer_key` + `session_key` (not header-only). Flutter refreshes rotate/soft knobs on app resume; web refetches playback on window focus; bottom-nav `play` uses the same HomePage lobby surface as `home`. Hidden browser tabs and backgrounded apps fail closed. Lobby tile hides and pauses while soft is open (one ad at a time).
+- Web and Flutter re-serve immediately before soft open so a creative the lobby tile just showed is not opened again from a stale cache. Soft waits for geo then pauses the lobby tile; soft fetch is fully out-of-band so enabling soft or a failed attempt does not leave the tile unpaid. Activity or a hard gate during an in-flight soft serve aborts open. Soft opens only after a successful impression. Soft waits for viewer + session keys and geo before arming open. Tile pause sync must not clear on the false→true open transition. Empty, failed, or pre-open soft exits re-arm dwell while the player is still idle and the tab/app is visible (no background idle-timer loop). Same viewer/session freq caps as the tile and in-match. Soft knobs are separate from lobby rotate.
+
+**Phase C lobby takeover packages**
+- Marketplace packages may set `lobby_takeover` (seeded reservation package, lobby placement, exclusive + reservation buying type required). Serve stamps `lobby_takeover` on matching creatives so soft interstitial prefers that brand (still one creative at a time; rotate/soft still respect caps and gates).
 
 Full first-day dictionary, **buying types end to end** (what / why / when / advantages / differences), FAQ, and cheat sheet: `Dama_Ad_Marketplace_Auction_And_Reservation_Guide` (read Section 4 first for buying types).
-Day-to-day ads ops (including lobby rotation + frequency caps): `Dama_Ads_And_Admin_Ops_Guide`.
+Day-to-day ads ops (including lobby rotation, soft idle, takeover, frequency caps): `Dama_Ads_And_Admin_Ops_Guide`.
 
 ---
 
